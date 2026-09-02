@@ -1,0 +1,43 @@
+# ORCA Marine Intelligence — .gitignore
+
+# Temp files (audit reports, handoff docs)
+.tmp/
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Environment variables (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Build output
+frontend/.next/
+frontend/out/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Data (large files — keep only .geojson samples)
+data/*.csv
+data/*.nc
+
+# Logs
+*.log

@@ -1,194 +1,232 @@
-# ORCA — Complete Codebase Guide (SIH26176)
+# ORCA — Codebase Guide
 
-**Live Demo:** `https://cron-system.vercel.app/orca/` · Map `https://cron-system.vercel.app/orca/map/` · GeoJSON Arch `https://cron-system.vercel.app/orca/geojson/` · MPP Plan `https://cron-system.vercel.app/orca/mpp/` · Plan Visual `https://cron-system.vercel.app/orca/plan/`
+This document describes the project structure, what each file does, and how to run the system locally.
 
-This doc is the **file-section** for your Notion + repo — where every file lives, what it does, and how to run it. Copy-paste to Notion `Import Markdown`.
+> **Current Status (02 Sep 2026):** The repository contains documentation, data files (437 PFZ points), and scaffold stubs with TODOs. The agents, routers, and frontend components are defined but not yet implemented. This guide covers both the current files and the proposed structure for the full MVP.
+
+**For the architecture and data flow, see** [ORCA_GeoJSON_Architecture.md](ORCA_GeoJSON_Architecture.md).
+**For the development schedule, see** [ORCA_2Week_MPP_Plan.md](ORCA_2Week_MPP_Plan.md).
+**For API endpoint details, see** [API.md](API.md).
 
 ---
 
-## 1. Repo To Be Created (2-Week MPP) — Proposed Structure
+## Project Structure
 
-`orca-marine-intelligence/` ← new GitHub repo 
 ```
 orca-marine-intelligence/
-├─ README.md                          # 4-min demo path + live URLs
-├─ docs/
-│  ├─ ORCA_GeoJSON_Architecture.md    # ← already live https://cron-system.vercel.app/orca/ORCA_GeoJSON_Architecture.md
-│  ├─ ORCA_2Week_MPP_Plan.md          # ← https://cron-system.vercel.app/orca/mpp/ORCA_2Week_MPP_Plan.md
-│  ├─ ORCA_Codebase_Guide.md          # this file
-│  └─ API.md                          # endpoint catalog
-├─ frontend/                          # M3 + M4 (Next.js 14)
-│  ├─ app/
-│  │  ├─ page.tsx                     # Chat + Map split (Talk to ORCA + Map View)
-│  │  ├─ map/page.tsx                 # Standalone Map View (Leaflet)
-│  │  └─ api/pfz/route.ts             # Next proxy → FastAPI (avoids CORS)
-│  ├─ components/
-│  │  ├─ ChatPanel.tsx                # Talk to ORCA, Bhashini text 22 langs
-│  │  ├─ MapView.tsx                  # Leaflet, pfz-today.geojson 437 circles, popup citation
-│  │  ├─ SafetyBadge.tsx              # ✅ Proof Check
-│  │  └─ LanguageSwitch.tsx           # request_locale
-│  ├─ lib/
-│  │  ├─ bhashini.ts                  # ULCA Translate, detect
-│  │  └─ geo.ts                       # distance, DMS→decimal
-│  └─ package.json
-├─ backend/                           # M1 + M2 + M5 + M6 (FastAPI)
-│  ├─ main.py                         # FastAPI app, /health, CORS
-│  ├─ routers/
-│  │  ├─ pfz.py                       # GET /api/pfz/today → GeoJSON, POST /ingest/pfz
-│  │  ├─ tiles.py                     # GET /api/tiles/pfz/{z}/{x}/{y}.pbf (PostGIS ST_AsMVT)
-│  │  ├─ weather.py                   # GET /api/weather?lat,lon (IMD proxy, mock W1)
-│  │  └─ geofence.py                  # POST /api/geofence/check {lat,lon} → {inside EEZ/MPA?}
-│  ├─ agents/
-│  │  ├─ orchestrator.py              # M1 Brain ReAct, Intent→Planner→Tool Router
-│  │  ├─ fish_finder.py               # M2 WHERE sector=KERALA distance<80 on pfz GeoJSON
-│  │  ├─ sea_checker.py               # M5 wave mock 0.8m W1 → OSF W2
-│  │  ├─ weather_agent.py             # M5 wind/cyclone IMD
-│  │  ├─ danger_agent.py              # M5 EEZ/MPA ST_DWithin
-│  │  └─ combiner.py                  # M1 Smart Combiner Fusion•Rank•Explain after swarm
-│  ├─ ingest/
-│  │  ├─ incois_textdata.py           # M2: curl -b cookies.txt TextData?secid=SEC001-014 → DMS→decimal → GeoJSON
-│  │  ├─ copernicus_fallback.py       # Backlog W5: PHY 001_024 + BGC 001_028 where chl>0.5
-│  │  └─ boundaries.py                # MarineRegions EEZ + WDPA MPA → PostGIS
-│  ├─ db/
-│  │  ├─ postgis.py                   # connection, ST_GeomFromGeoJSON
-│  │  ├─ redis.py                     # cache 6h, multi-turn memory
-│  │  └─ schema.sql                   # pfz(geom, sector, place, bearing, depth, distance), eez, mpa, waves
-│  ├─ requirements.txt
-│  └─ Dockerfile
-├─ data/
-│  ├─ pfz-today.geojson               # 437 Points 02-Sep (live https://cron-system.vercel.app/orca/map/data/pfz-today.geojson)
-│  ├─ pfz-all.json                    # 437 objects with DMS
-│  ├─ eez.geojson                     # MarineRegions
-│  └─ mpa.geojson                     # WDPA
-├─ infra/
-│  ├─ docker-compose.yml              # FastAPI + PostGIS + Redis
-│  ├─ vercel.json                     # cron-system static hosting already live file_count:9
-│  └─ cron_ingest.sh                  # daily 11:30am TextData loop
-├─ scripts/
-│  ├─ extract_pfz.sh                  # loop SEC001-014 with JSESSIONID
-│  └─ dms_to_decimal.py
-├─ .env.example
-└─ .gitignore
+├── README.md                          # Project overview and quick start
+├── CONTRIBUTING.md                    # Branch conventions and PR workflow
+├── .env.example                       # Environment variable template
+├── .gitignore                         # Git ignore rules
+├── docs/
+│   ├── ORCA_GeoJSON_Architecture.md   # How the system works
+│   ├── ORCA_Codebase_Guide.md         # This file
+│   ├── ORCA_2Week_MPP_Plan.md        # Development schedule
+│   └── API.md                         # API endpoint catalog
+├── data/
+│   ├── pfz-today.geojson              # Today's 437 PFZ points (live data)
+│   └── pfz-all.json                   # Full PFZ dataset with DMS coordinates
+├── frontend/                          # Next.js 14 application
+│   ├── app/
+│   │   ├── page.tsx                   # Root layout (Chat + Map split view)
+│   │   ├── map/page.tsx               # Standalone map view
+│   │   └── api/pfz/route.ts           # Server-side PFZ proxy
+│   ├── components/
+│   │   ├── ChatPanel.tsx              # Conversational chat interface
+│   │   ├── MapView.tsx                # Interactive map with PFZ overlays
+│   │   ├── SafetyBadge.tsx            # Safety status indicator
+│   │   └── LanguageSwitch.tsx         # 22-language selector
+│   ├── lib/
+│   │   ├── bhashini.ts                # Bhashini ULCA language services
+│   │   └── geo.ts                     # Geographic calculation utilities
+│   ├── package.json                   # Node.js dependencies
+│   └── tsconfig.json                  # TypeScript configuration
+├── backend/                           # FastAPI application
+│   ├── main.py                        # Application entry point and CORS
+│   ├── agents/
+│   │   ├── orchestrator.py            # Multi-agent coordinator (Brain)
+│   │   ├── fish_finder.py             # PFZ zone proximity search
+│   │   ├── sea_checker.py             # Wave height and current evaluation
+│   │   ├── weather_agent.py           # Wind speed and tide assessment
+│   │   ├── danger_agent.py            # EEZ/MPA geofence and cyclone checks
+│   │   └── combiner.py                # Smart ranking and evidence generation
+│   ├── ingest/
+│   │   ├── incois_textdata.py         # INCOIS TextData HTML parser
+│   │   ├── copernicus_fallback.py     # Copernicus Marine fallback (Week 5)
+│   │   └── boundaries.py              # EEZ/MPA boundary loader
+│   ├── routers/
+│   │   ├── pfz.py                     # PFZ data endpoints
+│   │   ├── tiles.py                   # Vector tile server
+│   │   ├── chat.py                    # Chat endpoint for the Brain
+│   │   ├── weather.py                 # Weather data endpoints
+│   │   └── geofence.py               # Geofence check endpoints
+│   ├── db/
+│   │   ├── postgis.py                 # PostGIS connection and queries
+│   │   ├── redis.py                   # Redis cache and session management
+│   │   └── schema.sql                 # Database table definitions
+│   ├── requirements.txt               # Python dependencies
+│   └── Dockerfile                     # Backend container definition
+├── infra/
+│   ├── docker-compose.yml             # PostGIS + Redis + Backend services
+│   └── vercel.json                    # Vercel deployment configuration
+└── scripts/
+    ├── extract_pfz.sh                 # PFZ data extraction shell script
+    └── dms_to_decimal.py              # DMS coordinate converter
 ```
 
-### Where Current Live Files Move
-| Now (demo hosting) | Moves to (MPP repo) |
-|---|---|
-| `cron-system/static/orca/index.html` (`tmp/sih26176.html`) | `docs/arch.html` + `frontend/app/page.tsx` |
-| `cron-system/static/orca/map/data/pfz-today.geojson` | `data/pfz-today.geojson` + `backend/db` seed |
-| `cron-system/static/orca/map/index.html` | `frontend/app/map/page.tsx` |
-| `tmp/pfz_SEC*.html` | `backend/ingest` cache, not committed |
-| `docs/ORCA_*.md` | `docs/` |
+---
+
+## Key Files — What Each Does
+
+### Backend Agents
+
+**orchestrator.py** — The central coordinator that receives user queries, detects intent, and dispatches sub-tasks to the four specialist agents. It uses a ReAct-style pattern to decide which tools to call and handles multi-turn conversation memory via Redis.
+
+**fish_finder.py** — Queries the PostGIS database for PFZ zones within a configurable radius of the user's location. Returns the closest zones ranked by proximity with metadata like sector, bearing, and depth.
+
+**sea_checker.py** — Evaluates wave height and current speed at each candidate zone. Returns a safety assessment (safe, caution, or danger) based on configurable thresholds.
+
+**weather_agent.py** — Assesses wind speed and tide conditions at each candidate zone. In the MVP it returns mock data; in Week 2 it will integrate with IMD's marine weather API.
+
+**danger_agent.py** — Checks candidate zones against EEZ and MPA boundaries using PostGIS spatial containment queries. Also monitors active cyclone warnings from IMD.
+
+**combiner.py** — After all agents return their assessments, the Combiner ranks candidates using a weighted scoring formula and produces a single safe recommendation with evidence citations.
+
+### Backend Routers
+
+**pfz.py** — Serves PFZ data to the frontend. The `GET /api/pfz/today` endpoint returns today's GeoJSON FeatureCollection, cached in Redis for 6 hours.
+
+**tiles.py** — Generates Mapbox Vector Tiles from PostGIS using `ST_AsMVT`. The frontend map fetches these tiles for efficient rendering of large datasets.
+
+**chat.py** — The conversational interface endpoint. Accepts user queries, dispatches them to the Orchestrator, and returns advisory responses with map references and safety information.
+
+**weather.py** — Serves weather data for marine advisory, including wind speed, wave height, and cyclone warnings.
+
+**geofence.py** — Provides geofence checking endpoints for points and routes against EEZ and MPA boundaries.
+
+### Backend Data Layer
+
+**postgis.py** — Connection pooling and query helpers for PostGIS. Provides functions for upserting PFZ features, spatial proximity searches, and boundary containment checks.
+
+**redis.py** — Redis connection management and caching helpers. Handles PFZ data caching, tile caching, and multi-turn conversation memory.
+
+**schema.sql** — PostGIS table definitions for pfz_zones, eez_boundaries, mpa_boundaries, and ingest_log, with spatial indexes for fast queries.
+
+### Frontend Components
+
+**ChatPanel.tsx** — The conversational chat interface where users type or speak queries in any of 22 supported languages. Displays agent responses with map references and safety badges.
+
+**MapView.tsx** — An interactive map built with React Leaflet that displays PFZ zones as colored circles, EEZ/MPA boundaries, and agent recommendation overlays. Supports fly-to animations and popup details.
+
+**SafetyBadge.tsx** — A color-coded safety indicator showing wave height, wind speed, and danger status at a glance. Green means safe, amber means caution, red means danger.
+
+**LanguageSwitch.tsx** — A language selector supporting 22 Indian languages via the Bhashini ULCA API. Auto-detects input language and allows manual override.
+
+### Frontend Library
+
+**bhashini.ts** — Client for the Bhashini ULCA API providing language detection, translation, and (in Week 3) speech-to-text and text-to-speech.
+
+**geo.ts** — Client-side geographic utilities for haversine distance, bearing calculation, DMS formatting, and location extraction from text.
+
+### Data Files
+
+**pfz-today.geojson** — The live GeoJSON FeatureCollection containing 437 PFZ zone points. This is the shared data model that all agents query. Updated daily at 11:30 AM IST from INCOIS TextData.
+
+**pfz-all.json** — The full PFZ dataset including DMS coordinates and all metadata fields. Used for development and testing.
 
 ---
 
-## 2. Key Files — What Each Does (For 6 Members)
+## How to Run Locally
 
-| File | Owner | PS FR | What It Does |
-|------|-------|-------|--------------|
-| `backend/agents/orchestrator.py` | **M1** | FR1, FR5 | `ReAct` splits `fish where? + safe?` → calls 4 agents in parallel, handles multi-turn `location/boat` |
-| `backend/agents/combiner.py` | **M1** | FR5,6,8 | After swarm `x612,y430` — `closest*0.4 + safe sea*0.3 + wind*0.2 + not banned*0.1` → `explain + citation` |
-| `backend/ingest/incois_textdata.py` | **M2** | FR4 | `curl -c cookies.txt TextDataHome → TextData?secid=SEC001-014` → parse 7-col → `DMS 8 33 18 N→8.555` → `GeoJSON` 437 |
-| `backend/routers/tiles.py` | **M2/M6** | FR4, NFR | `GET /tiles/pfz/{z}/{x}/{y}.pbf` `ST_AsMVT` — Map View fetches tiles, not raw GeoJSON in prod |
-| `frontend/components/MapView.tsx` | **M3** | FR3,6,7 | `Leaflet` `Bhuvan WMS` + `437 cyan circles` `rank1<60km`, popup `bearing/distance/citation INCOIS` + route `pgRouting` |
-| `frontend/lib/bhashini.ts` | **M4** | FR2 | `Bhashini ULCA Translate` `detect → respond same language` `22 langs` `request_locale=ta/ml/hi` — text MVP only |
-| `backend/agents/danger_agent.py` | **M5** | FR7 | `ST_DWithin(boat, eez, 2km)` `MarineRegions` + `WDPA MPA` → `IMBL` warning |
-| `backend/main.py` + `routers/pfz.py` | **M6** | NFR | `FastAPI /api/pfz/today` server proxy `requests.get(https://incois...)` bypasses browser `CORS` → `fetch('/api/pfz/today')` same-origin |
-| `infra/docker-compose.yml` | **M6** | NFR | `FastAPI:8000 + PostGIS:5432 + Redis:6379` one `docker compose up` |
+### Prerequisites
 
----
+- Docker and Docker Compose
+- Node.js 18 or later
+- Python 3.11 or later
 
-## 3. Tech Stack (MVP, No Voice/Copernicus)
+### Step 1: Clone and Configure
 
-| Layer | Choice | Why |
-|-------|--------|-----|
-| Frontend | `Next.js 14` + `react-leaflet` + `Tailwind` | `Vercel` deploy `cron-system` already live, `Bhuvan` WMS easy |
-| Language | `Bhashini ULCA` `Translate` + `fasttext` detect | 22 langs text MVP, no `STT/TTS` mic |
-| Backend | `FastAPI` `Python 3.11` | Same as ingest `xarray/rioxarray`, `CORS` proxy simple |
-| Geo | `PostGIS` `ST_AsMVT` + `GDAL` `ogr2ogr` + `GeoPandas` | `437 Points` → `tiles` for 2G at sea |
-| Cache | `Redis` `6h` for `pfz` + `multi-turn` | Offline `GeoJSON` `mbtiles` via `expo-file-system` pattern |
-| Raster (W2) | `xarray`, `Dask`, `Zarr/COG` | `OSF` `06Z` `wave/current` when mock replaced |
-| LLM | `tool-calling LLM` + `RAG` over `INCOIS` docs | `M1` `ReAct` tool routing |
-| Infra | `Docker Compose` + `Vercel` `cron-system` | `file_count:9` `335959 bytes` live, `GitHub` auto-deploy |
-
----
-
-## 4. API Catalog (MPP)
-
-| Method | Endpoint | Owner | Returns |
-|--------|----------|-------|---------|
-| `GET` | `/api/pfz/today` | M6 | `FeatureCollection` 437 Points `pfz-today.geojson` (proxied `INCOIS` HTML) |
-| `POST` | `/api/ingest/pfz` | M2 | Triggers `SEC001-014` loop with `JSESSIONID`, returns `437 count` |
-| `GET` | `/api/tiles/pfz/{z}/{x}/{y}.pbf` | M2/M6 | `MVT` vector tile for `Map View` |
-| `GET` | `/api/weather?lat,lon` | M5 | `{wind, wave:0.8 mock W1, cyclone}` |
-| `POST` | `/api/geofence/check` | M5 | `{insideEEZ: bool, distanceToIMBL: m}` |
-| `POST` | `/api/chat` | M1 | `{answer, map_ref, evidence:[citation], lang}` |
-
-`CORS`: `app.add_middleware(CORSMiddleware, allow_origins=["https://cron-system.vercel.app"], ...)` — but `frontend` `fetch('/api/pfz/today')` same-origin → no CORS.
-
----
-
-## 5. Data — What We Extract & How
-
-**INCOIS TextData (Live 02-Sep):** `https://incois.gov.in/MarineFisheries/TextData?secid=SEC005` with `JSESSIONID` `F352B2C32650...` → HTML `<table><tr><td>Pallithottam</td><td>SW</td><td>232</td><td>55-60</td><td>645-650</td><td>8 33 18 N</td><td>76 10 2 E</td>` → parse → `DMS→decimal` → `Point(lon,lat)` → `pfz-today.geojson`.
-
-**Loop:** `for SEC001 GUJARAT … SEC014 LAKSHADWEEP` daily `11:30am` (INCOIS publishes 11am).
-
-**Fallback (Backlog W5):** `Copernicus Marine` `cmems_mod_glo_phy_my` `thetao SST` + `cmems_mod_glo_bgc_my` `chl` where `chl>0.5 & SST front (sobel)` → polygonize.
-
-**Boundaries (Static, W1):** `MarineRegions EEZ` `https://geo.vliz.be/.../eez.geojson` + `WDPA MPA` `https://www.protectedplanet.net/downloads` → `PostGIS`.
-
----
-
-## 6. How to Run (For 6, After Clone)
+Clone the repository and create your environment file:
 
 ```bash
-# 1. Env
-cp .env.example .env  # INCOIS_JSESSIONID, BHASHINI_API_KEY, DATABASE_URL, REDIS_URL
-
-# 2. Infra
-docker compose up -d  # PostGIS + Redis
-psql -f backend/db/schema.sql
-
-# 3. Ingest (M2) — live 437 points
-curl -c cookies.txt https://incois.gov.in/MarineFisheries/TextDataHome?mfid=1 -o /tmp/home.html
-for s in SEC001 SEC002 ... SEC014; do curl -b cookies.txt https://incois.gov.in/MarineFisheries/TextData?secid=$s -o data/pfz_$s.html; done
-python backend/ingest/incois_textdata.py  # → data/pfz-today.geojson
-
-# 4. Backend
-cd backend && pip install -r requirements.txt && uvicorn main:app --reload --port 8000
-# test: curl http://localhost:8000/api/pfz/today | jq '.features | length' # 437
-
-# 5. Frontend
-cd frontend && npm i && npm run dev  # http://localhost:3000 → Chat + Map
-# Map standalone: http://localhost:3000/map → fetches /api/pfz/today → 437 cyan dots
+git clone https://github.com/yourteam/orca-marine-intelligence.git
+cd orca-marine-intelligence
+cp .env.example .env
 ```
 
-**Vercel (M6):** Push to `main` → `cron-system` auto-deploy `https://cron-system.vercel.app/orca/` + `/map/` + `/geojson/` + `/mpp/` + `/plan/`.
+Edit `.env` and fill in your INCOIS JSESSIONID and Bhashini API key. The PostGIS and Redis URLs can stay as-is for Docker development.
+
+### Step 2: Start Infrastructure
+
+Launch PostGIS and Redis with Docker Compose:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+```
+
+This starts PostGIS on port 5432 (with the schema auto-loaded) and Redis on port 6379.
+
+### Step 3: Ingest PFZ Data
+
+Fetch today's PFZ data from INCOIS:
+
+```bash
+INCOIS_JSESSIONID=<your-session-id> bash scripts/extract_pfz.sh
+```
+
+This creates `data/pfz-today.geojson` with today's 437 PFZ points.
+
+### Step 4: Start the Backend
+
+Install Python dependencies and start the FastAPI server:
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+Verify it works: `curl http://localhost:8000/health`
+
+### Step 5: Start the Frontend
+
+Install Node.js dependencies and start the Next.js development server:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:3000 to see the Chat + Map split view. The standalone map is at http://localhost:3000/map.
 
 ---
 
-## 7. Other Details (NFR, Testing, Risks)
+## Running with Docker (Full Stack)
 
-- **NFR:** `Reliability` cache `Redis 6h` + fallback `yesterday’s GeoJSON` when `TextData 404`; `Latency` `P50` map <2s via `MVT` tiles; `Offline` `mbtiles` `expo-file-system`; `Audit` logs `datasets_used` per answer.
-- **Weekly Global Tests (All 6, Live):** `Fri W1 05 Sep 16:00` `Malayalam text → Map pin` + `Fri W2 12 Sep 16:00` 5 SIH scenarios `PFZ→Safety Veraval→Lightning→Route EEZ→Refinement` — `P50 + geofence distance` logged.
-- **Deliverables SIH:** `frontend` + `backend` `FastAPI` + `PostGIS` `Zarr` + `explainability` `citation` + `video` + `docs` `ORCA_2Week_MPP_Plan.md` `ORCA_GeoJSON_Architecture.md` + `eval` 5 scenarios.
-- **Repo Rules:** `main` protected, `6 feature branches` `M1-orchestrator` etc., `PR` needs `1 review` + `Vercel` preview.
+To run everything in containers:
 
----
+```bash
+docker compose -f infra/docker-compose.yml up -d --build
+```
 
-## 8. File Section for Notion — Copy This Table
-
-| Section | Files | Who |
-|---------|-------|-----|
-| **Docs** | `README.md`, `docs/ORCA_GeoJSON_Architecture.md`, `docs/ORCA_2Week_MPP_Plan.md`, `docs/ORCA_Codebase_Guide.md` (this), `docs/API.md` | M1+M6 |
-| **Data (Live 02-Sep)** | `data/pfz-today.geojson` (128KB 437), `data/pfz-all.json` (125KB), `data/eez.geojson`, `data/mpa.geojson` | M2+M5 |
-| **Frontend** | `frontend/app/page.tsx`, `frontend/app/map/page.tsx`, `frontend/components/MapView.tsx`, `frontend/components/ChatPanel.tsx`, `frontend/lib/bhashini.ts` | M3+M4 |
-| **Backend Agents** | `backend/agents/orchestrator.py`, `combiner.py`, `fish_finder.py`, `sea_checker.py`, `weather_agent.py`, `danger_agent.py` | M1+M2+M5 |
-| **Ingest** | `backend/ingest/incois_textdata.py`, `copernicus_fallback.py` (W5), `boundaries.py` | M2 |
-| **Infra** | `infra/docker-compose.yml`, `infra/vercel.json`, `infra/cron_ingest.sh`, `backend/db/schema.sql` | M6 |
-| **Live Demo** | `https://cron-system.vercel.app/orca/` `https://cron-system.vercel.app/orca/map/` `https://cron-system.vercel.app/orca/geojson/` `https://cron-system.vercel.app/orca/mpp/` `https://cron-system.vercel.app/orca/plan/` | All |
+This builds and starts PostGIS, Redis, and the FastAPI backend. The frontend runs separately with `npm run dev` during development.
 
 ---
 
-*Generated 02 Sep 2026 16:00 IST — 2-week MPP, 437 PFZ live, mock wave W1 → real OSF W2, text multilingual MVP. This file → Notion import Markdown.*
+## Team Ownership
+
+Each file has an owner responsible for its implementation. See the `Owner` comment at the top of each file for the assigned team member (M1 through M6).
+
+| Milestone | Owner | Scope |
+|-----------|-------|-------|
+| M1 | Orchestrator Lead | Orchestrator, Combiner, reasoning logic |
+| M2 | Data Engineer | TextData ingestion, PostGIS, tiles |
+| M3 | AI Engineer | Chat endpoint, Bhashini integration |
+| M4 | Maps Engineer | MapView, Leaflet, vector tiles |
+| M5 | Safety Engineer | Geofencing, weather, danger assessment |
+| M6 | Platform Engineer | FastAPI, Docker, Vercel, deployment |
+
+---
+
+*Codebase guide for ORCA SIH26176. For the architecture, see [ORCA_GeoJSON_Architecture.md](ORCA_GeoJSON_Architecture.md). For the schedule, see [ORCA_2Week_MPP_Plan.md](ORCA_2Week_MPP_Plan.md).*
