@@ -32,20 +32,20 @@ orca-marine-intelligence/
 │   # eez.geojson + mpa.geojson will be added by Member B in W1 (India's sea borders + protected parks)
 │
 ├── frontend/                          ← What the fisherman sees (website) — split into 2 subdirectories
-│   ├── chat/                          ← 1) Core Chat UI — Member D chat lane
+│   ├── chat/                          ← 1) Core Chat UI — Member E (Chat & App Shell)
 │   │   ├── ChatPanel.tsx              ← Chat box where fisherman types (and sees answers)
 │   │   ├── LanguageSwitch.tsx         ← Button to pick one of 22 Indian languages
 │   │   ├── bhashini.ts                ← Talks to Bhashini (translates between languages)
 │   │   └── index.ts                   ← Barrel export for chat
-│   ├── map/                           ← 2) Map View + geo — Member D map lane
+│   ├── map/                           ← 2) Map View + geo — Member D (Map)
 │   │   ├── MapView.tsx                ← Interactive map that draws 437 zone circles
 │   │   ├── SafetyBadge.tsx            ← Green / yellow / red safety dot
 │   │   ├── geo.ts                     ← Helper math: distance, bearing, DMS→decimal
 │   │   └── index.ts                   ← Barrel export for map
 │   ├── app/
-│   │   ├── page.tsx                   ← Home page: left chat (chat/) + right map (map/)
-│   │   ├── map/page.tsx               ← Full-screen map page
-│   │   └── api/pfz/route.ts           ← Trick to avoid CORS: frontend asks here, this asks the server
+│   │   ├── page.tsx                   ← Home page shell — Member E (wires chat/ + map/)
+│   │   ├── map/page.tsx               ← Full-screen map page — Member D
+│   │   └── api/pfz/route.ts           ← Map data proxy — Member D (map cache)
 │   ├── package.json                   ← List of frontend libraries (Next.js, Leaflet, etc.)
 │   └── tsconfig.json                  ← Settings for TypeScript (the language Next.js uses)
 │
@@ -131,23 +131,32 @@ orca-marine-intelligence/
 | `infra/docker-compose.yml` | **One-command dev env.** | `postgis:15-3.3` on 5432, `redis:7` on 6379. Run `docker compose -f infra/docker-compose.yml up -d`. In W2 you can add `backend` as third service. |
 | `infra/vercel.json` | **Deploy.** | Tells Vercel where `frontend/.next` lives. Push to `main` → auto-deploys to `https://cron-system.vercel.app/orca/*`. Friday live tests run here, not localhost. |
 
-### Member D — Frontend & Maps (what the fisherman sees — starts from live cron-system sample)
+### Member D — Frontend Map (what the fisherman sees on the map)
 
-*Folder: `frontend/` split into 2 subdirectories + `diagrams/` — you own the entire screen. You call M-C's APIs (`/api/chat`, `/api/pfz/today`), you call M-A's bhashini helper.*
+*Folder: `frontend/map/` + `frontend/app/map/` + `diagrams/` — you own the visual map. You call M-C's `/api/pfz/today` + `/api/tiles`.*
 
 | File | In plain words | What you implement |
 |------|---------------|--------------------|
-| `frontend/app/page.tsx` | **The full shell (your heaviest file).** Home page: top bar (LanguageSwitch + SafetyBadge), left ChatPanel + right MapView. | **Start from** `diagrams/map-prototype.html` (already renders 437 points — open it, copy Leaflet logic). Convert to React: `left 30% <ChatPanel onRecommend={c=>mapRef.current.flyTo(c)}> \|\| right 70% <MapView ref={mapRef}>`. Responsive: mobile stacked (`flex-col`), desktop split (`flex-row`). GPS on mount: `navigator.geolocation.getCurrentPosition` → blue dot + pass lat/lon to ChatPanel. Imports: `from "@/chat/ChatPanel"` and `from "@/map/MapView"` via barrel `index.ts`. |
-| `frontend/chat/ChatPanel.tsx` | **The chat box.** Where fisherman types. | Text input + send → `fetch POST /api/chat` (M-C) → show reply + evidence + call `onMapFlyTo(center)`. React `useState` for messages. Lives in `frontend/chat/` (core chat UI). |
+| `frontend/map/MapView.tsx` | **The map.** Draw base map + 437 zone circles + popups + route line. | Start from `diagrams/map-prototype.html` (already renders 437 points — copy Leaflet logic). `react-leaflet`: `<MapContainer>` + `<TileLayer url={bhuvanOrOSM}>` + `features.map(f => <CircleMarker color="cyan">)`. Highlight top picks (<60km) brighter cyan, safe zones green border. `onClick` → popup `place, bearing, distance, depth, citation`. Draw `<Polyline positions={route}>` for green route. W1 fetch whole GeoJSON; W2 switch to `M-C's tiles`. Lives in `frontend/map/`. |
+| `frontend/map/SafetyBadge.tsx` | **Safety dot.** Green/yellow/red badge. | `props: {wave_m, wind_kts, danger}` → red if forbidden or wave>2.5m or wind>25kt, yellow if wave>1.5m or wind>15kt, else green. Values from M-A via M-C. Lives in `frontend/map/`. |
+| `frontend/map/geo.ts` | **Map math.** | `haversine`, `bearing`, `dmsToDecimal`, `parseLocation(text)→{lat,lon}` small lookup. Sort "closest first" in popup. Lives in `frontend/map/`. |
+| `frontend/map/index.ts` | **Barrel.** | `export * from "./MapView"` so shell does `import {MapView} from "@/map"` |
+| `frontend/app/map/page.tsx` | **Full map page.** | Wraps `MapView` full-screen. Same fetch as `page.tsx` but no chat. Used for `https://cron-system.vercel.app/orca/map/`. |
+| `frontend/app/api/pfz/route.ts` | **Map data proxy + offline cache.** | Frontend asks here, this asks `M-C's /api/pfz/today`, caches 6h with `unstable_cache`, on fail serves `data/pfz-today.geojson` from `public/` via service worker. Fisherman at sea with no signal still sees yesterday's map. (Next.js routing) |
+| `diagrams/*` | **Polish 5 HTML diagrams.** | Update `architecture.html`, `geojson-pipeline.html`, `mpp-table.html` for SIH video screenshots. Make them match your React map. |
+
+### Member E — Frontend Chat & App Shell (what the fisherman types + the shell that holds chat+map)
+
+*Folder: `frontend/chat/` + `frontend/app/page.tsx` — you own the conversational UI and the shell that wires chat→map. You call M-C's `POST /api/chat`.*
+
+| File | In plain words | What you implement |
+|------|---------------|--------------------|
+| `frontend/chat/ChatPanel.tsx` | **The chat box.** Where fisherman types Malayalam/English. | Text input + send → `fetch POST /api/chat` (M-C) → show reply + evidence + call `onMapFlyTo(center)` (callback passed from `app/page.tsx` shell to `MapView`). React `useState` for messages. Lives in `frontend/chat/` (core chat UI). |
 | `frontend/chat/LanguageSwitch.tsx` | **22-language switch.** | Dropdown for `en/hi/ml/ta/...` plus auto-detect. Calls `frontend/chat/bhashini.ts` to detect/translate. Lives in `frontend/chat/` (core chat UI). |
 | `frontend/chat/bhashini.ts` | **Translator helper.** | Export `detectLanguage(text)` and `translate(text, from, to)`. W1: simple unicode check `if Malayalam chars → ml else en` is enough. URL in `.env.example`. M-A also calls you from orchestrator. Lives in `frontend/chat/`. |
-| `frontend/map/MapView.tsx` | **The map.** Draw base map + 437 zone circles + popups + route line. | `react-leaflet`: `<MapContainer>` + `<TileLayer url={bhuvanOrOSM}>` + `features.map(f => <CircleMarker color="cyan">)`. Highlight top recommendations (<60km) brighter cyan, safe zones green border. `onClick` → popup `place, bearing, distance, depth, citation`. Draw `<Polyline positions={route}>` for green route. W1 fetch whole GeoJSON; W2 switch to `M-C's tiles`. Lives in `frontend/map/`. |
-| `frontend/map/SafetyBadge.tsx` | **Safety dot.** Green/yellow/red badge. | `props: {wave_m, wind_kts, danger}` → red if forbidden or wave>2.5m or wind>25kt, yellow if wave>1.5m or wind>15kt, else green. Values come from M-A's agents via M-C's APIs. Lives in `frontend/map/`. |
-| `frontend/map/geo.ts` | **Map math.** | `haversine`, `bearing`, `dmsToDecimal`, `parseLocation(text)→{lat,lon}` small lookup. Used to sort "closest first" in the popup. Lives in `frontend/map/`. |
-| `frontend/app/map/page.tsx` | **Full map page.** | Wraps `MapView` full-screen. Same fetch as `page.tsx` but no chat. Used for `https://cron-system.vercel.app/orca/map/`. |
-| `frontend/app/api/pfz/route.ts` | **Map data proxy + offline cache.** Frontend asks here, this asks `M-C's /api/pfz/today`, caches 6h with `unstable_cache`, and on fail serves `data/pfz-today.geojson` from `public/` via service worker. Fisherman at sea with no signal still sees yesterday's map. (Stays in `frontend/app/api/` — Next.js routing) |
-| `diagrams/*` | **Polish 5 HTML diagrams.** | Update `architecture.html`, `geojson-pipeline.html`, `mpp-table.html` for SIH video screenshots. Make them match your React map. |
-| `frontend/package.json` | **Frontend libraries.** | `npm install` after clone. Already has Next 14 + Leaflet + Tailwind. |
+| `frontend/chat/index.ts` | **Barrel.** | `export * from "./ChatPanel"` so shell does `import {ChatPanel} from "@/chat"` |
+| `frontend/app/page.tsx` | **The full shell (your heaviest file).** Home page: top bar (LanguageSwitch + SafetyBadge), left ChatPanel + right MapView. | Start from `diagrams/map-prototype.html` shell. Convert to React: `left 30% <ChatPanel onRecommend={c=>mapRef.current.flyTo(c)}> \|\| right 70% <MapView ref={mapRef}>`. Responsive: mobile stacked (`flex-col`), desktop split (`flex-row`). GPS on mount: `navigator.geolocation.getCurrentPosition` → blue dot + pass lat/lon to ChatPanel. Imports: `from "@/chat/ChatPanel"` and `from "@/map/MapView"` via barrels. You wire chat→map, M-D provides MapView. |
+| `frontend/package.json` | **Frontend libraries (shared).** | `npm install` after clone. Already has Next 14 + Leaflet + Tailwind. Both D and E run this. |
 
 ---
 
@@ -251,8 +260,9 @@ docker compose -f infra/docker-compose.yml up -d --build
 |----------------|-----------------|---------|
 | Member A (Agents) | `backend/agents/orchestrator.py` docstring + `docs/API.md` `/api/chat` | Member B for `postgis.find_nearest` shape, Member C for `/api/chat` wrapper |
 | Member B (Data) | `backend/ingest/incois_textdata.py` docstring, `backend/db/schema.sql` | Member C for `/health` verify |
-| Member C (Backend API) | `backend/main.py`, `infra/docker-compose.yml`, `docs/API.md` (all 5 routers) | Member A for agent call shapes, Member D for what frontend expects |
-| Member D (Frontend) | `frontend/components/MapView.tsx` docstring, `diagrams/map-prototype.html` (live sample) | Member C for API URLs (`/api/pfz/today`, `/api/chat`, `/api/tiles`) |
+| Member C (Backend API) | `backend/main.py`, `infra/docker-compose.yml`, `docs/API.md` (all 5 routers) | Member A for agent call shapes, Member D for tile format, Member E for chat payload |
+| Member D (Frontend Map) | `frontend/map/MapView.tsx` docstring, `diagrams/map-prototype.html` (live sample) | Member C for API URLs (`/api/pfz/today`, `/api/tiles`), Member E for shell wiring |
+| Member E (Frontend Chat) | `frontend/chat/ChatPanel.tsx` docstring, `frontend/chat/bhashini.ts` | Member C for `/api/chat` shape, Member D for `MapView.flyTo` callback |
 
 ---
 

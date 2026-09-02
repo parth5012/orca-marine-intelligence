@@ -1,7 +1,7 @@
 /**
  * Bhashini Language Service Client
  *
- * Owner: M-D (Frontend & Maps) — Bhashini ULCA translate
+ * Owner: M-E (Frontend Chat & App Shell) — Bhashini ULCA translate
  * Module: frontend/chat/bhashini.ts
  *
  * Client for Bhashini ULCA API providing:

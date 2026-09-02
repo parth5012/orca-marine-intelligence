@@ -30,18 +30,19 @@ This one flow proves the 8 SIH core requirements **directly from ISRO's Expected
 
 ---
 
-## 2. Who Does What (4 Lanes)
+## 2. Who Does What (5 Lanes — you asked for M-5 to own Chat & App Shell)
 
-We split the 6-person plan into 4 clean categories — one tech layer per person, no mixed files, no merge conflicts.
+We split the 6-person plan into 5 clean categories — one tech layer per person, no mixed files, no merge conflicts. Frontend is split into **M-D Map** + **M-E Chat & App Shell** as requested.
 
 | Lane | Category | What they own (folder) | Files (see guide) |
 |------|----------|------------------------|-------------------|
 | **Member A** | **Agents & Orchestration** | `backend/agents/` — the intelligence | `orchestrator.py` (brain), `combiner.py` (ranking), `fish_finder.py`, `sea_checker.py`, `weather_agent.py`, `danger_agent.py` — all 6 agents |
 | **Member B** | **Data Extractors & Storage** | `backend/ingest/` + `backend/db/` + `scripts/` — the data pipeline | `incois_textdata.py`, `boundaries.py`, `postgis.py`, `redis.py`, `schema.sql`, `extract_pfz.sh`, `dms_to_decimal.py` |
 | **Member C** | **Backend API & Platform** | `backend/routers/` + `backend/main.py` + `infra/` — the server | `main.py`, `pfz.py`, `tiles.py`, `chat.py`, `geofence.py`, `weather.py`, `docker-compose.yml`, `vercel.json` |
-| **Member D** | **Frontend & Maps** | `frontend/` + `diagrams/` — what the fisherman sees | `app/page.tsx` (shell), `app/map/page.tsx`, `app/api/pfz/route.ts`, `components/MapView, ChatPanel, SafetyBadge, LanguageSwitch`, `lib/bhashini.ts, geo.ts` — starts from live `https://cron-system.vercel.app/orca/map/` |
+| **Member D** | **Frontend Map** | `frontend/map/` + `frontend/app/map/` + `diagrams/` — the visual map | `map/MapView.tsx`, `map/SafetyBadge.tsx`, `map/geo.ts`, `app/map/page.tsx`, `app/api/pfz/route.ts` (map proxy) — starts from live `https://cron-system.vercel.app/orca/map/` |
+| **Member E** | **Frontend Chat & App Shell** | `frontend/chat/` + `frontend/app/page.tsx` — the conversational UI + shell | `chat/ChatPanel.tsx`, `chat/LanguageSwitch.tsx`, `chat/bhashini.ts`, `app/page.tsx` (shell wires chat→map) |
 
-**Critical handover:** Member B must deliver the daily 437-point GeoJSON on **Tuesday 02 Sep**. Until that exists, A cannot rank, C cannot serve APIs, and D cannot draw dots. B is the single blocking dependency for the whole team.
+**Critical handover:** Member B must deliver the daily 437-point GeoJSON on **Tuesday 02 Sep**. Until that exists, A cannot rank, C cannot serve APIs, and D/E cannot draw dots or chat. B is the single blocking dependency for the whole team.
 
 ---
 
@@ -49,7 +50,7 @@ We split the 6-person plan into 4 clean categories — one tech layer per person
 
 **You own the intelligence — all 6 agents. You make the chatbot understand, check safety, and rank.**
 
-> **Category ownership:** `backend/agents/` only — `orchestrator.py`, `combiner.py`, `fish_finder.py`, `sea_checker.py`, `weather_agent.py`, `danger_agent.py`. You do NOT touch `frontend/` (M-D) or `backend/routers/` (M-C). Call M-B's `postgis.py` to query zones, call M-D's `bhashini.ts` for translation.
+> **Category ownership:** `backend/agents/` only — `orchestrator.py`, `combiner.py`, `fish_finder.py`, `sea_checker.py`, `weather_agent.py`, `danger_agent.py`. You do NOT touch `frontend/` (M-D/M-E) or `backend/routers/` (M-C). Call M-B's `postgis.py` to query zones, call M-E's `chat/bhashini.ts` for translation.
 
 ### Week 1 — Build the brain (by Tue 09 Sep)
 
@@ -299,14 +300,14 @@ When Member A's answer comes back with `map.center` (e.g., `[8.555, 76.167]`), c
 
 ## 7. Daily Schedule
 
-| Day | Member A (Agents) | Member B (Data) | Member C (Backend API) | Member D (Frontend) |
-|-----|-------------------|-----------------|------------------------|---------------------|
-| **Tue 02 Sep** | Brain stub + 6 agents stubs | **pfz-today.geojson 437 POINTS (blocks all)** | FastAPI proxy `GET /api/pfz/today` + `/api/chat` stub | Map renders cyan circles from sample |
-| **Wed 03 Sep** | Fish Finder + parallel `gather` | PostGIS ingest + EEZ/MPA load | 5 routers wired in `main.py`, Docker up | Bhuvan WMS + ChatPanel Bhashini `ml` detect |
-| **Thu 04 Sep** | Combiner scoring `0.4/0.3/0.2/0.1` + citation | 11:30 AM cron skeleton | Tiles 501 + geofence/weather wrappers | Popup citation + SafetyBadge + shell `page.tsx` + offline proxy |
-| **Fri 05 Sep 16:00** | **Global Test #1 (everyone live)** | **Global Test #1** | **Global Test #1** | **Global Test #1** |
+| Day | Member A (Agents) | Member B (Data) | Member C (Backend API) | Member D (Map) | Member E (Chat & Shell) |
+|-----|-------------------|-----------------|------------------------|----------------|-------------------------|
+| **Tue 02 Sep** | Brain stub + 6 agents stubs | **pfz-today.geojson 437 POINTS (blocks all)** | FastAPI proxy `GET /api/pfz/today` + `/api/chat` stub | Map renders cyan circles from sample | ChatPanel stub + `chat/bhashini.ts` `ml` detect |
+| **Wed 03 Sep** | Fish Finder + parallel `gather` | PostGIS ingest + EEZ/MPA load | 5 routers wired in `main.py`, Docker up | Bhuvan WMS base layer | LanguageSwitch 22 langs + shell stub |
+| **Thu 04 Sep** | Combiner scoring `0.4/0.3/0.2/0.1` + citation | 11:30 AM cron skeleton | Tiles 501 + geofence/weather wrappers | Popup citation + SafetyBadge + offline proxy | Shell `page.tsx` wires ChatPanel→MapView flyTo + GPS |
+| **Fri 05 Sep 16:00** | **Global Test #1 (everyone live)** | **Global Test #1** | **Global Test #1** | **Global Test #1** | **Global Test #1** |
 
-**W2:** Mon M-B real IMD + M-A memory, Tue M-C tiles+geofence APIs real, Wed M-D SMS display + offline service worker + route avoidance, Thu freeze, **Fri 12 Sep 16:00 Global Test #2** (5 scenarios).
+**W2:** Mon M-B real IMD + M-A memory, Tue M-C tiles+geofence APIs real, Wed M-D offline map tiles + M-E shell polish + SMS display, Thu freeze, **Fri 12 Sep 16:00 Global Test #2** (5 scenarios).
 
 ---
 
@@ -314,7 +315,7 @@ When Member A's answer comes back with `map.center` (e.g., `[8.555, 76.167]`), c
 
 - **INCOIS down / 404:** Use yesterday's `data/pfz-today.geojson` from Redis/disk. Warn user "data up to 24h old". Copernicus fallback comes Week 5.
 - **JSESSIONID cookie expires:** `scripts/extract_pfz.sh` re-fetches TextDataHome before each sector. Retry with backoff. Member B owns this.
-- **Browser CORS blocked:** Never call INCOIS directly from the browser — always go through Member D's FastAPI proxy.
+- **Browser CORS blocked:** Never call INCOIS directly from the browser — always go through Member C's FastAPI proxy (`M-C`).
 - **Vercel drift:** Friday live tests catch local vs prod mismatches.
 
 ---
@@ -328,10 +329,11 @@ After you implement, your code lives here:
 | Member A | `backend/agents/*` (all 6 agents) | Agent ranking + `curl POST /api/chat` |
 | Member B | `backend/ingest/*`, `backend/db/*`, `scripts/*` | `data/pfz-today.geojson` + `docker ps` |
 | Member C | `backend/main.py`, `backend/routers/*` (5 routers), `infra/*` | `curl /api/pfz/today`, `/api/chat`, `/health` |
-| Member D | `frontend/*` (all 9 files) + `diagrams/*` | `https://cron-system.vercel.app/orca/map/` + `https://cron-system.vercel.app/orca/` shell |
+| Member D | `frontend/map/*` + `frontend/app/map/` + `frontend/app/api/pfz/` + `diagrams/*` | `https://cron-system.vercel.app/orca/map/` (map) |
+| Member E | `frontend/chat/*` + `frontend/app/page.tsx` | `https://cron-system.vercel.app/orca/` (shell: chat left + map right) |
 
 **Next read:** For the pipeline detail, see [ORCA_GeoJSON_Architecture.md](ORCA_GeoJSON_Architecture.md). For running locally, see steps in [ORCA_Codebase_Guide.md](ORCA_Codebase_Guide.md).
 
 ---
 
-*Plan for 4 members — each lane has step-by-step tasks. If stuck, start with Week 1 Tasks for your lane and ask in standup 10:00 IST.*
+*Plan for 5 members (M-D Map + M-E Chat & App Shell as requested) — each lane has step-by-step tasks. If stuck, start with Week 1 Tasks for your lane and ask in standup 10:00 IST.*

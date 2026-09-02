@@ -1,4 +1,6 @@
 /**
+ * Owner: M-E (Frontend Chat & App Shell) — barrel for chat
+ *
  * Chat â€” Barrel Export
  *
  * Re-exports core chat UI modules for clean imports:

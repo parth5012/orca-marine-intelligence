@@ -1,7 +1,7 @@
 /**
  * LanguageSwitch Component
  *
- * Owner: M-D (Frontend & Maps) — 22-language switch
+ * Owner: M-E (Frontend Chat & App Shell) — 22-language switch
  * Module: frontend/chat/LanguageSwitch.tsx
  *
  * Language selector supporting 22 Indian languages via Bhashini API.
