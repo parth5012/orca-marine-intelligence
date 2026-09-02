@@ -35,10 +35,10 @@ We split the old 6-person plan into 4 lanes to balance workload and keep skills 
 
 | Lane | Name | What they own | Files (see guide) |
 |------|------|---------------|-------------------|
-| **Member A** | **Brain + Language** | The chatbot brain, ranking logic, and all language handling | `backend/agents/orchestrator.py`, `combiner.py`, `backend/routers/chat.py`, `frontend/components/ChatPanel.tsx`, `frontend/lib/bhashini.ts` |
-| **Member B** | **Data + Safety** | All data fetching, the database, and safety checks | `backend/ingest/*`, `backend/db/*`, `backend/agents/fish_finder, sea_checker, weather_agent, danger_agent`, `backend/routers/geofence/weather`, `scripts/*` |
+| **Member A** | **Brain + Language** | The chatbot brain, ranking logic, closest-zone search, and all language handling | `backend/agents/orchestrator.py`, `combiner.py`, `fish_finder.py`, `backend/routers/chat.py`, `frontend/components/ChatPanel.tsx`, `frontend/lib/bhashini.ts` |
+| **Member B** | **Data + Safety** | Data fetching, database, and sea/wind/danger checks (heavy ingest track) | `backend/ingest/*`, `backend/db/*`, `backend/agents/sea_checker, weather_agent, danger_agent`, `scripts/*` |
 | **Member C** | **Maps** | Everything the fisherman sees on the map | `frontend/components/MapView, SafetyBadge`, `frontend/app/map/*`, `frontend/lib/geo.ts`, `backend/routers/tiles.py` |
-| **Member D** | **Platform** | The server, deployment, and end-to-end wiring | `backend/main.py`, `backend/routers/pfz.py`, `infra/*`, `frontend/app/api/*`, `.env`, `docs/API.md` |
+| **Member D** | **Platform + APIs** | The server, deployment, and end-to-end wiring + public APIs | `backend/main.py`, `backend/routers/pfz.py, geofence.py, weather.py`, `infra/*`, `frontend/app/api/*`, `.env`, `docs/API.md` |
 
 **Critical handover:** Member B must deliver the daily 437-point GeoJSON on **Tuesday 02 Sep**. Until that exists, Members A, C, and D cannot query anything. B is the single blocking dependency for the whole team.
 

@@ -1,7 +1,7 @@
 """
 Geofence Check Router
 
-Owner: M-B (Data + Safety)
+Owner: M-D (Platform) — moved from M-B to balance load (Platform owns API surface)
 Module: backend/routers/geofence.py
 
 Checks if a given point or route falls within restricted zones:

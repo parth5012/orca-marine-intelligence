@@ -83,17 +83,18 @@ orca-marine-intelligence/
 
 ## 2. What Each File Does (and Who Builds It)
 
-### Member A — Brain + Language
+### Member A — Brain + Language + Fish Search
 
 | File | In plain words | What you implement |
 |------|---------------|--------------------|
 | `backend/agents/orchestrator.py` | **The brain.** Understands "Where is fish near Kochi?" → pulls out language + location → asks 4 helpers at once. | Step 1: detect language (use Bhashini or simple check). Step 2: get lat/lon from GPS or place name table. Step 3: `asyncio.gather(fish, sea, weather, danger)` — parallel calls. Step 4: hand results to Combiner. Handle one helper timing out (>10s) as "unknown", don't crash. |
+| `backend/agents/fish_finder.py` | **Closest zones.** Asks the map database: "what fishing zones are within 80km of Kochi?" | SQL: `SELECT * FROM pfz_zones WHERE ST_DWithin(geom::geography, ST_MakePoint(lon,lat)::geography, 80000) ORDER BY ST_Distance LIMIT 5`. If 0 results at 80km, retry 120km, then 160km. Member A owns this because the brain directly needs the list to rank. |
 | `backend/agents/combiner.py` | **The decider.** Gets 4 helpers' reports for each zone, scores them, picks one winner with proof. | Implement the formula: `closest*0.4 + sea_safe*0.3 + wind_ok*0.2 + not_forbidden*0.1`. Closest: `1 - distance/max_distance`. Sea: 1.0 if wave<1.5m else slide to 0. Wind: 1.0 if <15kt else slide. Forbidden: 0 or 1. Return `{ best_zone, explanation, citation }`. Citation: `INCOIS TextData SEC005 KERALA 02-Sep`. |
 | `backend/routers/chat.py` | **The chat URL.** Frontend posts a message here, gets back reply + map data. | `POST /api/chat { message, lat, lon, session_id }` → call orchestrator → return `{ reply, map: {center, route}, safety, evidence, language }` (see `API.md`). In W1, `reply` is text; W2 add Redis memory via `session_id`. |
 | `frontend/components/ChatPanel.tsx` | **The chat box.** Where the fisherman types and sees answers. | Text input + send button. On send, `fetch("/api/chat")`. Show reply, evidence citations, and call `onMapFlyTo(center)` to move the map. TypeScript + React state (`useState` for messages). |
 | `frontend/lib/bhashini.ts` | **The translator.** Talks to Bhashini server to detect and translate among 22 Indian languages. | Export `detectLanguage(text)` and `translate(text, from, to)`. For W1, even simple mapping works: if text has Malayalam characters → `ml`, else `en`. Real Bhashini URL is in `.env.example`. |
 
-### Member B — Data + Safety
+### Member B — Data + Safety (the heavy lifter — deliver Tue or everyone is blocked)
 
 | File | In plain words | What you implement |
 |------|---------------|--------------------|
@@ -103,12 +104,9 @@ orca-marine-intelligence/
 | `backend/db/schema.sql` | **Creates tables.** | Already written with `CREATE TABLE pfz_zones, eez_boundaries, mpa_boundaries, ingest_log + GIST index on geom`. If you change columns, update here first, then run `docker compose up` again. |
 | `backend/db/postgis.py` | **Talks to the map database.** | Functions: `upsert_zones(features)`, `find_nearest(lon, lat, radius=80000)`, `check_contains(lon,lat, table)`. Use `psycopg` + `ST_DWithin` / `ST_Contains`. |
 | `backend/db/redis.py` | **Talks to fast memory.** | Functions: `cache_pfz(data, ttl=6h)`, `get_cached_pfz()`, `save_session(session_id, {lat,lon,boat})`, `get_session()`. Use `redis-py`. If Redis is down, just query PostGIS directly (don't crash). |
-| `backend/agents/fish_finder.py` | **Closest zones.** | SQL: `SELECT * FROM pfz_zones WHERE ST_DWithin(geom::geography, ST_MakePoint(lon,lat)::geography, 80000) ORDER BY ST_Distance LIMIT 5`. If 0 results at 80km, retry 120km, then 160km. |
 | `backend/agents/sea_checker.py` | **Wave check.** | W1: return `wave_m=0.8` for every zone (mock). W2: replace with OSF 06Z data joined by lat/lon. Return `{ wave_m, current_kt, status: "safe"|"caution"|"danger"}`. |
 | `backend/agents/weather_agent.py` | **Wind check.** | W1: mock `wind_kts=8`. W2: fetch IMD at `https://mausam.imd.gov.in`. Same status thresholds: safe <15kt, caution 15-25kt, danger >25kt. |
-| `backend/agents/danger_agent.py` | **Forbidden check.** | For each zone: `ST_Contains(eez)`, `ST_DWithin(border,2000)` for IMBL warning 2km, `ST_Contains(mpa)` for forbidden. Also check IMD cyclone within 500km. Return `{ inside_eez, near_imbl, in_mpa, cyclone_alert }`. |
-| `backend/routers/geofence.py` | **Check my point URL.** | `POST /api/geofence/check {lat,lon}` → call `danger_agent` checks → `{ inside_eez, inside_mpa, restricted }` (see `API.md`). |
-| `backend/routers/weather.py` | **Weather URL.** | `GET /api/weather/current?lat=&lon=` → call `weather_agent` + `sea_checker` → `{ wind_speed_kts, wave_height_m, ... }`. |
+| `backend/agents/danger_agent.py` | **Forbidden check.** | For each zone: `ST_Contains(eez)`, `ST_DWithin(border,2000)` for IMBL warning 2km, `ST_Contains(mpa)` for forbidden. Also check IMD cyclone within 500km. Return `{ inside_eez, near_imbl, in_mpa, cyclone_alert }`. Member A will call this via the fish_finder + combiner flow. |
 | `scripts/extract_pfz.sh` | **Shell helper for B.** | Already has the 14-sector loop with `curl -b cookies.txt`. Just make it executable: `chmod +x scripts/extract_pfz.sh`. |
 | `scripts/dms_to_decimal.py` | **Math helper.** | Already has `def dms_to_decimal(deg, min, sec, hemi)` with `South/West → negative`. Call from `incois_textdata.py`. |
 
@@ -123,18 +121,20 @@ orca-marine-intelligence/
 | `frontend/lib/geo.ts` | **Map math.** | `haversine(lon1,lat1,lon2,lat2) → km`, `bearing(...) → degrees`, `dmsToDecimal(...)` (reuse), `parseLocation(text) → {lat,lon}` small lookup. |
 | `backend/routers/tiles.py` | **Map tile server.** | W2 task: `GET /api/tiles/{z}/{x}/{y}.pbf` → `SELECT ST_AsMVT(...)` from PostGIS. W1: tiles not needed — frontend can fetch the whole GeoJSON file. Member C owns this. |
 
-### Member D — Platform
+### Member D — Platform + APIs
 
 | File | In plain words | What you implement |
 |------|---------------|--------------------|
-| `backend/main.py` | **Server startup.** | Already has `FastAPI() + /health`. Add CORS: `app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000","https://cron-system.vercel.app"], ...)`. Include 5 routers: `app.include_router(pfz.router)`, etc. |
+| `backend/main.py` | **Server startup.** | Already has `FastAPI() + /health`. Add CORS: `app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000","https://cron-system.vercel.app"], ...)`. Include all routers: `app.include_router(pfz.router)`, `geofence`, `weather`, `chat`, `tiles`, etc. |
 | `backend/routers/pfz.py` | **Zones URL (the CORS fix).** | `GET /api/pfz/today` → try Redis (`get_cached_pfz`), if hit return it, else call `incois_textdata.py` → fetch today → cache + return. Browser never calls INCOIS directly — always this proxy, so CORS error disappears. |
+| `backend/routers/geofence.py` | **Check forbidden URL.** Owns the public API for geofence checks. | `POST /api/geofence/check {lat,lon}` → call `danger_agent` checks from Member B → `{ inside_eez, inside_mpa, restricted }` (see `API.md`). Member B writes the logic, you expose it. |
+| `backend/routers/weather.py` | **Weather URL.** Owns the public API for weather. | `GET /api/weather/current?lat=&lon=` → call `weather_agent` + `sea_checker` from Member B → `{ wind_speed_kts, wave_height_m, ... }`. Member B writes the logic, you expose it. |
 | `frontend/app/api/pfz/route.ts` | **Next.js proxy** (extra safety). | `export async function GET() { return fetch("http://localhost:8000/api/pfz/today").then(r=>r.json()) }` — same-origin for Vercel. |
 | `frontend/package.json` | **Frontend libraries list.** | `npm install` after clone. Already has Next 14 + Leaflet + Tailwind. Add `bhashini` or `fasttext` if needed. |
 | `infra/docker-compose.yml` | **One-command dev env.** | `postgis:15-3.3` on 5432, `redis:7` on 6379. Run `docker compose -f infra/docker-compose.yml up -d`. In W2 you can add `backend` as third service. |
 | `infra/vercel.json` | **Deploy settings.** | Tells Vercel where `static/orca` lives. Push to `main` → auto deploys to `https://cron-system.vercel.app/orca/*`. Don't change unless Vercel path changes. |
 | `.env.example` | **Secrets template.** | Copy to `.env` → fill `INCOIS_JSESSIONID, BHASHINI_API_KEY`. `DATABASE_URL, REDIS_URL` stay as-is for Docker. Never commit `.env`. |
-| `docs/API.md` | **Endpoint docs** (D owns keeping it updated). | Lists all 6 endpoints with request/response examples. Update it when you change a URL. |
+| `docs/API.md` | **Endpoint docs** (D owns keeping it updated). | Lists all 6 endpoints with request/response examples. Update it when you change a URL. You now own 3 of them (pfz, geofence, weather) + main wiring. |
 
 ---
 
