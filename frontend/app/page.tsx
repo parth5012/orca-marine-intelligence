@@ -1,7 +1,7 @@
 /**
  * ORCA — Root Page
  *
- * Owner: M-C (Maps) + M-A (Brain + Language)
+ * Owner: M-C (Maps) — owns full shell: left ChatPanel (M-A embeds) + right MapView + wiring flyTo + offline cache
  * Module: frontend/app/page.tsx
  *
  * Main application layout combining:

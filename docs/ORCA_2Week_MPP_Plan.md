@@ -37,8 +37,8 @@ We split the old 6-person plan into 4 lanes to balance workload and keep skills 
 |------|------|---------------|-------------------|
 | **Member A** | **Brain + Language** | The chatbot brain, ranking logic, closest-zone search, and all language handling | `backend/agents/orchestrator.py`, `combiner.py`, `fish_finder.py`, `backend/routers/chat.py`, `frontend/components/ChatPanel.tsx`, `frontend/lib/bhashini.ts` |
 | **Member B** | **Data + Safety** | Data fetching, database, and sea/wind/danger checks (heavy ingest track) | `backend/ingest/*`, `backend/db/*`, `backend/agents/sea_checker, weather_agent, danger_agent`, `scripts/*` |
-| **Member C** | **Maps** | Everything the fisherman sees on the map | `frontend/components/MapView, SafetyBadge`, `frontend/app/map/*`, `frontend/lib/geo.ts`, `backend/routers/tiles.py` |
-| **Member D** | **Platform + APIs** | The server, deployment, and end-to-end wiring + public APIs | `backend/main.py`, `backend/routers/pfz.py, geofence.py, weather.py`, `infra/*`, `frontend/app/api/*`, `.env`, `docs/API.md` |
+| **Member C** | **Maps** | Everything the fisherman sees + the shell that holds chat+map together (heaviest UI lane — starts from live cron-system sample at https://cron-system.vercel.app/orca/map/) | `frontend/app/page.tsx` (full shell), `frontend/app/map/*`, `frontend/app/api/pfz/route.ts` (map data proxy + offline cache), `frontend/components/MapView, SafetyBadge`, `frontend/lib/geo.ts`, `backend/routers/tiles.py`, `diagrams/*` polish |
+| **Member D** | **Platform + APIs** | The server, deployment, and end-to-end wiring + public APIs | `backend/main.py`, `backend/routers/pfz.py, geofence.py, weather.py`, `infra/*`, `.env`, `docs/API.md` |
 
 **Critical handover:** Member B must deliver the daily 437-point GeoJSON on **Tuesday 02 Sep**. Until that exists, Members A, C, and D cannot query anything. B is the single blocking dependency for the whole team.
 
@@ -226,14 +226,18 @@ Open `frontend/components/SafetyBadge.tsx`. Show one badge per zone:
 - Red = danger/forbidden
 Read values from Member B's helper responses; in W1 they are mocks (always green).
 
-### Week 2 — Make it navigable
+### Week 2 — Make it navigable + offline
 
 - Replace whole-file GeoJSON fetch with tile fetch: `backend/routers/tiles.py` serves Mapbox Vector Tiles (`/api/tiles/{z}/{x}/{y}.pbf`). Tiles load faster on slow 2G at sea.
 - GPS pin: use `navigator.geolocation.getCurrentPosition` (browser API that gives lat/lon, accuracy ±10m). Show a blue dot for "you are here".
 - Route with avoidance: call `pgRouting` (a path finder inside PostGIS) with cost = `wave*0.5 + wind*0.3 + forbidden_penalty (big number)`. This makes the route go around rough/forbidden areas.
 - Fly-to animation polish.
+- **Offline & shell (new — why M-C is heavier):**
+  1. Own the full shell `frontend/app/page.tsx` — left ChatPanel (M-A gives you the component) + right MapView, responsive (mobile stacked, desktop split), wire `ChatPanel onRecommend → MapView.flyTo`.
+  2. Own the map data proxy `frontend/app/api/pfz/route.ts` — add 6h `unstable_cache` and offline fallback: if fetch fails, serve `data/pfz-today.geojson` from `public/` via service worker. So a fisherman at sea with no signal still sees yesterday's map.
+  3. Own `diagrams/*` polish — update `diagrams/architecture.html` and `geojson-pipeline.html` for final SIH submission video screenshots.
 
-*Deliverable:* Live map at `https://cron-system.vercel.app/orca/map/` (W1 on mock data, W2 on tiles + real route).
+*Deliverable:* Live map at `https://cron-system.vercel.app/orca/map/` (W1 on mock data, W2 on tiles + real route + offline) + responsive shell. You have a head start — the cron-system sample already renders 437 points; convert it from `diagrams/map-prototype.html` into `MapView.tsx`.
 
 ---
 
@@ -272,9 +276,9 @@ Read values from Member B's helper responses; in W1 they are mocks (always green
 1. Open `infra/vercel.json`. It tells Vercel how to deploy static files for `cron-system` (temporary hosting). Until we have our own Vercel project in W2, push to `main` auto-deploys to `https://cron-system.vercel.app/orca/*`.
 2. Ensure `file_count` and `static/orca` paths match. Friday's global tests are on live Vercel, not local — that's how you catch CORS/JSESSIONID drift.
 
-**Task D4 — Small frontend wiring**
+**Task D4 — API wiring + handover to M-C**
 
-Open `frontend/app/page.tsx` — this is the root page with ChatPanel on left and MapView on right. Wire them so a chat answer (`map.center`) flies the map (Member C gives you the callback). Keep `frontend/package.json` dependencies up to date (`npm install` after each change).
+Wire `backend/main.py` to include all 5 routers and expose `/health`. Keep `frontend/package.json` up to date (`npm install`). Hand the shell `frontend/app/page.tsx` to Member C — you provide the API URLs, C wires ChatPanel → MapView `flyTo`. You focus on making the APIs return real data, C makes them look good.
 
 ### Week 2 — Polish + ship
 
@@ -316,10 +320,10 @@ After you implement, your code lives here:
 
 | You are | You edit | Judges see at |
 |---------|----------|---------------|
-| Member A | `backend/agents/orchestrator.py`, `combiner.py`, `backend/routers/chat.py`, `frontend/components/ChatPanel.tsx`, `frontend/lib/bhashini.ts` | Chat + language demo |
-| Member B | `backend/ingest/*`, `backend/db/*`, `backend/agents/{fish,sea,weather,danger}.py`, `backend/routers/geofence,weather` | `data/pfz-today.geojson` + map points |
-| Member C | `frontend/components/MapView, SafetyBadge`, `frontend/app/map/*`, `frontend/lib/geo.ts`, `backend/routers/tiles.py` | `https://cron-system.vercel.app/orca/map/` |
-| Member D | `backend/main.py`, `backend/routers/pfz.py`, `infra/*`, `frontend/app/page.tsx` | `https://cron-system.vercel.app/orca/` + `curl /health` |
+| Member A | `backend/agents/orchestrator.py, combiner.py, fish_finder.py`, `backend/routers/chat.py`, `frontend/components/ChatPanel.tsx`, `frontend/lib/bhashini.ts` | Chat + language demo |
+| Member B | `backend/ingest/*`, `backend/db/*`, `backend/agents/sea_checker, weather_agent, danger_agent`, `scripts/*` | `data/pfz-today.geojson` + safety checks |
+| Member C | `frontend/app/page.tsx` (shell), `frontend/app/map/*`, `frontend/app/api/pfz/route.ts`, `frontend/components/MapView, SafetyBadge`, `frontend/lib/geo.ts`, `backend/routers/tiles.py`, `diagrams/*` | `https://cron-system.vercel.app/orca/map/` + `https://cron-system.vercel.app/orca/` (shell) |
+| Member D | `backend/main.py`, `backend/routers/pfz.py, geofence.py, weather.py`, `infra/*` | `https://cron-system.vercel.app/orca/` APIs + `curl /health` |
 
 **Next read:** For the pipeline detail, see [ORCA_GeoJSON_Architecture.md](ORCA_GeoJSON_Architecture.md). For running locally, see steps in [ORCA_Codebase_Guide.md](ORCA_Codebase_Guide.md).
 
