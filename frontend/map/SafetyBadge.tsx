@@ -2,7 +2,7 @@
  * SafetyBadge Component
  *
  * Owner: M-D (Frontend & Maps) — green/yellow/red badge
- * Module: frontend/components/SafetyBadge.tsx
+ * Module: frontend/map/SafetyBadge.tsx
  *
  * Visual safety indicator showing sea conditions at a glance.
  * Displays wave height, wind speed, and danger status with

@@ -2,25 +2,36 @@
 
 > **Paste tip:** Create Notion page under "ORCA Core" → paste this markdown.
 
-**You own:** `frontend/` + `diagrams/` — **everything the fisherman sees**. You have a head start: live sample already renders 437 points at `https://cron-system.vercel.app/orca/map/` — convert `diagrams/map-prototype.html` → `MapView.tsx`.  
+**You own:** `frontend/chat/` + `frontend/map/` + `frontend/app/` + `diagrams/` — **everything the fisherman sees, split into 2 subdirectories.**  
 **Official PS:** [SIH26176 — ISRO](https://github.com/vedantchalke36/sih-2026-problem-statements/blob/main/ps_2026/SIH26176.md) — maps, alerts, same-language reply are MVP.  
 **Depends on:** M-C's 5 APIs (`/api/chat`, `/api/pfz/today`, `/api/tiles`, `/api/geofence/check`, `/api/weather`) + M-A's bhashini shape. **Used by:** Judges' eyes — if your map doesn't load, W1 fails.
 
+**Your 2 subdirectories:**
+
+| Subdirectory | What it holds | Files |
+|--------------|---------------|-------|
+| `frontend/chat/` | **1) Core Chat UI** | `ChatPanel.tsx` (chat box), `LanguageSwitch.tsx` (22-language dropdown), `bhashini.ts` (translator helper), `index.ts` (barrel) |
+| `frontend/map/` | **2) Map View + geo** | `MapView.tsx` (map + 437 circles), `SafetyBadge.tsx` (green/yellow/red), `geo.ts` (haversine/bearing), `index.ts` (barrel) |
+
+Plus `frontend/app/` (Next.js routing: `page.tsx` shell, `map/page.tsx` full map, `api/pfz/route.ts` proxy) stays in `app/`.
+
 ---
 
-## 1) Your 10 files (one stack: React + Leaflet + Tailwind)
+## 1) Your 11 files in 2 subdirectories (one stack: React + Leaflet + Tailwind)
 
 | File | What it does in plain words |
 |------|-----------------------------|
-| `frontend/app/page.tsx` | **The full shell (your heaviest).** Top bar (LanguageSwitch + SafetyBadge), left ChatPanel + right MapView, responsive. |
-| `frontend/components/MapView.tsx` | **The map.** Draws base map + 437 zone circles + popups + green route line. |
-| `frontend/components/ChatPanel.tsx` | **The chat box.** Where fisherman types, sees reply + evidence, triggers map flyTo. |
-| `frontend/components/SafetyBadge.tsx` | **Safety dot.** Green/yellow/red badge for a zone. |
-| `frontend/components/LanguageSwitch.tsx` | **22-language switch.** Dropdown + auto-detect. |
-| `frontend/lib/bhashini.ts` | **Translator helper.** `detectLanguage()` + `translate()` via Bhashini ULCA. |
-| `frontend/lib/geo.ts` | **Map math.** `haversine`, `bearing`, `dmsToDecimal`, `parseLocation`. |
-| `frontend/app/map/page.tsx` | **Full map page.** Full-screen `MapView` without chat. |
-| `frontend/app/api/pfz/route.ts` | **Map data proxy + offline cache.** Next.js proxy with 6h cache + service worker fallback. |
+| `frontend/chat/ChatPanel.tsx` | **The chat box.** Where fisherman types. `chat/` — core chat UI. |
+| `frontend/chat/LanguageSwitch.tsx` | **22-language switch.** Dropdown + auto-detect. `chat/` |
+| `frontend/chat/bhashini.ts` | **Translator helper.** `detectLanguage()` + `translate()` via Bhashini ULCA. `chat/` |
+| `frontend/chat/index.ts` | **Barrel.** `export * from "./ChatPanel"` so shell does `import {ChatPanel} from "@/chat"` |
+| `frontend/map/MapView.tsx` | **The map.** Draw base map + 437 zone circles + popups + route line. `map/` |
+| `frontend/map/SafetyBadge.tsx` | **Safety dot.** Green/yellow/red badge. `map/` |
+| `frontend/map/geo.ts` | **Map math.** `haversine`, `bearing`, `dmsToDecimal`, `parseLocation`. `map/` |
+| `frontend/map/index.ts` | **Barrel.** `export * from "./MapView"` so shell does `import {MapView} from "@/map"` |
+| `frontend/app/page.tsx` | **The full shell (your heaviest).** Top bar `LanguageSwitch (from chat/)` + `SafetyBadge (from map/)`, left ChatPanel + right MapView. `app/` |
+| `frontend/app/map/page.tsx` | **Full map page.** Full-screen `MapView` without chat. `app/` |
+| `frontend/app/api/pfz/route.ts` | **Map data proxy + offline cache.** Next.js proxy with 6h cache + service worker fallback. `app/api/` |
 | `diagrams/*` | **Polish 5 HTML diagrams** for SIH video screenshots. |
 
 Every file has `Owner: M-D (Frontend & Maps)` + TODOs — open it.

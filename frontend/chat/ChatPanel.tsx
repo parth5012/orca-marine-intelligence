@@ -2,7 +2,7 @@
  * ChatPanel Component
  *
  * Owner: M-D (Frontend & Maps) — chat UI (calls M-C /api/chat)
- * Module: frontend/components/ChatPanel.tsx
+ * Module: frontend/chat/ChatPanel.tsx
  *
  * Conversational chat interface for the ORCA multi-agent system.
  * Supports text input in 22 Indian languages with auto-detection.

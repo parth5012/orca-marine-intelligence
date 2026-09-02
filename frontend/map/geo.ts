@@ -2,7 +2,7 @@
  * Geo Utilities
  *
  * Owner: M-D (Frontend & Maps) — haversine/bearing helpers
- * Module: frontend/lib/geo.ts
+ * Module: frontend/map/geo.ts
  *
  * Client-side geographic calculation utilities for map rendering.
  * Used by MapView for distance/bearing calculations and

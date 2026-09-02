@@ -64,7 +64,7 @@ PFZ today, safety tomorrow morning, tide/weather at location, lightning/cyclone 
 | **M-A** | **Agents & Orchestration** | `backend/agents/` | `orchestrator.py`, `combiner.py`, `fish_finder.py`, `sea_checker.py`, `weather_agent.py`, `danger_agent.py` | All intelligence, parallel `asyncio.gather` |
 | **M-B** | **Data Extractors & Storage** | `backend/ingest/` + `backend/db/` + `scripts/` | `incois_textdata.py`, `boundaries.py`, `postgis.py`, `redis.py`, `schema.sql`, `extract_pfz.sh`, `dms_to_decimal.py` | **Tue blocking deliverable** — `pfz-today.geojson` 437 |
 | **M-C** | **Backend API & Platform** | `backend/routers/` + `backend/main.py` + `infra/` | `main.py`, `pfz.py`, `tiles.py`, `chat.py`, `geofence.py`, `weather.py`, `docker-compose.yml`, `vercel.json` | Wraps M-A's agents as URLs, fixes CORS |
-| **M-D** | **Frontend & Maps** | `frontend/` + `diagrams/` | `app/page.tsx` (shell), `MapView`, `ChatPanel`, `SafetyBadge`, `LanguageSwitch`, `bhashini.ts`, `geo.ts`, `route.ts` | Has live sample at `https://cron-system.vercel.app/orca/map/` — convert `diagrams/map-prototype.html` → `MapView.tsx` |
+| **M-D** | **Frontend & Maps** | `frontend/` split into 2 subdirs + `diagrams/` | `frontend/chat/` (ChatPanel, LanguageSwitch, bhashini), `frontend/map/` (MapView, SafetyBadge, geo), `frontend/app/` (page.tsx, map/page, api/pfz/route) | Has live sample at `https://cron-system.vercel.app/orca/map/` — convert `diagrams/map-prototype.html` → `map/MapView.tsx` |
 
 Each member's detailed page (paste to Notion as sub-pages):
 - **M-A:** [`01-m1-agents.md`](01-m1-agents.md)

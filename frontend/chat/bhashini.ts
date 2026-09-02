@@ -2,7 +2,7 @@
  * Bhashini Language Service Client
  *
  * Owner: M-D (Frontend & Maps) — Bhashini ULCA translate
- * Module: frontend/lib/bhashini.ts
+ * Module: frontend/chat/bhashini.ts
  *
  * Client for Bhashini ULCA API providing:
  *     - Language detection (22 Indian languages)

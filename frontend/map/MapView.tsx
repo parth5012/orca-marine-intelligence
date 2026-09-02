@@ -2,7 +2,7 @@
  * MapView Component
  *
  * Owner: M-D (Frontend & Maps) — Leaflet map + 437 circles
- * Module: frontend/components/MapView.tsx
+ * Module: frontend/map/MapView.tsx
  *
  * Interactive map showing PFZ zones, EEZ/MPA boundaries,
  * agent recommendation overlays, and user location.
