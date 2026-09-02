@@ -4,7 +4,10 @@ This guide tells you where every file is, what it does in plain words, and how t
 
 > **Current status (02 Sep 2026):** The repo has the docs, live data (437 fishing zones), and scaffold files with TODO instructions. The server, map, and agents are not yet coded — each file tells you exactly what to build there.
 
+> **Official PS:** [SIH26176 — ISRO](https://github.com/vedantchalke36/sih-2026-problem-statements/blob/main/ps_2026/SIH26176.md) (Software · Disaster Management · due 20 Sep 2026)
 > See also: [How ORCA works](ORCA_GeoJSON_Architecture.md) · [2-week plan](ORCA_2Week_MPP_Plan.md) · [API endpoints](API.md) · [Team workflow](CONTRIBUTING.md)
+
+> **MVP note per PS:** Multilingual same-language reply (22 Indian languages) + multi-turn refinement are MVP requirements — see `frontend/lib/bhashini.ts` + `LanguageSwitch.tsx` (M-D) and `backend/agents/orchestrator.py` multi-turn (M-A). Voice is the only thing deferred.
 
 ---
 

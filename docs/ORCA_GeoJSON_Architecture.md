@@ -2,9 +2,12 @@
 
 This doc explains ORCA in simple terms: where the fishing advice comes from, how we clean it, where we store it, how 4 helpers use it, and what can go wrong.
 
+> **Official PS:** [SIH26176 — ISRO](https://github.com/vedantchalke36/sih-2026-problem-statements/blob/main/ps_2026/SIH26176.md) — *ORCA Marine EcOsystem Reasoning with Collaborative Agents* (Software · Disaster Management · due 20 Sep 2026)
 > Other docs: [2-week plan](ORCA_2Week_MPP_Plan.md) · [Files and how to run](ORCA_Codebase_Guide.md) · [API details](API.md)
 
 **Live demo (temporary):** https://cron-system.vercel.app/orca/  · Map: https://cron-system.vercel.app/orca/map/ · Data: https://cron-system.vercel.app/orca/map/data/pfz-today.geojson
+
+> **PS mandates for MVP:** same-language reply (22 Indian languages via Bhashini) + multi-turn refinement are required — not optional W2 polish — alongside data discovery, spatial reasoning, maps, alerts, geofencing, and route optimization.
 
 ---
 

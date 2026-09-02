@@ -5,7 +5,8 @@ This is your day-by-day plan for building the ORCA MVP in 14 days. Read this if 
 **Period:** 02 September to 16 September 2026 (2 weeks)
 **Team size:** 4 members (A, B, C, D) — see who does what below
 **Goal:** By 16 Sep, a fisherman in Kochi can type a question in Malayalam and get a safe fishing spot on a map with proof.
-**Out of scope for this MVP:** Voice input/output (you type, not speak) and Copernicus satellite fallback data. Those come later.
+**Official PS:** [SIH26176 — ISRO, ORCA Marine EcOsystem Reasoning](https://github.com/vedantchalke36/sih-2026-problem-statements/blob/main/ps_2026/SIH26176.md) (Software, Disaster Management, due 20 Sep 2026). PS mandates in MVP: same-language reply (Indian regional languages), multi-turn refinement, autonomous data discovery, spatial-temporal reasoning, explainable evidence, maps/alerts, geofencing, route optimization.
+**Out of scope for this MVP:** Voice input/output (you type, not speak) and Copernicus satellite fallback data. Those come later — **multilingual text (22 languages via Bhashini) is IN scope for MVP per PS, not W2 polish.**
 
 > Other docs: [How ORCA works](ORCA_GeoJSON_Architecture.md) · [Files and how to run](ORCA_Codebase_Guide.md) · [API details](API.md)
 
@@ -21,7 +22,7 @@ A fisherman near Kochi opens ORCA, types "Where is fish?" in Malayalam, and ORCA
 5. Shows it on a map with a popup: place name, bearing, distance, and a citation like "INCOIS TextData SEC005 KERALA 02-Sep"
 6. Sends the route as SMS in Malayalam
 
-This one flow proves all 8 SIH requirements (chat, multilingual, location, data discovery, reasoning, maps, geofencing, evidence).
+This one flow proves the 8 SIH core requirements **directly from ISRO's Expected Solution** (natural language intent + same-language reply + multi-turn + data discovery + spatial-temporal reasoning + explainable maps/evidence + safety alerts + geofencing + route optimization). Full query list from PS: PFZ today, safety tomorrow morning, tide/weather at location, lightning/cyclone alerts, chlorophyll/SST hotspots, safest route, productivity decline, avoid hazardous/geofenced zones.
 
 **How we test it:**
 - **W1 test — Fri 05 Sep 16:00 IST (everyone, on live Vercel):** Malayalam text near Kochi → map pin appears at correct place → safety badge is green → mock SMS sent. If this fails, W1 is not done.
