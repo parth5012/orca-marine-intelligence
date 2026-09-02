@@ -1,7 +1,7 @@
 /**
  * MapView Component
  *
- * Owner: M4 (Maps)
+ * Owner: M-C (Maps)
  * Module: frontend/components/MapView.tsx
  *
  * Interactive map showing PFZ zones, EEZ/MPA boundaries,

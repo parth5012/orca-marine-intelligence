@@ -1,7 +1,7 @@
 /**
  * LanguageSwitch Component
  *
- * Owner: M3 (AI)
+ * Owner: M-A (Brain + Language)
  * Module: frontend/components/LanguageSwitch.tsx
  *
  * Language selector supporting 22 Indian languages via Bhashini API.

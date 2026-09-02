@@ -1,7 +1,7 @@
 """
 Geofence Check Router
 
-Owner: M5 (Safety)
+Owner: M-B (Data + Safety)
 Module: backend/routers/geofence.py
 
 Checks if a given point or route falls within restricted zones:

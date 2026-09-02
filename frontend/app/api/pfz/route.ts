@@ -1,7 +1,7 @@
 /**
  * PFZ API Route (Next.js Server Component)
  *
- * Owner: M4 (Maps)
+ * Owner: M-D (Platform)
  * Module: frontend/app/api/pfz/route.ts
  *
  * Next.js API route that proxies PFZ data from the FastAPI backend.

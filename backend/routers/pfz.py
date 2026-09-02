@@ -1,7 +1,7 @@
 """
 PFZ Data Proxy Router
 
-Owner: M2 (Data)
+Owner: M-B (Data + Safety)
 Module: backend/routers/pfz.py
 
 Serves the latest PFZ GeoJSON data to the frontend map.

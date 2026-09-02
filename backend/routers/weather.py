@@ -1,7 +1,7 @@
 """
 Weather Data Router
 
-Owner: M2 (Data)
+Owner: M-B (Data + Safety)
 Module: backend/routers/weather.py
 
 Serves weather data for marine advisory: wind speed, wave height,

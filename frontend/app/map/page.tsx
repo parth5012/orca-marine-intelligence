@@ -1,7 +1,7 @@
 /**
  * ORCA — Map View Page (Standalone)
  *
- * Owner: M4 (Maps)
+ * Owner: M-C (Maps)
  * Module: frontend/app/map/page.tsx
  *
  * Standalone full-screen map view for development and demo purposes.

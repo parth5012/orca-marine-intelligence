@@ -1,54 +1,77 @@
-# ORCA — GeoJSON-Centric Architecture
+# ORCA — How It Works (Plain-English Architecture)
 
-This document explains how ORCA works internally: the data pipeline from INCOIS satellites to fisherman's phone, the multi-agent architecture, and the shared GeoJSON data model that keeps all agents aligned.
+This doc explains ORCA in simple terms: where the fishing advice comes from, how we clean it, where we store it, how 4 helpers use it, and what can go wrong.
 
-**Live demo:** https://cron-system.vercel.app/orca/
+> Other docs: [2-week plan](ORCA_2Week_MPP_Plan.md) · [Files and how to run](ORCA_Codebase_Guide.md) · [API details](API.md)
 
-**For the 2-week schedule, see** [ORCA_2Week_MPP_Plan.md](ORCA_2Week_MPP_Plan.md).
-**For file locations and run instructions, see** [ORCA_Codebase_Guide.md](ORCA_Codebase_Guide.md).
-
----
-
-## The Problem
-
-Indian fishermen receive daily Potential Fishing Zone advisories from INCOIS as HTML tables published at 11:00 AM IST. These tables list zone names, compass directions, bearings, depths, and distances — but only as text. A fisherman in Kerala who reads "Pallithottam, SW, 232, 55-60, 645-650" has to mentally translate those numbers into a decision about where to sail, whether the sea is safe, and whether the route crosses any restricted zones.
-
-ORCA turns this text into spatial intelligence by converting INCOIS tables into GeoJSON, running four specialist agents in parallel against the same coordinates, and presenting a single safe recommendation on an interactive map with evidence.
+**Live demo (temporary):** https://cron-system.vercel.app/orca/  · Map: https://cron-system.vercel.app/orca/map/ · Data: https://cron-system.vercel.app/orca/map/data/pfz-today.geojson
 
 ---
 
-## The GeoJSON Pipeline
+## 1. The Problem in One Minute
 
-The core innovation of ORCA is a simple but powerful data pipeline that converts INCOIS's text-based advisories into a shared GeoJSON FeatureCollection that all agents can query.
-
-### Step 1: Fetch TextData HTML
-
-INCOIS publishes 14 sector pages (SEC001 through SEC014) covering the entire Indian coast. Each page contains an HTML table with seven columns: place name, compass direction, bearing, depth range, distance range, latitude in DMS, and longitude in DMS.
-
-The fetch requires a valid session cookie obtained from the TextDataHome page. This cookie is refreshed daily before the 11:30 AM ingest window.
+Every day at 11 AM, the Indian government office INCOIS publishes a table like this:
 
 ```
-GET https://incois.gov.in/MarineFisheries/TextData?secid=SEC005
-Cookie: JSESSIONID=<daily-session-id>
+place        direction  bearing  depth   distance  latitude   longitude
+Pallithottam    SW       232    55-60   645-650   8 33 18 N  76 10 02 E
+...
+(about 437 rows across 14 coastal sectors)
 ```
 
-### Step 2: Parse HTML Tables
+This says "there may be fish near Pallithottam, southwest, depth 55-60 m, distance 645 m (?), at 8°33'18" N, 76°10'02" E". Useful — but:
+- It is **text in a table**, not a map. A fisherman has to guess where.
+- It says nothing about whether the sea is **safe** (waves, wind, storms).
+- It says nothing about whether it is **allowed** (sea borders, protected parks).
+- It is only in **English numerals**, not the fisherman's language.
 
-Each sector page is parsed to extract the seven-column table rows. The parser handles variations in HTML structure across sectors and gracefully skips malformed rows.
+ORCA fixes this: table → dot on a map → 4 safety checks in parallel → one safest spot with proof + route in the fisherman's language.
 
-### Step 3: Convert DMS Coordinates
+---
 
-INCOIS uses Degrees-Minutes-Seconds format (for example, "8 33 18 N" for latitude). Each coordinate pair is converted to decimal degrees using the standard formula:
+## 2. The 5-Step Pipeline (Table → Map)
+
+### Step 1 — Go fetch the tables
+
+INCOIS has 14 pages, one per coastal sector:
+
+```
+SEC001 Gujarat, SEC002 Maharashtra, ... SEC005 Kerala, ... SEC014 Lakshadweep
+Each: https://incois.gov.in/MarineFisheries/TextData?secid=SEC005
+```
+
+You cannot open them directly — you first visit `TextDataHome?mfid=1` to get a session cookie (`JSESSIONID`). INCOIS gives you a cookie, you show it back with each SEC request. Cookie expires ≈ daily, so we refresh at 11:30 AM.
+
+**Who does this:** Member B, `scripts/extract_pfz.sh` + `backend/ingest/incois_textdata.py`.
+
+### Step 2 — Read the HTML rows
+
+Each page contains a `<table>` with 7 columns. Use a HTML parser (Python's `BeautifulSoup`) to loop rows:
+
+```
+row → [ "Pallithottam", "SW", "232", "55-60", "645-650", "8 33 18 N", "76 10 02 E" ]
+```
+
+Skip rows that are broken or missing coordinates — log them but don't crash.
+
+### Step 3 — Convert DMS coordinates to normal numbers
+
+INCOIS uses Degrees-Minutes-Seconds (8 33 18 N). Maps need decimal (8.555). Convert:
 
 ```
 decimal = degrees + minutes/60 + seconds/3600
+8 33 18 N → 8 + 33/60 + 18/3600 = 8.555   (N = positive)
+76 10 02 E → 76 + 10/60 + 2/3600 = 76.167  (E = positive)
+S or W → negative (not needed for India, but handle it)
 ```
 
-Negative values are applied for South and West hemispheres. The converted coordinates become the `coordinates` array in a GeoJSON Point geometry.
+**Helper:** `scripts/dms_to_decimal.py` already has `dms_to_decimal()` — call it.
 
-### Step 4: Build GeoJSON FeatureCollection
+GeoJSON stores it as `[longitude, latitude]` (note: lon first).
 
-Each parsed row becomes a GeoJSON Feature with a Point geometry and a properties object containing the zone metadata:
+### Step 4 — Build one shared list (GeoJSON)
+
+Each row becomes a dot on the map:
 
 ```json
 {
@@ -60,157 +83,174 @@ Each parsed row becomes a GeoJSON Feature with a Point geometry and a properties
     "bearing": 232,
     "depth": "55-60",
     "distance_km": 645,
-    "intensity": "high",
     "sector": "KERALA",
     "source": "incois_textdata",
     "timestamp": "2026-09-02T11:30:00+05:30"
   },
-  "geometry": {
-    "type": "Point",
-    "coordinates": [76.167, 8.555]
-  }
+  "geometry": { "type": "Point", "coordinates": [76.167, 8.555] }
 }
 ```
 
-The full collection currently contains 437 features across all 14 sectors.
+All 437 dots together form a `FeatureCollection` saved as `data/pfz-today.geojson`. This single file is the **shared list** — every helper reads the same dots so they don't disagree.
 
-### Step 5: Store and Cache
+### Step 5 — Save in two fast places
 
-The FeatureCollection is written to `data/pfz-today.geojson` on disk, upserted into PostGIS for spatial queries, and cached in Redis with a 6-hour TTL until the next daily fetch.
-
----
-
-## Multi-Agent Architecture
-
-ORCA uses four specialist agents that all read the same GeoJSON coordinates. This shared data model is critical — without it, agents would produce conflicting recommendations.
-
-### The Orchestrator (Brain)
-
-The Orchestrator receives a user query, detects the language, extracts or receives GPS coordinates, and dispatches sub-tasks to the four specialist agents in parallel. It uses a ReAct-style tool routing pattern to decide which agents to call.
-
-### Fish Finder
-
-Queries the GeoJSON collection for the closest productive zones within a configurable radius of the user's location. It ranks results by proximity and returns the top candidates with metadata.
-
-### Sea Checker
-
-For each candidate zone, the Sea Checker evaluates wave height and current speed. In the MVP it uses mock data (0.8 meters). In Week 2 it will pull real data from the Ocean State Forecast.
-
-### Weather Agent
-
-Evaluates wind speed and tide conditions at each candidate zone. In the MVP it uses mock data. In Week 2 it will integrate with IMD's marine weather API.
-
-### Danger Agent
-
-Checks each candidate zone against EEZ (Exclusive Economic Zone) boundaries from MarineRegions and MPA (Marine Protected Area) boundaries from WDPA using PostGIS spatial containment queries. It also checks for active cyclone warnings.
-
-### Smart Combiner
-
-After all four agents return their assessments, the Smart Combiner ranks the candidates using a weighted scoring formula:
-
-- Closest zone: 40% weight
-- Safe sea conditions: 30% weight
-- Favorable wind: 20% weight
-- No geofence violation: 10% weight
-
-The Combiner produces a single safe recommendation with evidence citations (for example, "INCOIS TextData SEC005 KERALA 02-Sep-2026").
+1. **File:** `data/pfz-today.geojson` — a teammate without a database can still see today's points.
+2. **Map database (PostGIS):** a database that understands "near Kochi" queries. Tables are in `backend/db/schema.sql`, helper is `backend/db/postgis.py`.
+3. **Fast memory (Redis):** keeps the same data for 6 hours so we don't re-fetch on every click. Helper is `backend/db/redis.py`. If Redis is down, we read from the database; if the database is down, we read the file — ORCA keeps working, just slower.
 
 ---
 
-## Kochi Walkthrough
+## 3. The Shared List Idea (Why It Matters)
 
-Here is the complete flow for a fisherman near Kochi asking in Malayalam:
+Without a shared list, each helper would search on its own and you'd get nonsense:
 
-1. The fisherman types "എവിടെ മത്സ്യം?" (Where is fish?) in the chat interface.
+```
+Fish helper: "Go to Pallithottam!"
+Sea helper:  "Wave at Pallithottam is 2.8m — dangerous!"
+→ No one compared the two.
+```
 
-2. The system detects Malayalam and extracts GPS coordinates from the device or text context.
+With a shared list, the **same coordinates** flow through all helpers:
 
-3. The Fish Finder queries the 437-point GeoJSON collection and finds Pallithottam at 8.555°N, 76.167°E — approximately 55 kilometers southwest, bearing 232.
+```
+Fish helper: Pallithottam 12 km (closest), Mampally 18 km
+Sea helper:  Pallithottam wave 0.8m (safe), Mampally wave 2.8m (danger)
+Weather:     Pallithottam wind 8kt (ok), Mampally wind 28kt (danger)
+Danger:      Both outside forbidden zones
+→ Decider sees the full picture for each dot and picks Pallithottam.
+```
 
-4. The Sea Checker evaluates wave height at that point (0.8 meters — safe).
-
-5. The Weather Agent evaluates wind speed (8 knots — favorable).
-
-6. The Danger Agent confirms no EEZ or MPA violations and no active cyclone warnings.
-
-7. The Smart Combiner ranks Pallithottam as the top recommendation with a confidence score of 0.87.
-
-8. The Map View flies to the zone coordinates, displays a cyan circle with a popup showing bearing, distance, and citation, and draws a green route line from the fisherman's GPS position.
-
-9. The reply is sent in Malayalam with the map reference and safety badge (green).
-
----
-
-## Data Schema
-
-### pfz_zones
-
-| Column | Type | Description |
-|--------|------|-------------|
-| zone_id | VARCHAR(64) | Unique identifier (for example, SEC005_001) |
-| zone_name | VARCHAR(256) | Place name from INCOIS |
-| area_km2 | FLOAT | Estimated zone area in square kilometers |
-| intensity | VARCHAR(32) | Fishing intensity: low, medium, or high |
-| source | VARCHAR(64) | Data source: incois_textdata or copernicus |
-| geom | GEOMETRY(Point, 4326) | WGS84 coordinates |
-| created_at | TIMESTAMPTZ | First ingest timestamp |
-| updated_at | TIMESTAMPTZ | Last update timestamp |
-
-### eez_boundaries
-
-| Column | Type | Description |
-|--------|------|-------------|
-| country | VARCHAR(128) | Sovereign state |
-| eez_name | VARCHAR(256) | EEZ designation name |
-| geom | GEOMETRY(MultiPolygon, 4326) | Boundary polygon |
-
-### mpa_boundaries
-
-| Column | Type | Description |
-|--------|------|-------------|
-| mpa_name | VARCHAR(256) | Protected area name |
-| iucn_category | VARCHAR(32) | IUCN management category |
-| area_km2 | FLOAT | Protected area size |
-| geom | GEOMETRY(MultiPolygon, 4326) | Boundary polygon |
+**Member B creates** this list once at 11:30 AM; **Members A, C, D read** it all day.
 
 ---
 
-## Failure Modes
+## 4. The 4 Helpers + The Brain (How an Answer Is Made)
 
-### INCOIS TextData Unavailable
+When a fisherman types "Where is fish?" we dispatch 4 helpers **at the same time** (parallel), not one after another.
 
-If INCOIS returns a 404 or the session cookie expires, the system falls back to yesterday's cached GeoJSON from Redis. The user sees a warning that data may be up to 24 hours old. A Copernicus Marine fallback is planned for Week 5.
+```
+User message ("എവിടെ മത്സ്യം?" + GPS 9.93, 76.26)
+         │
+         ▼
+   ┌─────────────┐  figures out: language=ml, location=[9.93,76.26]
+   │ The Brain   │  then asks 4 helpers in parallel:
+   │ (Member A)  │ ─────────────────────────────────────┐
+   └─────────────┘                                      │
+         │         ┌──────────────┬──────────────┬──────────────┬──────────────┐
+         │         ▼              ▼              ▼              ▼              ▼
+         │    Helpers all read the same 437 GEO dots
+         │     ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+         │     │Fish      │ │Sea       │ │Weather   │ │Danger    │
+         │     │Finder    │ │Checker   │ │Agent     │ │Watch     │
+         │     │(Member B)│ │(Member B)│ │(Member B)│ │(Member B)│
+         │     │"closest  │ │"wave     │ │"wind     │ │"is it    │
+         │     │within 80 │ │0.8m? safe│ │8kt? ok"  │ │forbidden?│
+         │     │km"       │ │          │ │          │ │           │
+         │     └──────────┘ └──────────┘ └──────────┘ └──────────┘
+         │         │              │              │              │
+         │         └──────────────┴──────────────┴──────────────┘
+         ▼
+   ┌─────────────┐  scores: closest*0.4 + sea*0.3 + wind*0.2 + not_forbidden*0.1
+   │ The Decider │  winner = highest total
+   │ (Member A)  │  e.g. Pallithottam 0.87 (closest 12km, calm 0.8m, wind 8kt, allowed)
+   └─────────────┘  returns: { best_zone, explanation, citation }
+         │
+         ▼
+   Map flies to the winner, popup shows bearing/distance/citation, route drawn
+   Reply translated back to Malayalam + SMS sent (Member D)
+```
 
-### Session Cookie Expiry
+### Who is what
 
-The JSESSIONID cookie expires periodically. The ingest script refreshes it by requesting the TextDataHome page before each sector fetch. If the refresh fails, the system retries with exponential backoff.
+| Helper | What it checks | W1 mock | W2 real |
+|--------|---------------|---------|---------|
+| **Fish Finder** (`backend/agents/fish_finder.py`) | Closest zones within 80km (expand to 120km/160km if none). Rank by distance. | PostGIS `ST_DWithin` query | Same |
+| **Sea Checker** (`backend/agents/sea_checker.py`) | Wave height at each zone. Safe <1.5m, caution 1.5-2.5m, danger >2.5m. | Returns 0.8m (safe) | OSF 06Z wave data |
+| **Weather Agent** (`backend/agents/weather_agent.py`) | Wind speed + cyclone. Safe <15kt, caution 15-25kt, danger >25kt. | Returns 8kt, no cyclone | IMD https://mausam.imd.gov.in |
+| **Danger Watch** (`backend/agents/danger_agent.py`) | Inside sea border? Inside protected park (MPA)? Near international line (IMBL 2km)? Cyclone within 500km? | Checks PostGIS `ST_Contains` + `ST_DWithin` for EEZ/MPA | + real IMD cyclone overlay |
 
-### PostGIS Unavailable
+The **Decider** (`backend/agents/combiner.py`) weights the four scores and always cites the government source: `INCOIS TextData SEC005 KERALA 02-Sep-2026`.
 
-If PostGIS is unreachable, the system falls back to serving the GeoJSON file directly from disk. Spatial queries (geofence checks, proximity searches) will return errors, but basic PFZ display continues to work.
+### Why parallel?
 
-### Redis Unavailable
-
-If Redis is unreachable, the system bypasses caching and queries PostGIS directly. Response times increase but functionality is preserved. Conversation memory for multi-turn chat is lost.
-
-### Agent Timeout
-
-If any individual agent takes longer than 10 seconds to respond, the Orchestrator proceeds with partial results and marks the missing agent's assessment as "unknown" in the combined response.
+Asking 4 helpers one by one would take 4×2 sec = 8 sec. Asking at once with `asyncio.gather(...)` takes ~2 sec (the slowest one). For a fisherman checking before sailing, 2 sec vs 8 sec matters.
 
 ---
 
-## Tech Stack Summary
+## 5. Walkthrough: Fisherman in Kochi Asking in Malayalam
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Data Source | INCOIS TextData | Daily PFZ advisories |
-| Storage | PostGIS | Spatial queries and boundary containment |
-| Cache | Redis | 6-hour PFZ cache, conversation memory |
-| Backend | FastAPI (Python 3.11) | API server and agent orchestration |
-| Frontend | Next.js 14, React Leaflet | Chat interface and map visualization |
-| Language | Bhashini ULCA | 22-language translation and detection |
-| Deployment | Docker, Vercel | Local development and production hosting |
+Follow the message through the system:
+
+1. **He types:** "എവിടെ മത്സ്യം?" (Where is fish?) on `ChatPanel.tsx` (Member A) — GPS auto-attached `[9.9312, 76.2673]` if location permission granted, otherwise extracted from "near Kochi" text.
+
+2. **Language detect:** `frontend/lib/bhashini.ts` sees Malayalam unicode → language = `ml`. If unsure, defaults to `en`.
+
+3. **Brain extracts location:** `[9.93, 76.26]` (Kochi coast).
+
+4. **Fish Finder runs:** SQL finds Pallithottam at `[76.167, 8.555]`, 12 km away bearing 232 (southwest), depth 55-60m. This is closest within 80km.
+
+5. **Sea Checker sees:** wave 0.8 m → safe.
+
+6. **Weather sees:** wind 8 knots → safe, no cyclone within 500 km → safe.
+
+7. **Danger Watch sees:** outside forbidden parks, inside Indian EEZ, not within 2 km of international line → allowed.
+
+8. **Decider scores:** `closest 0.85*0.4 + sea 1.0*0.3 + wind 1.0*0.2 + allowed 1.0*0.1 = 0.94`. Runner-up Mampally scores 0.62 (far + rough 2.8m). Winner: Pallithottam.
+
+9. **Map reacts:** `frontend/components/MapView.tsx` (Member C) flies to `[8.555, 76.167]`, shows cyan circle, popup "Pallithottam — Bearing 232 — 12 km — Depth 55-60m — INCOIS SEC005 02-Sep", draws green route from GPS dot.
+
+10. **Reply in Malayalam:** Brain translates: "പല്ലിത്തോട്ടം 12 കി.മീ SW, തരംഗം 0.8 മീ — പോകാൻ സുരക്ഷിതം." Safety badge: **green**.
+
+> If all zones are dangerous inside 80km, the system expands to 120km/160km and warns "closest safe zone is farther — 98 km away."
 
 ---
 
-*Architecture document for ORCA SIH26176. For the development schedule, see [ORCA_2Week_MPP_Plan.md](ORCA_2Week_MPP_Plan.md). For file locations and setup instructions, see [ORCA_Codebase_Guide.md](ORCA_Codebase_Guide.md).*
+## 6. Where Data Is Stored (Tables)
+
+Database tables are created by `backend/db/schema.sql`:
+
+| Table | What it holds | Example row |
+|-------|--------------|-------------|
+| `pfz_zones` | 437 fishing dots for today | `zone_id: SEC005_001, place: Pallithottam, geom: Point(76.167, 8.555), sector: KERALA, depth: 55-60, created_at: ...` |
+| `eez_boundaries` | India's sea border polygon | `eez_name: India EEZ, geom: MultiPolygon(...)` (from MarineRegions) |
+| `mpa_boundaries` | Protected parks (no fishing) | `mpa_name: Vembanad, area_km2: 12.5, geom: Polygon(...)` (from WDPA) |
+| `ingest_log` | When we last fetched | `sector: SEC005, count: 32, fetched_at: 2026-09-02T11:30Z, status: ok` |
+
+All `geom` columns use `GEOMETRY(Point/MultiPolygon, 4326)` — that just means WGS84 lat/lon, the same coordinates Google Maps uses.
+
+---
+
+## 7. What Can Go Wrong and What We Do
+
+| If this breaks | How we notice | What we do so ORCA keeps running | Who fixes |
+|----------------|---------------|----------------------------------|-----------|
+| **INCOIS returns 404 / no data** | `incois_textdata.py` gets HTTP 404 or empty table | Show yesterday's `data/pfz-today.geojson` from Redis/disk. Warn fisherman: "Data up to 24h old". Log it in `ingest_log`. No Copernicus fallback in W1 (comes W5). | Member B |
+| **JSESSIONID cookie expired** | INCOIS returns login page instead of table | `extract_pfz.sh` re-fetches `TextDataHome` for a new cookie before each SEC. Retry 3× with backoff (1s,2s,4s). | Member B |
+| **INCOIS CORS blocked in browser** | Browser console: `No 'Access-Control-Allow-Origin'` | Never call INCOIS from browser. Frontend calls `GET /api/pfz/today` on our FastAPI proxy (Member D), which calls INCOIS server-side where CORS doesn't apply. Next.js proxy `frontend/app/api/pfz/route.ts` as second layer. | Member D |
+| **Database (PostGIS) down** | `psycopg` error on query | Serve today's points directly from `data/pfz-today.geojson` file (no spatial query). "Near me" still works via simple math (`haversine` in `frontend/lib/geo.ts`); forbiddenchecks return "unknown" instead of crash. | Members B, D |
+| **Fast memory (Redis) down** | `redis-py` error | Skip cache: query PostGIS directly. Slower (~100ms vs ~5ms) but same answer. Conversation memory (multi-turn) is lost — fisherman must resend location. | Members A, D |
+| **One helper is slow (>10s)** | Orchestrator timeout | Proceed with the other 3 helpers, mark missing check as `"unknown"`, lower confidence score (e.g., 0.87 → 0.62). Show badge Yellow instead of Green with note "wave check unavailable". | Member A |
+| **All zones dangerous within 80km** | Every zone scores < threshold | Expand radius to 120km, then 160km. If still forbidden everywhere, return "No safe zone nearby — do not sail north-west of Kochi today" with explanation and forbid-list. | Members A, B |
+| **Phone has no internet at sea** | Frontend can't fetch | Offline tile cache `mbtiles` (Member D, W2) + yesterday's `data/pfz-today.geojson` cached by service worker. Show cached map. | Member D |
+
+> Rule: **never show a crash**. Always return something — even if it's "data is old / check unavailable" — with a clear color badge and an explanation.
+
+---
+
+## 8. Tools We Use (No Jargon Summary)
+
+| What it is | Plain meaning |
+|------------|---------------|
+| **PostGIS** | A database that can answer "what is within 80km of Kochi?" Geographic search, like Google Maps but inside our database. |
+| **Redis** | A sticky note that self-erases after 6 hours — fast memory so we don't re-fetch the same file on every click. |
+| **`ST_DWithin` / `ST_Contains`** | Database questions: "Is this point within X meters of this border?" / "Is this point inside this park polygon?" Member B writes them, you don't have to memorize. |
+| **`ST_AsMVT`** | Slices map data into tiny tile squares that load fast on slow 2G internet at sea. Member C fetches them. |
+| **FastAPI** | The Python web framework that runs the server URLs (`/api/pfz/today`, `/api/chat`). Member D owns it. |
+| **Leaflet** | The open-source map library that draws circles and popups. Member C uses it inside React. |
+| **Bhashini** | Government translator that converts between 22 Indian languages. Member A uses it. |
+| **Vercel** | A website host — `git push` → live URL. Temporary hosting at `cron-system` until ORCA gets its own project in W2. |
+
+---
+
+*Architecture for ORCA SIH26176 — written for 4 team members. For daily tasks, see [ORCA_2Week_MPP_Plan.md](ORCA_2Week_MPP_Plan.md). For file locations and local setup, see [ORCA_Codebase_Guide.md](ORCA_Codebase_Guide.md).*

@@ -1,7 +1,7 @@
 /**
  * ORCA — Root Page
  *
- * Owner: M4 (Maps) + M3 (AI)
+ * Owner: M-C (Maps) + M-A (Brain + Language)
  * Module: frontend/app/page.tsx
  *
  * Main application layout combining:

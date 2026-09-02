@@ -1,7 +1,7 @@
 /**
  * Bhashini Language Service Client
  *
- * Owner: M3 (AI)
+ * Owner: M-A (Brain + Language)
  * Module: frontend/lib/bhashini.ts
  *
  * Client for Bhashini ULCA API providing:

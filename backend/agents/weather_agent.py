@@ -1,7 +1,7 @@
 """
 Weather Agent — Wind, Tide, and Storm Conditions
 
-Owner: M5 (Safety & Geofencing)
+Owner: M-B (Data + Safety)
 Module: backend/agents/weather_agent.py
 
 The Weather Agent provides atmospheric and tidal conditions at PFZ coordinates.

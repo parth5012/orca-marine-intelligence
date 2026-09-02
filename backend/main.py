@@ -1,7 +1,7 @@
 """
 ORCA Agentic Marine Intelligence — FastAPI Application Entry Point
 
-Owner: M6 (Platform)
+Owner: M-D (Platform)
 Module: backend/main.py
 
 This is the main FastAPI application that serves the ORCA backend API.

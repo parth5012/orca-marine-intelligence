@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ORCA Marine Intelligence — PFZ Data Extraction Script
-# Owner: M2 (Data)
+# Owner: M-B (Data + Safety)
 # Module: scripts/extract_pfz.sh
 #
 # Fetches today's INCOIS TextData and extracts PFZ coordinates.

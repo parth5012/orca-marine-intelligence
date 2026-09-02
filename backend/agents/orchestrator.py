@@ -1,7 +1,7 @@
 """
 ORCA Brain — Orchestrator Agent
 
-Owner: M1 (Orchestrator Lead)
+Owner: M-A (Brain + Language)
 Module: backend/agents/orchestrator.py
 
 The Orchestrator is the central "brain" of ORCA. It receives a user query

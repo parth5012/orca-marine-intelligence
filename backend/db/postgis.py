@@ -1,7 +1,7 @@
 """
 PostGIS Connection & Query Utilities
 
-Owner: M2 (Data)
+Owner: M-B (Data + Safety)
 Module: backend/db/postgis.py
 
 Provides connection pooling and query helpers for PostGIS spatial database.

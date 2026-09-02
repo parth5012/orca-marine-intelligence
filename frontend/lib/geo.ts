@@ -1,7 +1,7 @@
 /**
  * Geo Utilities
  *
- * Owner: M4 (Maps)
+ * Owner: M-C (Maps)
  * Module: frontend/lib/geo.ts
  *
  * Client-side geographic calculation utilities for map rendering.

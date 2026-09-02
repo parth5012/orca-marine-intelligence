@@ -1,7 +1,7 @@
 """
 DMS to Decimal Degree Converter
 
-Owner: M2 (Data)
+Owner: M-B (Data + Safety)
 Module: scripts/dms_to_decimal.py
 
 Converts coordinates from DMS (Degrees Minutes Seconds) format

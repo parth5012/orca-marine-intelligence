@@ -1,7 +1,7 @@
 """
 Smart Combiner — Fusion Ranking Agent
 
-Owner: M1 (Orchestrator Lead)
+Owner: M-A (Brain + Language)
 Module: backend/agents/combiner.py
 
 The Smart Combiner receives results from all four specialist agents and

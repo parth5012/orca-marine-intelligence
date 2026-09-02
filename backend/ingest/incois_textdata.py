@@ -1,7 +1,7 @@
 """
 INCOIS TextData → GeoJSON Daily Ingestion
 
-Owner: M2 (Data)
+Owner: M-B (Data + Safety)
 Module: backend/ingest/incois_textdata.py
 
 Parses INCOIS TextData HTML tables published daily at ~11:30 AM IST

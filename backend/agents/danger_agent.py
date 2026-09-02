@@ -1,7 +1,7 @@
 """
 Danger Watch Agent — Safety Geofence Agent
 
-Owner: M5 (Safety Engineer)
+Owner: M-B (Data + Safety)
 Module: backend/agents/danger_agent.py
 
 The Danger Watch agent checks if a recommended fishing zone is:
