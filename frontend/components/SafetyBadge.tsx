@@ -1,7 +1,7 @@
 /**
  * SafetyBadge Component
  *
- * Owner: M-C (Maps)
+ * Owner: M-D (Frontend & Maps) — green/yellow/red badge
  * Module: frontend/components/SafetyBadge.tsx
  *
  * Visual safety indicator showing sea conditions at a glance.

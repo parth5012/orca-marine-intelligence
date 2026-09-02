@@ -1,7 +1,7 @@
 /**
  * Geo Utilities
  *
- * Owner: M-C (Maps)
+ * Owner: M-D (Frontend & Maps) — haversine/bearing helpers
  * Module: frontend/lib/geo.ts
  *
  * Client-side geographic calculation utilities for map rendering.

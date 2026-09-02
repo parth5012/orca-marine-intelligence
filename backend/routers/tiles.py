@@ -1,7 +1,7 @@
 """
 Vector Tile Server Router
 
-Owner: M-C (Maps)
+Owner: M-C (Backend API & Platform) — GET /api/tiles/{z}/{x}/{y}.pbf
 Module: backend/routers/tiles.py
 
 Serves vector tiles (MVT) for PFZ zones, EEZ/MPA boundaries,

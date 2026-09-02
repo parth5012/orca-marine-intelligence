@@ -1,7 +1,7 @@
 """
 Chat Endpoint Router â€” ORCA Brain Interface
 
-Owner: M-A (Brain + Language)
+Owner: M-C (Backend API & Platform) — POST /api/chat wrapper
 Module: backend/routers/chat.py
 
 Provides the conversational interface to ORCA's multi-agent system.

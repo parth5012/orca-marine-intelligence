@@ -1,7 +1,7 @@
 """
 Sea Checker Agent â€” Wave and Current Conditions
 
-Owner: M-B (Data + Safety)
+Owner: M-A (Agents & Orchestration) — wave/current check
 Module: backend/agents/sea_checker.py
 
 The Sea Checker agent evaluates ocean conditions at PFZ zone coordinates.

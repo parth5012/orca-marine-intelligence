@@ -1,7 +1,7 @@
 """
 Fish Finder Agent — PFZ Zone Discovery
 
-Owner: M-A (Brain + Language) — moved from M-B to balance load (closest-zone search called by orchestrator)
+Owner: M-A (Agents & Orchestration) � closest-zone search
 Module: backend/agents/fish_finder.py
 
 The Fish Finder agent queries the shared PFZ GeoJSON data to find fishing

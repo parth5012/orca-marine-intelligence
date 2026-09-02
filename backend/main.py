@@ -1,7 +1,7 @@
 """
 ORCA Agentic Marine Intelligence â€” FastAPI Application Entry Point
 
-Owner: M-D (Platform)
+Owner: M-C (Backend API & Platform) — FastAPI app + CORS
 Module: backend/main.py
 
 This is the main FastAPI application that serves the ORCA backend API.

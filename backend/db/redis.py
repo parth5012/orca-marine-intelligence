@@ -1,7 +1,7 @@
 """
 Redis Connection & Cache Utilities
 
-Owner: M-D (Platform)
+Owner: M-B (Data Extractors & Storage) — Redis cache (6h + sessions)
 Module: backend/db/redis.py
 
 Provides Redis connection management and caching helpers for ORCA.

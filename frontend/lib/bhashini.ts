@@ -1,7 +1,7 @@
 /**
  * Bhashini Language Service Client
  *
- * Owner: M-A (Brain + Language)
+ * Owner: M-D (Frontend & Maps) — Bhashini ULCA translate
  * Module: frontend/lib/bhashini.ts
  *
  * Client for Bhashini ULCA API providing:

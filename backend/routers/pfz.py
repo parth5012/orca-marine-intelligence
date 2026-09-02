@@ -1,7 +1,7 @@
 """
 PFZ Data Proxy Router
 
-Owner: M-B (Data + Safety)
+Owner: M-C (Backend API & Platform) — GET /api/pfz/today (CORS proxy)
 Module: backend/routers/pfz.py
 
 Serves the latest PFZ GeoJSON data to the frontend map.

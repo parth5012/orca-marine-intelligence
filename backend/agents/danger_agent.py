@@ -1,7 +1,7 @@
 """
 Danger Watch Agent â€” Safety Geofence Agent
 
-Owner: M-B (Data + Safety)
+Owner: M-A (Agents & Orchestration) — EEZ/MPA/cyclone check
 Module: backend/agents/danger_agent.py
 
 The Danger Watch agent checks if a recommended fishing zone is:

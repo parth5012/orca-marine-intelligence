@@ -1,7 +1,7 @@
 """
 Copernicus Marine Fallback Ingest
 
-Owner: M-B (Data + Safety)
+Owner: M-B (Data Extractors & Storage) — Copernicus fallback (W5)
 Module: backend/ingest/copernicus_fallback.py
 
 Fallback data source for when INCOIS TextData is unavailable.

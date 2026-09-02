@@ -1,7 +1,7 @@
 """
 INCOIS TextData â†’ GeoJSON Daily Ingestion
 
-Owner: M-B (Data + Safety)
+Owner: M-B (Data Extractors & Storage) — INCOIS fetcher
 Module: backend/ingest/incois_textdata.py
 
 Parses INCOIS TextData HTML tables published daily at ~11:30 AM IST

@@ -1,7 +1,7 @@
 """
 EEZ & MPA Boundary Ingest
 
-Owner: M-B (Data + Safety)
+Owner: M-B (Data Extractors & Storage) — EEZ/MPA loader
 Module: backend/ingest/boundaries.py
 
 One-time ingest of boundary datasets used by DangerAgent for geofencing:

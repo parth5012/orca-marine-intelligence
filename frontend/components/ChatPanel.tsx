@@ -1,7 +1,7 @@
 /**
  * ChatPanel Component
  *
- * Owner: M-A (Brain + Language)
+ * Owner: M-D (Frontend & Maps) — chat UI (calls M-C /api/chat)
  * Module: frontend/components/ChatPanel.tsx
  *
  * Conversational chat interface for the ORCA multi-agent system.

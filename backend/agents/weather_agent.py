@@ -1,7 +1,7 @@
 """
 Weather Agent â€” Wind, Tide, and Storm Conditions
 
-Owner: M-B (Data + Safety)
+Owner: M-A (Agents & Orchestration) — wind/cyclone check
 Module: backend/agents/weather_agent.py
 
 The Weather Agent provides atmospheric and tidal conditions at PFZ coordinates.

@@ -1,5 +1,5 @@
 # ORCA Marine Intelligence â€” Docker Compose (Local Development)
-# Owner: M-D (Platform)
+# Owner: M-C (Backend API & Platform) — Docker env (PostGIS+Redis)
 #
 # Services:
 #   - postgis   : PostgreSQL + PostGIS (port 5432)

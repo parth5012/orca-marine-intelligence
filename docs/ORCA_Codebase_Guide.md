@@ -83,18 +83,22 @@ orca-marine-intelligence/
 
 ## 2. What Each File Does (and Who Builds It)
 
-### Member A — Brain + Language + Fish Search
+### Member A — Agents & Orchestration (the intelligence)
+
+*Folder: `backend/agents/` — 6 agents that think. You own all the logic, no frontend, no routers.*
 
 | File | In plain words | What you implement |
 |------|---------------|--------------------|
-| `backend/agents/orchestrator.py` | **The brain.** Understands "Where is fish near Kochi?" → pulls out language + location → asks 4 helpers at once. | Step 1: detect language (use Bhashini or simple check). Step 2: get lat/lon from GPS or place name table. Step 3: `asyncio.gather(fish, sea, weather, danger)` — parallel calls. Step 4: hand results to Combiner. Handle one helper timing out (>10s) as "unknown", don't crash. |
-| `backend/agents/fish_finder.py` | **Closest zones.** Asks the map database: "what fishing zones are within 80km of Kochi?" | SQL: `SELECT * FROM pfz_zones WHERE ST_DWithin(geom::geography, ST_MakePoint(lon,lat)::geography, 80000) ORDER BY ST_Distance LIMIT 5`. If 0 results at 80km, retry 120km, then 160km. Member A owns this because the brain directly needs the list to rank. |
-| `backend/agents/combiner.py` | **The decider.** Gets 4 helpers' reports for each zone, scores them, picks one winner with proof. | Implement the formula: `closest*0.4 + sea_safe*0.3 + wind_ok*0.2 + not_forbidden*0.1`. Closest: `1 - distance/max_distance`. Sea: 1.0 if wave<1.5m else slide to 0. Wind: 1.0 if <15kt else slide. Forbidden: 0 or 1. Return `{ best_zone, explanation, citation }`. Citation: `INCOIS TextData SEC005 KERALA 02-Sep`. |
-| `backend/routers/chat.py` | **The chat URL.** Frontend posts a message here, gets back reply + map data. | `POST /api/chat { message, lat, lon, session_id }` → call orchestrator → return `{ reply, map: {center, route}, safety, evidence, language }` (see `API.md`). In W1, `reply` is text; W2 add Redis memory via `session_id`. |
-| `frontend/components/ChatPanel.tsx` | **The chat box.** Where the fisherman types and sees answers. | Text input + send button. On send, `fetch("/api/chat")`. Show reply, evidence citations, and call `onMapFlyTo(center)` to move the map. TypeScript + React state (`useState` for messages). |
-| `frontend/lib/bhashini.ts` | **The translator.** Talks to Bhashini server to detect and translate among 22 Indian languages. | Export `detectLanguage(text)` and `translate(text, from, to)`. For W1, even simple mapping works: if text has Malayalam characters → `ml`, else `en`. Real Bhashini URL is in `.env.example`. |
+| `backend/agents/orchestrator.py` | **The brain.** Understands "Where is fish near Kochi?" → pulls out language + location → asks your 5 other agents at once. | Step 1: detect language (call `M-D's bhashini.ts` helper or simple unicode check). Step 2: get lat/lon from GPS or place name table `{"Kochi":[9.93,76.26]}`. Step 3: `asyncio.gather(fish, sea, weather, danger)` — parallel, not sequential. Step 4: hand results to `combiner.py`. If one helper times out (>10s), mark as "unknown", don't crash. |
+| `backend/agents/fish_finder.py` | **Closest zones.** Asks the map database: "what fishing zones are within 80km of Kochi?" | SQL: `SELECT * FROM pfz_zones WHERE ST_DWithin(geom::geography, ST_MakePoint(lon,lat)::geography, 80000) ORDER BY ST_Distance LIMIT 5`. If 0 results at 80km, retry 120km, then 160km. Queries `M-B's postgis.py`. |
+| `backend/agents/combiner.py` | **The decider.** Gets 4 helpers' reports for each zone, scores them, picks one winner with proof. | Formula: `closest*0.4 + sea_safe*0.3 + wind_ok*0.2 + not_forbidden*0.1`. Closest: `1 - distance/max_distance`. Sea: 1.0 if wave<1.5m else slide to 0. Wind: 1.0 if <15kt else slide. Forbidden: 0 or 1. Return `{ best_zone, explanation, citation: "INCOIS TextData SEC005 KERALA 02-Sep" }`. |
+| `backend/agents/sea_checker.py` | **Wave check.** | W1: return `wave_m=0.8` for every zone (mock). W2: replace with OSF 06Z data joined by lat/lon. Return `{ wave_m, current_kt, status: "safe"|"caution"|"danger"}`. |
+| `backend/agents/weather_agent.py` | **Wind check.** | W1: mock `wind_kts=8`. W2: fetch IMD at `https://mausam.imd.gov.in`. Thresholds: safe <15kt, caution 15-25kt, danger >25kt. |
+| `backend/agents/danger_agent.py` | **Forbidden check.** | For each zone: `ST_Contains(eez)`, `ST_DWithin(border,2000)` for 2km IMBL warning, `ST_Contains(mpa)` for forbidden. Also IMD cyclone within 500km. Return `{ inside_eez, near_imbl, in_mpa, cyclone_alert }`. |
 
-### Member B — Data + Safety (the heavy lifter — deliver Tue or everyone is blocked)
+### Member B — Data Extractors & Storage (the blocking path — deliver Tue or everyone is blocked)
+
+*Folder: `backend/ingest/` + `backend/db/` + `scripts/` — you produce the shared `data/pfz-today.geojson` that all other members read.*
 
 | File | In plain words | What you implement |
 |------|---------------|--------------------|
@@ -102,40 +106,43 @@ orca-marine-intelligence/
 | `backend/ingest/boundaries.py` | **Download sea borders once.** | Download `eez.geojson` (MarineRegions) and `mpa.geojson` (WDPA) → save `data/eez.geojson`, `data/mpa.geojson` → load into PostGIS (`eez_boundaries`, `mpa_boundaries`). Run once in W1, not daily. |
 | `backend/ingest/copernicus_fallback.py` | **Backup data** — only if INCOIS is down. Skip in W1 (do Week 5). | Left as TODO + docstring. |
 | `backend/db/schema.sql` | **Creates tables.** | Already written with `CREATE TABLE pfz_zones, eez_boundaries, mpa_boundaries, ingest_log + GIST index on geom`. If you change columns, update here first, then run `docker compose up` again. |
-| `backend/db/postgis.py` | **Talks to the map database.** | Functions: `upsert_zones(features)`, `find_nearest(lon, lat, radius=80000)`, `check_contains(lon,lat, table)`. Use `psycopg` + `ST_DWithin` / `ST_Contains`. |
-| `backend/db/redis.py` | **Talks to fast memory.** | Functions: `cache_pfz(data, ttl=6h)`, `get_cached_pfz()`, `save_session(session_id, {lat,lon,boat})`, `get_session()`. Use `redis-py`. If Redis is down, just query PostGIS directly (don't crash). |
-| `backend/agents/sea_checker.py` | **Wave check.** | W1: return `wave_m=0.8` for every zone (mock). W2: replace with OSF 06Z data joined by lat/lon. Return `{ wave_m, current_kt, status: "safe"|"caution"|"danger"}`. |
-| `backend/agents/weather_agent.py` | **Wind check.** | W1: mock `wind_kts=8`. W2: fetch IMD at `https://mausam.imd.gov.in`. Same status thresholds: safe <15kt, caution 15-25kt, danger >25kt. |
-| `backend/agents/danger_agent.py` | **Forbidden check.** | For each zone: `ST_Contains(eez)`, `ST_DWithin(border,2000)` for IMBL warning 2km, `ST_Contains(mpa)` for forbidden. Also check IMD cyclone within 500km. Return `{ inside_eez, near_imbl, in_mpa, cyclone_alert }`. Member A will call this via the fish_finder + combiner flow. |
+| `backend/db/postgis.py` | **Talks to the map database.** | Functions: `upsert_zones(features)`, `find_nearest(lon, lat, radius=80000)`, `check_contains(lon,lat, table)`. Use `psycopg` + `ST_DWithin` / `ST_Contains`. M-A calls these from agents. |
+| `backend/db/redis.py` | **Talks to fast memory.** | Functions: `cache_pfz(data, ttl=6h)`, `get_cached_pfz()`, `save_session(session_id, {lat,lon,boat})`, `get_session()`. Use `redis-py`. If Redis is down, just query PostGIS directly (don't crash). M-A/M-C use your cache. |
 | `scripts/extract_pfz.sh` | **Shell helper for B.** | Already has the 14-sector loop with `curl -b cookies.txt`. Just make it executable: `chmod +x scripts/extract_pfz.sh`. |
 | `scripts/dms_to_decimal.py` | **Math helper.** | Already has `def dms_to_decimal(deg, min, sec, hemi)` with `South/West → negative`. Call from `incois_textdata.py`. |
 
-### Member C — Maps (increased load — starts from live cron-system sample)
+### Member C — Backend API & Platform (the glue)
+
+*Folder: `backend/routers/` + `backend/main.py` + `infra/` — you expose 5 APIs and make it run. You call M-A's agents, you read M-B's DB.*
 
 | File | In plain words | What you implement |
 |------|---------------|--------------------|
-| `frontend/app/page.tsx` | **The full shell (your heaviest file).** Home page that holds everything: top bar (LanguageSwitch + SafetyBadge), left ChatPanel, right MapView. | **Start from** `diagrams/map-prototype.html` (already renders 437 points on cron-system — open it, copy the Leaflet logic). Convert to React: `left 30% <ChatPanel onRecommend={center=>mapRef.current.flyTo(center)}> \|\| right 70% <MapView ref={mapRef}>`. Add responsive: mobile stacked (`flex-col`), desktop split (`flex-row`). Wire GPS on mount: `navigator.geolocation.getCurrentPosition` → blue dot + pass lat/lon to ChatPanel. Handle loading spinner while `GET /api/pfz/today` fetches. |
-| `frontend/components/MapView.tsx` | **The map.** Draw base map + 437 zone circles + popups + route line. | Use `react-leaflet`: `<MapContainer>` + `<TileLayer url={bhuvanOrOSM}>` + `features.map(f => <CircleMarker color="cyan">)`. Highlight top recommendations (<60km) in brighter cyan. Highlight safe zones with green border. `onClick` on marker → popup with `place, bearing, distance, depth, citation`. Draw `<Polyline positions={route}>` for green route. In W1 fetch whole GeoJSON; W2 switch to tiles. |
-| `frontend/components/SafetyBadge.tsx` | **Safety dot.** Green/yellow/red badge for a zone. | `props: { wave_m, wind_kts, danger }` → if forbidden or wave>2.5m or wind>25kt → red, else if wave>1.5m or wind>15kt → yellow, else green. Small pill with text. Member B gives you the values; you just display. |
-| `frontend/app/map/page.tsx` | **Full map page.** | Wraps `MapView` full-screen. Same fetch as `page.tsx` but no chat. Used for `https://cron-system.vercel.app/orca/map/`. Add "Tap a zone to see bearing/distance" helper text. |
-| `frontend/app/api/pfz/route.ts` | **Map data proxy + offline cache.** Frontend asks here, this asks FastAPI, caches for offline. | `GET` handler: `fetch("http://localhost:8000/api/pfz/today")` → `unstable_cache 6h` → on fail, return `data/pfz-today.geojson` from `public/` via service worker. This is why a fisherman at sea with no signal still sees yesterday's map. M-C owns offline because it's map-specific. |
-| `frontend/lib/geo.ts` | **Map math.** | `haversine(lon1,lat1,lon2,lat2) → km`, `bearing(...) → degrees`, `dmsToDecimal(...)` (reuse), `parseLocation(text) → {lat,lon}` small lookup. Used to sort "closest first" in the popup. |
-| `backend/routers/tiles.py` | **Map tile server.** | W2 task: `GET /api/tiles/{z}/{x}/{y}.pbf` → `SELECT ST_AsMVT(...)` from PostGIS. W1: tiles not needed — frontend can fetch the whole GeoJSON file. Member C owns this. In W2, make the map fetch tiles instead of the whole file (loads fast on 2G). |
-| `diagrams/*` | **Polish the 5 HTML diagrams.** | Update `architecture.html`, `geojson-pipeline.html`, `mpp-table.html` colors/labels for final SIH video screenshots. You already have a sample map at `cron-system` — make the diagrams match the React map. |
-
-### Member D — Platform + APIs
-
-| File | In plain words | What you implement |
-|------|---------------|--------------------|
-| `backend/main.py` | **Server startup.** | Already has `FastAPI() + /health`. Add CORS: `app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000","https://cron-system.vercel.app"], ...)`. Include all routers: `app.include_router(pfz.router)`, `geofence`, `weather`, `chat`, `tiles`, etc. Hand the shell (`frontend/app/page.tsx`) to M-C — you focus on APIs returning real data, C makes them look good. |
-| `backend/routers/pfz.py` | **Zones URL (the CORS fix).** | `GET /api/pfz/today` → try Redis (`get_cached_pfz`), if hit return it, else call `incois_textdata.py` → fetch today → cache + return. Browser never calls INCOIS directly — always this proxy, so CORS error disappears. |
-| `backend/routers/geofence.py` | **Check forbidden URL.** Owns the public API for geofence checks. | `POST /api/geofence/check {lat,lon}` → call `danger_agent` checks from Member B → `{ inside_eez, inside_mpa, restricted }` (see `API.md`). Member B writes the logic, you expose it. |
-| `backend/routers/weather.py` | **Weather URL.** Owns the public API for weather. | `GET /api/weather/current?lat=&lon=` → call `weather_agent` + `sea_checker` from Member B → `{ wind_speed_kts, wave_height_m, ... }`. Member B writes the logic, you expose it. |
-| `frontend/package.json` | **Frontend libraries list.** | `npm install` after clone. Already has Next 14 + Leaflet + Tailwind. Add `bhashini` or `fasttext` if needed. |
+| `backend/main.py` | **Server startup.** | Already has `FastAPI() + /health`. Add CORS: `app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000","https://cron-system.vercel.app"], ...)`. Include all 5 routers: `app.include_router(pfz.router)`, `chat`, `tiles`, `geofence`, `weather`. |
+| `backend/routers/pfz.py` | **Zones URL (the CORS fix).** | `GET /api/pfz/today` → try `M-B's redis.get_cached_pfz()`, if hit return, else call `M-B's incois_textdata.py` → fetch today → cache + return. Browser never calls INCOIS directly — this proxy fixes CORS. |
+| `backend/routers/chat.py` | **Chat wrapper.** | `POST /api/chat {message,lat,lon,session_id}` → call `M-A's orchestrator.orchestrate()` → return `{reply, map, safety, evidence, language}` (see `API.md`). You don't write the brain, you wrap it as an API. |
+| `backend/routers/tiles.py` | **Map tile server.** | W2: `GET /api/tiles/{z}/{x}/{y}.pbf` → `SELECT ST_AsMVT(...)` from PostGIS (M-B's data). W1: return 501 "tiles W2" — M-D fetches whole GeoJSON in W1, tiles in W2. |
+| `backend/routers/geofence.py` | **Forbidden check API.** | `POST /api/geofence/check {lat,lon}` → call `M-A's danger_agent` → `{ inside_eez, inside_mpa, restricted }` (see `API.md`). |
+| `backend/routers/weather.py` | **Weather API.** | `GET /api/weather/current?lat=&lon=` → call `M-A's weather_agent + sea_checker` → `{ wind_speed_kts, wave_height_m, ... }`. |
 | `infra/docker-compose.yml` | **One-command dev env.** | `postgis:15-3.3` on 5432, `redis:7` on 6379. Run `docker compose -f infra/docker-compose.yml up -d`. In W2 you can add `backend` as third service. |
-| `infra/vercel.json` | **Deploy settings.** | Tells Vercel where `static/orca` lives. Push to `main` → auto deploys to `https://cron-system.vercel.app/orca/*`. Don't change unless Vercel path changes. |
-| `.env.example` | **Secrets template.** | Copy to `.env` → fill `INCOIS_JSESSIONID, BHASHINI_API_KEY`. `DATABASE_URL, REDIS_URL` stay as-is for Docker. Never commit `.env`. |
-| `docs/API.md` | **Endpoint docs** (D owns keeping it updated). | Lists all 6 endpoints with request/response examples. Update it when you change a URL. You now own 3 of them (pfz, geofence, weather) + main wiring. |
+| `infra/vercel.json` | **Deploy.** | Tells Vercel where `frontend/.next` lives. Push to `main` → auto-deploys to `https://cron-system.vercel.app/orca/*`. Friday live tests run here, not localhost. |
+
+### Member D — Frontend & Maps (what the fisherman sees — starts from live cron-system sample)
+
+*Folder: `frontend/` + `diagrams/` — you own the entire screen. You call M-C's APIs (`/api/chat`, `/api/pfz/today`), you call M-A's bhashini helper.*
+
+| File | In plain words | What you implement |
+|------|---------------|--------------------|
+| `frontend/app/page.tsx` | **The full shell (your heaviest file).** Home page: top bar (LanguageSwitch + SafetyBadge), left ChatPanel + right MapView. | **Start from** `diagrams/map-prototype.html` (already renders 437 points — open it, copy Leaflet logic). Convert to React: `left 30% <ChatPanel onRecommend={c=>mapRef.current.flyTo(c)}> \|\| right 70% <MapView ref={mapRef}>`. Responsive: mobile stacked (`flex-col`), desktop split (`flex-row`). GPS on mount: `navigator.geolocation.getCurrentPosition` → blue dot + pass lat/lon to ChatPanel. |
+| `frontend/components/MapView.tsx` | **The map.** Draw base map + 437 zone circles + popups + route line. | `react-leaflet`: `<MapContainer>` + `<TileLayer url={bhuvanOrOSM}>` + `features.map(f => <CircleMarker color="cyan">)`. Highlight top recommendations (<60km) brighter cyan, safe zones green border. `onClick` → popup `place, bearing, distance, depth, citation`. Draw `<Polyline positions={route}>` for green route. W1 fetch whole GeoJSON; W2 switch to `M-C's tiles`. |
+| `frontend/components/ChatPanel.tsx` | **The chat box.** Where fisherman types. | Text input + send → `fetch POST /api/chat` (M-C) → show reply + evidence + call `onMapFlyTo(center)`. React `useState` for messages. |
+| `frontend/components/SafetyBadge.tsx` | **Safety dot.** Green/yellow/red badge. | `props: {wave_m, wind_kts, danger}` → red if forbidden or wave>2.5m or wind>25kt, yellow if wave>1.5m or wind>15kt, else green. Values come from M-A's agents via M-C's APIs. |
+| `frontend/components/LanguageSwitch.tsx` | **22-language switch.** | Dropdown for `en/hi/ml/ta/...` plus auto-detect. Calls `frontend/lib/bhashini.ts` to detect/translate. |
+| `frontend/lib/bhashini.ts` | **Translator helper.** | Export `detectLanguage(text)` and `translate(text, from, to)`. W1: simple unicode check `if Malayalam chars → ml else en` is enough. URL in `.env.example`. M-A also calls you from orchestrator. |
+| `frontend/lib/geo.ts` | **Map math.** | `haversine`, `bearing`, `dmsToDecimal`, `parseLocation(text)→{lat,lon}` small lookup. Used to sort "closest first" in popup. |
+| `frontend/app/map/page.tsx` | **Full map page.** | Wraps `MapView` full-screen. Same fetch as `page.tsx` but no chat. Used for `https://cron-system.vercel.app/orca/map/`. |
+| `frontend/app/api/pfz/route.ts` | **Map data proxy + offline cache.** Frontend asks here, this asks `M-C's /api/pfz/today`, caches 6h with `unstable_cache`, and on fail serves `data/pfz-today.geojson` from `public/` via service worker. Fisherman at sea with no signal still sees yesterday's map. |
+| `diagrams/*` | **Polish 5 HTML diagrams.** | Update `architecture.html`, `geojson-pipeline.html`, `mpp-table.html` for SIH video screenshots. Make them match your React map. |
+| `frontend/package.json` | **Frontend libraries.** | `npm install` after clone. Already has Next 14 + Leaflet + Tailwind. |
 
 ---
 
@@ -237,10 +244,10 @@ docker compose -f infra/docker-compose.yml up -d --build
 
 | If you are ... | Read this first | Then ask |
 |----------------|-----------------|---------|
-| Member A (Brain+Language) | `docs/API.md` (the `/api/chat` format), `ORCA_GeoJSON_Architecture.md` (how agents work) | Member B for real wave/wind data shape |
-| Member B (Data+Safety) | `backend/ingest/incois_textdata.py` docstring, `backend/db/schema.sql` | Member D for `/health` verify |
-| Member C (Maps) | `frontend/components/MapView.tsx` docstring, `docs/API.md` (tile format) | Member B for tile URL once `tiles.py` is ready |
-| Member D (Platform) | `infra/docker-compose.yml`, `backend/main.py` | Everyone at standup 10:00 IST |
+| Member A (Agents) | `backend/agents/orchestrator.py` docstring + `docs/API.md` `/api/chat` | Member B for `postgis.find_nearest` shape, Member C for `/api/chat` wrapper |
+| Member B (Data) | `backend/ingest/incois_textdata.py` docstring, `backend/db/schema.sql` | Member C for `/health` verify |
+| Member C (Backend API) | `backend/main.py`, `infra/docker-compose.yml`, `docs/API.md` (all 5 routers) | Member A for agent call shapes, Member D for what frontend expects |
+| Member D (Frontend) | `frontend/components/MapView.tsx` docstring, `diagrams/map-prototype.html` (live sample) | Member C for API URLs (`/api/pfz/today`, `/api/chat`, `/api/tiles`) |
 
 ---
 

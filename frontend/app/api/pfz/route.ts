@@ -1,7 +1,7 @@
 /**
  * PFZ API Route (Next.js Server Component)
  *
- * Owner: M-C (Maps) â€” frontend data proxy for the map (owns map data fetching + offline cache; moved from M-D)
+ * Owner: M-D (Frontend & Maps) — Next.js proxy + offline cache for map
  * Module: frontend/app/api/pfz/route.ts
  *
  * Next.js API route that proxies PFZ data from the FastAPI backend.

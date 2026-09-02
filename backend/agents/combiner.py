@@ -1,7 +1,7 @@
 """
 Smart Combiner â€” Fusion Ranking Agent
 
-Owner: M-A (Brain + Language)
+Owner: M-A (Agents & Orchestration) — ranking & evidence
 Module: backend/agents/combiner.py
 
 The Smart Combiner receives results from all four specialist agents and

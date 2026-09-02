@@ -1,7 +1,7 @@
 """
 Weather Data Router
 
-Owner: M-D (Platform) â€” moved from M-B to balance load (Platform owns API surface)
+Owner: M-C (Backend API & Platform) — GET /api/weather
 Module: backend/routers/weather.py
 
 Serves weather data for marine advisory: wind speed, wave height,
