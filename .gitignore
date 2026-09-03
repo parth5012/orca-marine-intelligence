@@ -39,5 +39,15 @@ docker-compose.override.yml
 data/*.csv
 data/*.nc
 
+# Harness — per-member work logs (gitignored to avoid merge conflicts between M-A/B/C/D/E)
+# General harness is tracked: AGENTS.md, docs/notion/*
+# Per-member local logs are ignored — each member keeps their own copy per AGENTS.md §2
+LOG.md
+LOG_*.md
+BLOCKED.md
+BLOCKED_*.md
+LEARNINGS.md
+TECH_DEBT.md
+
 # Logs
 *.log
