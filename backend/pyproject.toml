@@ -9,6 +9,8 @@ dependencies = [
     "langchain>=1.3.18",
     "langchain-community>=0.4.2",
     "langgraph>=1.2.11",
+    "psycopg-binary>=3.3.5",
     "python-dotenv>=1.2.3",
+    "sqlalchemy>=2.0.52",
     "uvicorn>=0.52.4",
 ]
