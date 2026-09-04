@@ -40,12 +40,14 @@ KNOWN_TOOLS: tuple[str, ...] = (TOOL_FIND_FISH, TOOL_OCEAN, TOOL_WEATHER, TOOL_G
 # Coastal ports registry (draft - extends orchestrator.COASTAL_PORTS which
 # today only has Kochi/Veraval/Chennai). Coords are approximate WGS84.
 COASTAL_PORTS_REGISTRY: dict[str, list[float]] = {
+    "Kochi": [9.93, 76.26],
     "Munambam": [10.18, 76.17],
     "Beypore": [11.16, 75.80],
     "Kollam": [8.88, 76.57],
     "Vizag": [17.69, 83.29],  # Visakhapatnam alias
     "Visakhapatnam": [17.69, 83.29],
     "Veraval": [21.60, 69.60],
+    "Chennai": [13.08, 80.27],
 }
 
 PLANNER_SYSTEM_PROMPT: str = """You are ORCA's dynamic query planner (model: gemini-2.5-flash, budget <500ms).
@@ -80,6 +82,12 @@ Rules:
 # ---------------------------------------------------------------------------
 
 
+def _trace_line_refers_to_tool(line: str, tool: str) -> bool:
+    """Anchored trace-line attribution: line starts with tool or SELECT/SKIP tool."""
+    s = line.strip()
+    return s.startswith(tool) or s.startswith(f"SELECT {tool}") or s.startswith(f"SKIP {tool}")
+
+
 class TargetLocation(BaseModel):
     """Resolved fishing / safety location (None lat/lon = unknown -> clarify)."""
 
@@ -105,9 +113,13 @@ class PlannerOutput(BaseModel):
         description="Subset of [find_fishing_zones, check_ocean_state, check_weather, check_geofence]",
     )
 
-    @field_validator("selected_tools")
+    @field_validator("selected_tools", mode="before")
     @classmethod
-    def _known_tools(cls, v: list[str]) -> list[str]:
+    def _known_tools(cls, v: Any) -> list[str]:
+        if not v:
+            return []
+        if not v:
+            return []
         unknown = [t for t in v if t not in KNOWN_TOOLS]
         if unknown:
             raise ValueError(f"unknown tools {unknown}; known={list(KNOWN_TOOLS)}")
@@ -134,10 +146,16 @@ class PlannerOutput(BaseModel):
 
         Matches each selected tool to the trace line mentioning it, so
         SKIP lines for non-selected tools never misalign the display.
+        Matching is anchored (line starts with the tool name or
+        ``SELECT <tool>`` / ``SKIP <tool>``) so a tool name appearing
+        mid-sentence never misattributes the line.
         """
         plan: list[dict[str, Any]] = []
         for t in self.selected_tools:
-            why = next((line for line in self.reasoning_trace if t in line), "")
+            why = next(
+                (line for line in self.reasoning_trace if _trace_line_refers_to_tool(line, t)),
+                "",
+            )
             plan.append({"tool": t, "why": why})
         return plan
 
