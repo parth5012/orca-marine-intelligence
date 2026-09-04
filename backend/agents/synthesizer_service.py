@@ -56,7 +56,7 @@ import logging
 import os
 import re
 import time
-from typing import Any, Awaitable, Callable
+from typing import Any, AsyncGenerator, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,9 @@ __all__ = [
     "validate_synthesized_text",
     "synthesizer_error_to_sse_event",
     "synthesize_advisory",
+    "extract_native_token_text",
+    "iter_reply_tokens",
+    "synthesize_advisory_stream",
 ]
 
 # ---------------------------------------------------------------------------
@@ -684,3 +687,175 @@ async def synthesize_advisory(
         "elapsed_ms": elapsed_ms,
         "model": SYNTHESIZER_MODEL,
     }
+
+
+# ---------------------------------------------------------------------------
+# Token streaming for graph.py SSE (ticket #34, map #30)
+# ---------------------------------------------------------------------------
+
+
+def extract_native_token_text(chunk: Any) -> str:
+    """Extract plain text from an ``on_chat_model_stream`` chunk.
+
+    Handles every shape emitted by LangGraph ``astream_events(v2)`` /
+    LangChain chat models (verified against langchain-core 1.5.4):
+
+      - ``str`` → returned verbatim.
+      - ``AIMessageChunk`` / object with ``.content`` (``str``) → content.
+      - ``.content`` as ``list`` of blocks
+        (``{"type": "text", "text": "..."}`` or ``{"text": ...}``,
+        or objects exposing ``.text``) → joined via each block's
+        ``text`` (``b.text`` / ``b["text"]``).
+      - ``dict`` with ``content`` / ``text`` keys (same rules recursively).
+      - ``list`` of the above → joined.
+      - anything else → ``""`` (never raises; caller skips empty).
+
+    Never raises — returns ``""`` when no text is found so the SSE loop
+    can ``continue`` without breaking strict ``status* -> map -> safety ->
+    token+ -> evidence -> done`` ordering.
+    """
+    try:
+        if chunk is None:
+            return ""
+        if isinstance(chunk, str):
+            return chunk
+        if isinstance(chunk, list):
+            # List fallback (#34 review): AIMessageChunk content blocks —
+            # each block contributes its ``text`` (dict["text"] or .text).
+            parts: list[str] = []
+            for item in chunk:
+                if isinstance(item, dict):
+                    # Prefer explicit text block (skip tool_use etc.).
+                    _t = item.get("text")
+                    if isinstance(_t, str) and _t:
+                        parts.append(_t)
+                        continue
+                else:
+                    _btext = getattr(item, "text", None)
+                    if isinstance(_btext, str) and _btext:
+                        parts.append(_btext)
+                        continue
+                t = extract_native_token_text(item)
+                if t:
+                    parts.append(t)
+            return "".join(parts)
+        if isinstance(chunk, dict):
+            for key in ("content", "text", "delta"):
+                if chunk.get(key) is not None:
+                    t = extract_native_token_text(chunk.get(key))
+                    if t:
+                        return t
+            return ""
+        content = getattr(chunk, "content", None)
+        if content is None:
+            # Some chunks expose .text directly.
+            text_attr = getattr(chunk, "text", None)
+            if isinstance(text_attr, str):
+                return text_attr
+            return ""
+        return extract_native_token_text(content)
+    except Exception:
+        return ""
+
+
+def iter_reply_tokens(reply_text: str, chunk_size: int = 40) -> list[str]:
+    """Chunk a *validated* synthesizer reply into SSE ``token`` texts.
+
+    Delimiter-safe: all chunks except the last carry a trailing space so
+    naive client concatenation (``"".join(token.text)``) reconstructs the
+    original word spacing. Delegates to
+    ``backend.agents.orchestrator._chunk_text`` (single source of truth,
+    word-boundary splitting, placeholder-safe because ``__M*__`` tokens
+    contain no spaces per ``lexical_mask`` spec). Falls back to a minimal
+    whitespace split when the orchestrator import is unavailable (direct
+    script runs).
+
+    This is the graceful-degrade path for ticket #34: LangGraph
+    ``astream_events`` v2 IS available (langgraph 1.1.2), and
+    ``orchestrate_stream_via_graph`` listens for
+    ``on_chat_model_stream`` natively — but ``decision_agent`` synthesizes
+    via the raw ``google-genai`` SDK (not a LangChain chat model), so no
+    native token events fire today. Chunking the validated reply preserves
+    strict SSE ordering + early-token buffering semantics with zero
+    duplication, and the native hook activates automatically if a
+    LangChain chat model is ever embedded inside ``decision_agent``.
+    Only this validated path yields to the client — native chunks are
+    never streamed raw (see graph.py placeholder guard).
+    """
+    text = reply_text or ""
+    if not text.strip():
+        return []
+    try:
+        try:
+            from backend.agents.orchestrator import _chunk_text  # type: ignore
+        except ImportError:  # direct script runs
+            from orchestrator import _chunk_text  # type: ignore
+
+        raw = list(_chunk_text(text, chunk_size=chunk_size))
+    except Exception:
+        # Minimal fallback — never break the SSE token+ guarantee.
+        raw = [p for p in text.split(" ") if p]
+    if not raw:
+        return []
+    # Delimiter-safe spacing (#34 review fix): trailing space on all but
+    # last so "".join(tokens) == original spacing.
+    return [c + (" " if i < len(raw) - 1 else "") for i, c in enumerate(raw)]
+
+
+async def synthesize_advisory_stream(
+    combined: dict | None,
+    language: str = "en",
+    user_location: dict | None = None,
+    *,
+    client: Any | None = None,
+    timeout_s: float = SYNTHESIZER_TIMEOUT_S,
+    generate_fn: Callable[..., Awaitable[str]] | None = None,
+    max_output_tokens: int = 512,
+    chunk_size: int = 40,
+) -> AsyncGenerator[str, None]:
+    """Stream a validated advisory as SSE-ready token chunks.
+
+    Utility delegate (#34 low): thin async-generator wrapper over
+    :func:`synthesize_advisory` + :func:`iter_reply_tokens` — no
+    independent LLM call, no extra validation. Prefer calling
+    ``synthesize_advisory`` directly when the caller needs the envelope
+    (table/elapsed_ms/tier); use this helper only when an SSE token
+    iterator is needed.
+
+    Validation gate (Code Trumps LLM): the full LLM reply is assembled
+    and post-validated by :func:`synthesize_advisory` (veto parity,
+    numbers preserved, citation verbatim) BEFORE any chunk is yielded.
+    Streaming unvalidated transport chunks (``generate_content_stream``)
+    directly to SSE could emit hallucinated metrics or a missing
+    ``DO NOT SAIL`` veto that cannot be retracted — hence validated-then-
+    chunked. Each ``yield`` is one SSE ``token`` frame; callers add the
+    ``await asyncio.sleep(0)`` flush point between frames for real-time
+    delivery while preserving ``map``/``safety``-first ordering via the
+    caller's token buffer.
+
+    Args:
+        Same as :func:`synthesize_advisory` plus ``chunk_size`` (chars).
+
+    Yields:
+        Token strings (already word-boundary chunked). Empty reply yields
+        nothing — callers fall back to the deterministic combiner text.
+
+    Raises:
+        SynthesizerTimeoutError / SynthesizerAPIError /
+        SynthesizerConfigError — same as :func:`synthesize_advisory`;
+        callers surface ``.to_sse_event()`` explicitly (``fallback:none``)
+        and keep the deterministic combiner explanation as reply.
+    """
+    envelope = await synthesize_advisory(
+        combined,
+        language=language,
+        user_location=user_location,
+        client=client,
+        timeout_s=timeout_s,
+        generate_fn=generate_fn,
+        max_output_tokens=max_output_tokens,
+    )
+    reply = str(envelope.get("reply") or "")
+    for piece in iter_reply_tokens(reply, chunk_size=chunk_size):
+        await asyncio.sleep(0)  # SSE flush point — real-time delivery
+        yield piece

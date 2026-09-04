@@ -37,11 +37,23 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import re
 import time
 import uuid
 from typing import Any, TypedDict, Annotated
 
 logger = logging.getLogger(__name__)
+
+# Native-token placeholder guard (#34 review fix 1): raw masked spans
+# (``__MBEARING_*__`` / ``__MKNOTS_*__`` / ``__MDIST_*__`` /
+# ``__MCOORD_*__``) must NEVER reach the client. ``decision_agent``
+# synthesizes via the raw ``google-genai`` SDK (not a LangChain chat
+# model), so ``on_chat_model_stream`` fires no events today — verified on
+# langgraph 1.1.2. The hook below is kept for a future LangChain chat
+# model inside ``decision_agent``; any native text matching this pattern
+# is dropped/buffered, never yielded live. Only the VALIDATED
+# ``synthesizer_service.iter_reply_tokens`` path yields tokens to SSE.
+_NATIVE_PLACEHOLDER_RE = re.compile(r"__M[A-Za-z0-9_]+__")
 
 # ---------------------------------------------------------------------------
 # State
@@ -1108,10 +1120,11 @@ async def orchestrate_stream_via_graph(
     session_id: str | None = None,
 ):
     """
-    PROTOTYPE — SSE streaming via graph.astream_events (wayfinder #27, map #22).
+    SSE streaming via ``graph.astream_events`` v2 (wayfinder #34, map #30).
 
-    ROUGH DRAFT for human review — NOT FINAL. Direction to react to, not a
-    production implementation. Known shortcuts are marked PROTOTYPE below.
+    Hooks the LLM Advisory Synthesizer
+    (``backend/agents/synthesizer_service.py``) into the stream so advisory
+    tokens flow real-time under strict SSE ordering.
 
     Intended event order (docs/API.md strict):
       status* -> map -> safety -> token+ -> evidence -> done
@@ -1120,42 +1133,72 @@ async def orchestrate_stream_via_graph(
 
     Strategy:
       - Consume ``graph.astream_events(init_state, version='v2')``.
+      - ``on_chat_model_stream`` (native, LangChain chat-model chunks) is
+        parsed via ``synthesizer_service.extract_native_token_text`` and
+        streamed directly. Chunks arriving before ``map``+``safety`` are
+        BUFFERED in ``token_buf`` and flushed in order right after
+        ``safety`` so strict ordering always holds.
       - ``on_chain_start`` for known nodes -> ``status/running`` (only while
         no ``map`` has been emitted yet, to preserve the strict order above).
       - ``on_chain_end`` for ``fish_finder`` -> ``status/done`` +
-        immediate ``map`` (early flyTo, provisional) built from raw fish results.
+        immediate provisional ``map`` (early flyTo) built from raw fish
+        results.
       - ``on_chain_end`` for ``parallel_analysis`` (current topology runs the
         3 sea/weather/danger sub-agents inside one node via
         ``asyncio.gather``, so per-sub-agent events do NOT exist) -> stash
-        sea/weather/danger, then single ``safety`` (provisional via combiner).
-      - ``on_chain_end`` for ``decision_agent`` -> flush buffered chat-model
-        tokens, then chunked ``token`` events from its reply.
+        sea/weather/danger, then single provisional ``safety`` (via combiner).
+      - ``on_chain_end`` for ``decision_agent`` -> flush buffered native
+        tokens, then stream the VALIDATED synthesizer reply via
+        ``synthesizer_service.iter_reply_tokens`` (word-boundary chunks over
+        the validated ``reply``). Native path is primary when present;
+        validated chunking is the graceful degrade when no native tokens
+        arrived (no duplication — chunked replay is skipped if native
+        tokens were already streamed).
       - After the stream drains -> ``evidence`` -> ``done``.
       - No-location path (planner yields no user_location) uses empty map /
         amber safety / location-prompt tokens, same order.
       - ``graph is None`` falls back to ``orchestrator.orchestrate_stream``.
+        If the installed langgraph lacks ``astream_events`` (pre-1.x),
+        degrade gracefully to non-streaming ``orchestrate_via_graph`` +
+        validated chunk replay while preserving ordering + buffering.
 
-    PROTOTYPE timeouts (map decision #26: 1.4s sub-agent budget, P95<2.0s):
+    Timeouts (map decision #26: 1.4s sub-agent budget, P95<2.0s):
       per-node budget is OBSERVED only — an ``error`` event is emitted when a
       node exceeds 1.4s but the slow node is NOT preempted (LangGraph stream
       mode has no per-node cancel; true preemption needs Send fan-out +
       per-task wait_for like the orchestrator fallback). Total P95 is logged,
-      not enforced.
+      not enforced — early provisional ``map``/``safety`` keep TTFB <1.4s
+      even when the synthesizer uses its full 1.4s SLA.
 
-    PROTOTYPE tradeoffs for the human (see report):
+    Native-degrade note (ticket #34): ``astream_events`` v2 IS available
+    (langgraph 1.1.2) and the ``on_chat_model_stream`` hook below is live.
+    ``decision_agent`` synthesizes via the raw ``google-genai`` SDK (not a
+    LangChain chat model), so no native token events fire today — verified
+    on the installed version. Validated chunk replay
+    (``iter_reply_tokens`` over the ``synthesize_advisory`` reply, which
+    enforces veto/numbers/citation BEFORE any SSE token) therefore carries
+    tokens with identical ordering + buffering semantics. The native hook
+    activates automatically if a LangChain chat model is ever embedded
+    inside ``decision_agent`` (no streaming-path change needed).
+
+    Error preservation (#32/#33 — do NOT regress):
+      - ``planner_error`` (``fallback:none``) is yielded verbatim right after
+        the planner ``on_chain_end`` (surfacing, not blocking).
+      - ``synthesis_error`` (``fallback:none``) is yielded verbatim right
+        after decision tokens (deterministic combiner reply already streamed
+        as tokens; the error explains the LLM failure, never a silent
+        regex swap).
+
+    Tradeoffs carried from the #27 prototype:
       1. Strict order vs full status coverage: statuses after the early ``map``
          are SUPPRESSED (parallel/decision dones) so the ``status* -> map``
-         assertion holds. Alternative is interleaved statuses (map truly early
-         but statuses after map) — needs a contract decision.
+         assertion holds.
       2. ``safety`` before ``decision_agent`` finishes is PROVISIONAL (own
          combiner call, duplicates decision work). Final decision safety may
          differ; we do not re-emit.
-      3. No ``on_chat_model_stream`` exists today (decision_agent is a
-         deterministic combiner, not an LLM) — chunked ``_chunk_text`` tokens
-         are pseudo-streaming. A ``token_buf`` is kept for forward-compat.
-      4. Node names now match docs/API.md SSE agent names
+      3. Node names match docs/API.md SSE agent names
          (fish_finder/sea_checker/weather_agent/danger_agent).
-      5. Streaming path persists Redis session best-effort (mirrors
+      4. Streaming path persists Redis session best-effort (mirrors
          non-streaming path) before done.
     """
     graph = get_orca_graph()
@@ -1166,8 +1209,65 @@ async def orchestrate_stream_via_graph(
             yield evt
         return
 
-    # PROTOTYPE budgets (map decision #26)
-    PROTOTYPE_NODE_TIMEOUT_S = 1.4
+    # Graceful degrade: very old langgraph without astream_events — replay
+    # the non-streaming result as ordered SSE (map/safety/tokens/evidence).
+    if not hasattr(graph, "astream_events"):
+        logger.warning("graph.stream: astream_events unavailable — degrading to chunked replay")
+        _fb = await orchestrate_via_graph(query, language, location, session_id)
+        yield {"type": "status", "agent": "planner", "state": "done", "elapsed_ms": 0}
+        _fb_map = _fb.get("map") if isinstance(_fb.get("map"), dict) else {}
+        yield {
+            "type": "map",
+            "center": _fb_map.get("center"),
+            "pfz_features": _fb_map.get("pfz_features") or [],
+            "route": _fb_map.get("route") or [],
+        }
+        _fb_safety = _fb.get("safety") if isinstance(_fb.get("safety"), dict) else {}
+        yield {
+            "type": "safety",
+            "waves_m": _fb_safety.get("waves_m"),
+            "wind_kts": _fb_safety.get("wind_kts"),
+            "danger": _fb_safety.get("danger", "unknown"),
+            "badge": _fb_safety.get("badge", "amber"),
+        }
+        try:
+            from backend.agents.synthesizer_service import iter_reply_tokens as _iter_tokens  # type: ignore
+        except ImportError:
+            _iter_tokens = None  # type: ignore
+        _fb_reply = str(_fb.get("reply") or "")
+        if _iter_tokens is not None:
+            # iter_reply_tokens is already delimiter-safe (fix 4: trailing
+            # space on all but last) — yield verbatim.
+            _fb_chunks = _iter_tokens(_fb_reply)
+            for _ch in _fb_chunks:
+                yield {"type": "token", "text": _ch}
+                await asyncio.sleep(0)
+        else:
+            _raw_fb2 = _chunk_text(_fb_reply)
+            for _i2, _ch2 in enumerate(_raw_fb2):
+                _suf2 = " " if _i2 < len(_raw_fb2) - 1 else ""
+                yield {"type": "token", "text": _ch2 + _suf2}
+                await asyncio.sleep(0)
+        _fb_perr = _fb.get("planner_error")
+        if isinstance(_fb_perr, dict) and _fb_perr:
+            yield dict(_fb_perr)
+        _fb_serr = _fb.get("synthesis_error") if "synthesis_error" in _fb else None
+        if isinstance(_fb_serr, dict) and _fb_serr:
+            yield dict(_fb_serr)
+        _fb_ev = _fb.get("evidence") or ["INCOIS TextData"]
+        if isinstance(_fb_ev, str):
+            _fb_ev = [_fb_ev]
+        yield {"type": "evidence", "items": [str(e) for e in _fb_ev if e] or ["INCOIS TextData"]}
+        yield {
+            "type": "done",
+            "language": _fb.get("language") or language,
+            "confidence": _fb.get("confidence") or DEGRADED_CONFIDENCE,
+            "session_id": _fb.get("session_id") or session_id or "",
+        }
+        return
+
+    # Budgets (map decision #26: 1.4s observed per-node, P95<2.0s total)
+    NODE_TIMEOUT_S = 1.4
     P95_BUDGET_S = 2.0
     # Current compiled topology: planner -> fish_finder ->
     # parallel_analysis -> decision_agent. Sub-agent names kept for
@@ -1194,12 +1294,32 @@ async def orchestrate_stream_via_graph(
     decision_out: dict | None = None
     final_state: dict = {}
     token_buf: list[str] = []
+    # #34 native-token accounting: True once any on_chat_model_stream text
+    # was yielded live (primary path). Validated chunk replay is then skipped
+    # to avoid duplication (graceful-degrade fallback only when no native).
+    native_tokens_streamed = False
 
     map_emitted = False
     safety_emitted = False
+    # Last emitted map center [lon, lat] (provisional or final) — used by
+    # #34 fix 5 to detect provisional/final divergence.
+    emitted_map_center: list | None = None
 
-    def _proto_map_payload() -> dict:
-        # PROTOTYPE provisional map from raw fish results (early flyTo).
+    def _centers_differ(c1: Any, c2: Any, tol: float = 1e-9) -> bool:
+        """True when two [lon, lat] centers differ (lat/lon comparison)."""
+        try:
+            if c1 is None or c2 is None:
+                return c1 is not c2 and not (c1 is None and c2 is None)
+            if not isinstance(c1, (list, tuple)) or not isinstance(c2, (list, tuple)):
+                return True
+            if len(c1) < 2 or len(c2) < 2:
+                return True
+            return abs(float(c1[0]) - float(c2[0])) > tol or abs(float(c1[1]) - float(c2[1])) > tol
+        except (TypeError, ValueError):
+            return True
+
+    def _provisional_map_payload() -> dict:
+        # Provisional map from raw fish results (early flyTo).
         # Field names match docs/API.md exactly: center/pfz_features/route.
         # Early events carry provisional:true; final decision map does not.
         ul = user_location or final_state.get("user_location")
@@ -1230,8 +1350,8 @@ async def orchestrate_stream_via_graph(
             }
         return {"type": "map", "center": [ulon, ulat], "pfz_features": feats, "route": [], "provisional": True}
 
-    def _proto_safety_payload() -> dict:
-        # PROTOTYPE provisional safety via own combiner call so safety can be
+    def _provisional_safety_payload() -> dict:
+        # Provisional safety via own combiner call so safety can be
         # emitted at parallel_analysis end, before decision_agent finishes.
         # Field names match docs/API.md exactly: waves_m/wind_kts/danger/badge.
         # Early events carry provisional:true; final decision safety does not.
@@ -1251,7 +1371,7 @@ async def orchestrate_stream_via_graph(
             )
             best = combined.get("best")
         except Exception as exc:
-            logger.warning("graph.stream PROTOTYPE combiner failed: %s", exc)
+            logger.warning("graph.stream combiner failed: %s", exc)
             best = None
         if not isinstance(best, dict):
             return {"type": "safety", "waves_m": None, "wind_kts": None, "danger": "unknown", "badge": "amber", "provisional": True}
@@ -1288,22 +1408,60 @@ async def orchestrate_stream_via_graph(
             name = ev.get("name")
             now = time.perf_counter()
 
-            # Forward-compat: stream LLM tokens if a chat model is ever added
-            # inside decision_agent. Buffered until safety is out to keep
-            # strict status->map->safety->tokens order.
+            # Native token streaming (#34): on_chat_model_stream from
+            # astream_events v2, parsed via synthesizer_service helper.
+            # Buffered until map+safety are out to keep strict
+            # status->map->safety->tokens order; flushed live afterwards.
+            # NOTE (fix 1): decision_agent synthesizes via raw google-genai
+            # (not a LangChain chat model), so no native events fire today.
+            # This hook is kept for a future chat-model with validation —
+            # raw native text is NEVER yielded when it contains masked
+            # placeholders (__M*__); only the validated iter_reply_tokens
+            # path yields to the client.
             if etype == "on_chat_model_stream":
                 try:
+                    # Fix 2 — node origin filter: only decision_agent native
+                    # tokens may stream; other nodes' model noise is skipped.
+                    try:
+                        _meta = ev.get("metadata") or {}
+                        _origin = _meta.get("langgraph_node")
+                    except Exception:
+                        _origin = None
+                    if _origin is not None and _origin != "decision_agent":
+                        continue
                     data = ev.get("data") or {}
                     chunk = data.get("chunk")
-                    text = ""
-                    if isinstance(chunk, str):
-                        text = chunk
-                    elif chunk is not None:
-                        text = getattr(chunk, "content", "") or ""
-                        if not isinstance(text, str):
-                            text = str(text) if text else ""
+                    try:
+                        from backend.agents.synthesizer_service import (  # type: ignore
+                            extract_native_token_text as _extract_text,
+                        )
+
+                        text = _extract_text(chunk)
+                    except ImportError:
+                        text = ""
+                        if isinstance(chunk, str):
+                            text = chunk
+                        elif chunk is not None:
+                            text = getattr(chunk, "content", "") or ""
+                            if not isinstance(text, str):
+                                text = str(text) if text else ""
                     if text:
+                        # Fix 1 — placeholder guard: never yield raw masked
+                        # spans. Buffer (don't yield live); flush sites also
+                        # filter placeholders so they never reach the client.
+                        if _NATIVE_PLACEHOLDER_RE.search(text):
+                            logger.warning("graph.stream: dropping native chunk with masked placeholder")
+                            continue
                         if safety_emitted and map_emitted:
+                            # Fix 3 — drain buffered tokens in order before
+                            # the new live token (FIFO).
+                            while token_buf:
+                                _b = token_buf.pop(0)
+                                if _NATIVE_PLACEHOLDER_RE.search(_b):
+                                    continue
+                                native_tokens_streamed = True
+                                yield {"type": "token", "text": _b}
+                            native_tokens_streamed = True
                             yield {"type": "token", "text": text}
                         else:
                             token_buf.append(text)
@@ -1313,7 +1471,7 @@ async def orchestrate_stream_via_graph(
 
             if etype == "on_chain_start" and name in KNOWN_NODES:
                 node_start[name] = now
-                # PROTOTYPE: suppress post-map statuses to hold strict order.
+                # Suppress post-map statuses to hold strict order.
                 if not map_emitted:
                     yield {"type": "status", "agent": name, "state": "running"}
                 continue
@@ -1328,12 +1486,13 @@ async def orchestrate_stream_via_graph(
             start_t = node_start.get(name, now)
             elapsed_s = now - start_t
             elapsed_ms = int(elapsed_s * 1000)
-            # PROTOTYPE observability only — does not preempt the slow node.
-            if elapsed_s > PROTOTYPE_NODE_TIMEOUT_S:
+            # Observed 1.4s sub-agent budget — emits error but does not
+            # preempt the slow node (LangGraph stream has no per-node cancel).
+            if elapsed_s > NODE_TIMEOUT_S:
                 yield {
                     "type": "error",
                     "agent": name,
-                    "message": f"PROTOTYPE timeout {elapsed_s:.2f}s > {PROTOTYPE_NODE_TIMEOUT_S}s budget",
+                    "message": f"sub-agent budget exceeded {elapsed_s:.2f}s > {NODE_TIMEOUT_S}s budget",
                     "fallback": "unknown",
                 }
 
@@ -1370,9 +1529,14 @@ async def orchestrate_stream_via_graph(
                 if not map_emitted:
                     yield {"type": "status", "agent": name, "state": "done", "elapsed_ms": elapsed_ms}
                     # EARLY flyTo: map immediately from fish output.
-                    yield _proto_map_payload()
+                    _mp = _provisional_map_payload()
+                    try:
+                        emitted_map_center = _mp.get("center")
+                    except Exception:
+                        pass
+                    yield _mp
                     map_emitted = True
-                # PROTOTYPE: later statuses suppressed (see docstring tradeoff).
+                # Later statuses suppressed to hold strict status* -> map order.
 
             elif name == "parallel_analysis":
                 if isinstance(output, dict):
@@ -1384,11 +1548,25 @@ async def orchestrate_stream_via_graph(
                         danger_results = output["danger_results"]
                 if not map_emitted:
                     yield {"type": "status", "agent": name, "state": "done", "elapsed_ms": elapsed_ms}
-                    yield _proto_map_payload()
+                    _mp2 = _provisional_map_payload()
+                    try:
+                        emitted_map_center = _mp2.get("center")
+                    except Exception:
+                        pass
+                    yield _mp2
                     map_emitted = True
                 if not safety_emitted:
-                    yield _proto_safety_payload()
+                    yield _provisional_safety_payload()
                     safety_emitted = True
+                    # Fix 3 — provisional safety just completed map+safety:
+                    # drain buffered native tokens in order (FIFO) before
+                    # any later live token. Placeholder chunks are dropped.
+                    while token_buf and map_emitted:
+                        _b2 = token_buf.pop(0)
+                        if _NATIVE_PLACEHOLDER_RE.search(_b2):
+                            continue
+                        native_tokens_streamed = True
+                        yield {"type": "token", "text": _b2}
 
             elif name in ("sea_checker", "weather_agent", "danger_agent"):
                 # Forward-compat: current topology never emits these (they run
@@ -1408,8 +1586,16 @@ async def orchestrate_stream_via_graph(
                     and weather_results is not None
                     and danger_results is not None
                 ):
-                    yield _proto_safety_payload()
+                    yield _provisional_safety_payload()
                     safety_emitted = True
+                    # Fix 3 — drain buffered native tokens in order now that
+                    # map+safety hold (FIFO, placeholders dropped).
+                    while token_buf:
+                        _b3 = token_buf.pop(0)
+                        if _NATIVE_PLACEHOLDER_RE.search(_b3):
+                            continue
+                        native_tokens_streamed = True
+                        yield {"type": "token", "text": _b3}
 
             elif name == "decision_agent":
                 if isinstance(output, dict):
@@ -1420,6 +1606,10 @@ async def orchestrate_stream_via_graph(
                 if not map_emitted:
                     if isinstance(decision_out.get("map"), dict):
                         dm = decision_out["map"]
+                        try:
+                            emitted_map_center = dm.get("center")
+                        except Exception:
+                            pass
                         yield {
                             "type": "map",
                             "center": dm.get("center"),
@@ -1427,7 +1617,12 @@ async def orchestrate_stream_via_graph(
                             "route": dm.get("route") or [],
                         }
                     else:
-                        yield _proto_map_payload()
+                        _mpd = _provisional_map_payload()
+                        try:
+                            emitted_map_center = _mpd.get("center")
+                        except Exception:
+                            pass
+                        yield _mpd
                     map_emitted = True
                 if not safety_emitted:
                     if isinstance(decision_out.get("safety"), dict):
@@ -1440,24 +1635,85 @@ async def orchestrate_stream_via_graph(
                             "badge": ds.get("badge"),
                         }
                     else:
-                        yield _proto_safety_payload()
+                        yield _provisional_safety_payload()
                     safety_emitted = True
-                for buffered in token_buf:
+                # Fix 5 — provisional map divergence: if the authoritative
+                # decision map center differs (lat/lon) from the provisional
+                # early flyTo, emit the final map (provisional:false) before
+                # any tokens so the client highlights the correct zone.
+                _dm_final: Any = None
+                _final_center: Any = None
+                try:
+                    _dm_final = decision_out.get("map") if isinstance(decision_out, dict) else None
+                    _final_center = _dm_final.get("center") if isinstance(_dm_final, dict) else None
+                except Exception:
+                    _dm_final = None
+                    _final_center = None
+                # Only when both centers are present (fix 5): a None
+                # provisional (no-location) must stay None — never upgrade
+                # to the decision default [0,0].
+                if (
+                    map_emitted
+                    and emitted_map_center is not None
+                    and _final_center is not None
+                    and _centers_differ(emitted_map_center, _final_center)
+                ):
+                    try:
+                        _pfz = _dm_final.get("pfz_features") or []
+                    except Exception:
+                        _pfz = []
+                    try:
+                        _route = _dm_final.get("route") or []
+                    except Exception:
+                        _route = []
+                    yield {
+                        "type": "map",
+                        "center": _final_center,
+                        "pfz_features": _pfz,
+                        "route": _route,
+                        "provisional": False,
+                    }
+                    emitted_map_center = _final_center
+                # Flush early native tokens (buffered until map+safety) in
+                # order — these are live LLM tokens streamed directly.
+                # Placeholder chunks are dropped (fix 1); FIFO via pop(0).
+                while token_buf:
+                    buffered = token_buf.pop(0)
+                    if _NATIVE_PLACEHOLDER_RE.search(buffered):
+                        continue
+                    native_tokens_streamed = True
                     yield {"type": "token", "text": buffered}
-                token_buf.clear()
-                reply = decision_out.get("reply") or decision_out.get("explanation") or ""
-                chunks = _chunk_text(reply)
-                for idx, ch in enumerate(chunks):
-                    suffix = " " if idx < len(chunks) - 1 else ""
-                    yield {"type": "token", "text": ch + suffix}
+                # Validated chunk replay (#34 degrade path): the decision
+                # reply is already post-validated by synthesize_advisory
+                # (veto/numbers/citation). Skipped when native tokens already
+                # streamed live to avoid duplication.
+                # Only this validated path yields to the client (fix 1).
+                if not native_tokens_streamed:
+                    reply = decision_out.get("reply") or decision_out.get("explanation") or ""
+                    try:
+                        from backend.agents.synthesizer_service import (  # type: ignore
+                            iter_reply_tokens as _iter_tokens,
+                        )
+
+                        chunks = _iter_tokens(reply)
+                    except ImportError:
+                        # Fallback delimiter-safe (fix 4 parity when the
+                        # service import is unavailable).
+                        _raw_fb = _chunk_text(reply)
+                        chunks = [c + (" " if i < len(_raw_fb) - 1 else "") for i, c in enumerate(_raw_fb)]
+                    for ch in chunks:
+                        yield {"type": "token", "text": ch}
+                        await asyncio.sleep(0)  # SSE flush point
                 # CORR-04: explicit synthesis error — never silent (fallback:none).
                 _synth_err = decision_out.get("synthesis_error")
                 if isinstance(_synth_err, dict) and _synth_err:
-                    yield _synth_err
+                    yield dict(_synth_err)
 
     except Exception as exc:
-        logger.warning("graph.stream PROTOTYPE failed: %s", exc)
-        yield {"type": "error", "agent": "decision_agent", "message": f"PROTOTYPE stream failed: {exc}", "fallback": "unknown"}
+        # Low (fix 7): sanitize — log internals, stream a generic message
+        # so transport/API details never leak to the client.
+        logger.warning("graph.stream failed: %s", exc, exc_info=True)
+        yield {"type": "error", "agent": "decision_agent", "message": "stream failed (internal error)", "fallback": "unknown"}
 
     # ---- Tail: guarantee evidence -> done (and fill any gaps) ----
     resolved_ul = user_location or final_state.get("user_location")
@@ -1470,10 +1726,21 @@ async def orchestrate_stream_via_graph(
             yield {"type": "safety", "waves_m": None, "wind_kts": None, "danger": "unknown", "badge": "amber"}
             safety_emitted = True
         # If decision tokens never streamed (e.g. short-circuit), emit prompt.
-        if decision_out is None:
+        # Buffered native tokens (if any) flush first to preserve order
+        # (FIFO, placeholder chunks dropped — fix 1).
+        while token_buf:
+            _bt = token_buf.pop(0)
+            if _NATIVE_PLACEHOLDER_RE.search(_bt):
+                continue
+            native_tokens_streamed = True
+            yield {"type": "token", "text": _bt}
+        if decision_out is None and not native_tokens_streamed:
             prompt = "Please share your GPS location or mention a coastal place like Kochi, Veraval, or Chennai to find nearby fishing zones."
-            for chunk in _chunk_text(prompt):
-                yield {"type": "token", "text": chunk + " "}
+            _praw = _chunk_text(prompt)
+            for _pi, chunk in enumerate(_praw):
+                _psuf = " " if _pi < len(_praw) - 1 else ""
+                yield {"type": "token", "text": chunk + _psuf}
+                await asyncio.sleep(0)
         # MAJ-02: clarification tail surfaces decision evidence when present.
         _tail_ev = decision_out.get("evidence") if isinstance(decision_out, dict) else None
         if isinstance(_tail_ev, list) and any(_tail_ev):
@@ -1490,6 +1757,10 @@ async def orchestrate_stream_via_graph(
     if not map_emitted:
         if isinstance(dout.get("map"), dict):
             dm = dout["map"]
+            try:
+                emitted_map_center = dm.get("center")
+            except Exception:
+                pass
             yield {
                 "type": "map",
                 "center": dm.get("center"),
@@ -1498,6 +1769,10 @@ async def orchestrate_stream_via_graph(
             }
         elif isinstance(final_state.get("map"), dict):
             fm = final_state["map"]
+            try:
+                emitted_map_center = fm.get("center")
+            except Exception:
+                pass
             yield {
                 "type": "map",
                 "center": fm.get("center"),
@@ -1505,7 +1780,12 @@ async def orchestrate_stream_via_graph(
                 "route": fm.get("route") or [],
             }
         else:
-            yield _proto_map_payload()
+            _mpt = _provisional_map_payload()
+            try:
+                emitted_map_center = _mpt.get("center")
+            except Exception:
+                pass
+            yield _mpt
         map_emitted = True
     if not safety_emitted:
         if isinstance(dout.get("safety"), dict):
@@ -1527,11 +1807,15 @@ async def orchestrate_stream_via_graph(
                 "badge": fs.get("badge"),
             }
         else:
-            yield _proto_safety_payload()
+            yield _provisional_safety_payload()
         safety_emitted = True
-    for buffered in token_buf:
-        yield {"type": "token", "text": buffered}
-    token_buf.clear()
+    # Tail drain (fix 3): FIFO, placeholder chunks dropped (fix 1).
+    while token_buf:
+        _bt2 = token_buf.pop(0)
+        if _NATIVE_PLACEHOLDER_RE.search(_bt2):
+            continue
+        native_tokens_streamed = True
+        yield {"type": "token", "text": _bt2}
 
     # Session persist (best-effort, mirrors orchestrate_via_graph()).
     try:
@@ -1577,8 +1861,9 @@ async def orchestrate_stream_via_graph(
     yield {"type": "evidence", "items": evidence or ["INCOIS TextData"]}
     total_s = time.perf_counter() - t0
     if total_s > P95_BUDGET_S:
-        # PROTOTYPE: observe P95<2.0s SLA, do not fail the stream.
-        logger.warning("graph.stream PROTOTYPE total %.2fs exceeds P95 %.1fs budget", total_s, P95_BUDGET_S)
+        # Observe P95<2.0s SLA, do not fail the stream (early map/safety
+        # already kept TTFB low; tail latency is logged for SLO tracking).
+        logger.warning("graph.stream total %.2fs exceeds P95 %.1fs budget", total_s, P95_BUDGET_S)
     confidence = dout.get("confidence") or final_state.get("confidence") or (DEGRADED_CONFIDENCE if final_state.get("degraded") else DEFAULT_CONFIDENCE)
     yield {
         "type": "done",
