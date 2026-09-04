@@ -626,10 +626,10 @@ class TestOrchestrator:
             await asyncio.sleep(0.15)
             return [{"zone_id": "z1", "place": "A", "lat": 10.0, "lon": 76.0, "is_safe": True, "status": "safe", "warnings": [], "inside_eez": True, "inside_mpa": False, "mpa_name": None}]
 
-        with patch("backend.agents.fish_finder.find_fishing_zones", side_effect=mock_fish):
-            with patch("backend.agents.sea_checker.check_sea_conditions", side_effect=mock_sea):
-                with patch("backend.agents.weather_agent.check_weather", side_effect=mock_weather):
-                    with patch("backend.agents.danger_agent.check_safety_batch", side_effect=mock_danger):
+        with patch("backend.agents.subagents.fish_finder.find_fishing_zones", side_effect=mock_fish):
+            with patch("backend.agents.subagents.sea_checker.check_sea_conditions", side_effect=mock_sea):
+                with patch("backend.agents.subagents.weather_agent.check_weather", side_effect=mock_weather):
+                    with patch("backend.agents.subagents.danger_agent.check_safety_batch", side_effect=mock_danger):
                         with patch("backend.db.redis.get_session", new=AsyncMock(return_value=None)):
                             with patch("backend.db.redis.save_session", new=AsyncMock(return_value=None)):
                                 import time
@@ -637,8 +637,8 @@ class TestOrchestrator:
                                 result = await orchestrator.orchestrate(query="Where is fish?", language="en", location={"lat": 9.93, "lon": 76.26}, session_id="test-parallel")
                                 elapsed = time.perf_counter() - t0
 
-        # Parallel should be well under 0.75s (allowing LangGraph supervisor overhead; sequential would be >0.45s)
-        assert elapsed < 0.75, f"Gather not parallel, elapsed {elapsed:.3f}s >0.75s"
+        # Parallel should be well under 0.40s (allowing LangGraph supervisor overhead; sequential would be >0.45s)
+        assert elapsed < 0.40, f"Gather not parallel, elapsed {elapsed:.3f}s >0.40s"
         # Verify result has expected shape
         assert "reply" in result
         assert "map" in result
@@ -667,7 +667,7 @@ class TestOrchestrator:
         async def mock_danger_ok(points, **kwargs):
             return [{"zone_id": "z1", "place": "A", "lat": 10.0, "lon": 76.0, "is_safe": True, "status": "safe", "warnings": [], "inside_eez": True, "inside_mpa": False, "mpa_name": None}]
 
-        with patch("backend.agents.fish_finder.find_fishing_zones", side_effect=mock_fish):
+        with patch("backend.agents.subagents.fish_finder.find_fishing_zones", side_effect=mock_fish):
             with patch("backend.agents.sea_checker.check_sea_conditions", side_effect=mock_sea_timeout):
                 with patch("backend.agents.weather_agent.check_weather", side_effect=mock_weather_ok):
                     with patch("backend.agents.danger_agent.check_safety_batch", side_effect=mock_danger_ok):
@@ -706,10 +706,10 @@ class TestOrchestrator:
         async def mock_danger(points, **kwargs):
             return [{"zone_id": "z1", "place": "Pallithottam", "lat": 10.0, "lon": 76.0, "is_safe": True, "status": "safe", "warnings": [], "inside_eez": True, "inside_mpa": False, "mpa_name": None}]
 
-        with patch("backend.agents.fish_finder.find_fishing_zones", side_effect=mock_fish):
-            with patch("backend.agents.sea_checker.check_sea_conditions", side_effect=mock_sea):
-                with patch("backend.agents.weather_agent.check_weather", side_effect=mock_weather):
-                    with patch("backend.agents.danger_agent.check_safety_batch", side_effect=mock_danger):
+        with patch("backend.agents.subagents.fish_finder.find_fishing_zones", side_effect=mock_fish):
+            with patch("backend.agents.subagents.sea_checker.check_sea_conditions", side_effect=mock_sea):
+                with patch("backend.agents.subagents.weather_agent.check_weather", side_effect=mock_weather):
+                    with patch("backend.agents.subagents.danger_agent.check_safety_batch", side_effect=mock_danger):
                         with patch("backend.db.redis.get_session", new=AsyncMock(return_value=None)):
                             with patch("backend.db.redis.save_session", new=AsyncMock(return_value=None)):
                                 result = await orchestrator.orchestrate(query="എവിടെ മത്സ്യം?", language="ml", location={"lat": 9.93, "lon": 76.26}, session_id="test-ml")
@@ -750,10 +750,10 @@ class TestOrchestrator:
                 {"zone_id": "z2", "place": "Rough2", "lat": 10.1, "lon": 76.1, "is_safe": True, "status": "safe", "warnings": [], "inside_eez": True, "inside_mpa": False, "mpa_name": None},
             ]
 
-        with patch("backend.agents.fish_finder.find_fishing_zones", side_effect=mock_fish):
-            with patch("backend.agents.sea_checker.check_sea_conditions", side_effect=mock_sea):
-                with patch("backend.agents.weather_agent.check_weather", side_effect=mock_weather):
-                    with patch("backend.agents.danger_agent.check_safety_batch", side_effect=mock_danger):
+        with patch("backend.agents.subagents.fish_finder.find_fishing_zones", side_effect=mock_fish):
+            with patch("backend.agents.subagents.sea_checker.check_sea_conditions", side_effect=mock_sea):
+                with patch("backend.agents.subagents.weather_agent.check_weather", side_effect=mock_weather):
+                    with patch("backend.agents.subagents.danger_agent.check_safety_batch", side_effect=mock_danger):
                         with patch("backend.db.redis.get_session", new=AsyncMock(return_value=None)):
                             with patch("backend.db.redis.save_session", new=AsyncMock(return_value=None)):
                                 result = await orchestrator.orchestrate(query="Where is fish?", language="en", location={"lat": 9.93, "lon": 76.26}, session_id="test-unsafe")
@@ -791,10 +791,10 @@ class TestOrchestrator:
         async def mock_danger(points, **kwargs):
             return [{"zone_id": "z1", "place": "KochiZone", "lat": 9.93, "lon": 76.26, "is_safe": True, "status": "safe", "warnings": [], "inside_eez": True, "inside_mpa": False, "mpa_name": None}]
 
-        with patch("backend.agents.fish_finder.find_fishing_zones", side_effect=mock_fish):
-            with patch("backend.agents.sea_checker.check_sea_conditions", side_effect=mock_sea):
-                with patch("backend.agents.weather_agent.check_weather", side_effect=mock_weather):
-                    with patch("backend.agents.danger_agent.check_safety_batch", side_effect=mock_danger):
+        with patch("backend.agents.subagents.fish_finder.find_fishing_zones", side_effect=mock_fish):
+            with patch("backend.agents.subagents.sea_checker.check_sea_conditions", side_effect=mock_sea):
+                with patch("backend.agents.subagents.weather_agent.check_weather", side_effect=mock_weather):
+                    with patch("backend.agents.subagents.danger_agent.check_safety_batch", side_effect=mock_danger):
                         with patch("backend.db.redis.get_session", new=AsyncMock(return_value=None)):
                             with patch("backend.db.redis.save_session", new=AsyncMock(return_value=None)):
                                 result = await orchestrator.orchestrate(query="Where is fish near Kochi?", language="en", location=None, session_id="test-kochi")
