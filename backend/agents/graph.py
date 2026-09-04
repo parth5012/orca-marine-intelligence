@@ -80,6 +80,17 @@ class ORCAState(TypedDict, total=False):
     synthesis_error: dict | None
     synthesis_elapsed_ms: int
     masked_spans: int
+    # LLM supervisor observability (ticket #32, M-A only)
+    # Selective dispatch subset of [find_fishing_zones, check_ocean_state,
+    # check_weather, check_geofence]. None = legacy/offline run-all.
+    selected_tools: list[str] | None
+    reasoning_trace: list[str]
+    needs_clarification: bool
+    clarification_text: str | None
+    planner_status: str  # success | fallback_deterministic
+    planner_error: dict | None  # explicit SSE error event (fallback:none)
+    planner_elapsed_ms: int
+    planner_confidence: float
 
 TIMEOUT_S = 10.0
 
@@ -138,60 +149,303 @@ except ImportError:
     TIMEOUT_S = ORCH_TIMEOUT
 
 # ---------------------------------------------------------------------------
+# Selective-dispatch helpers (ticket #32 — zero-latency passthrough)
+# ---------------------------------------------------------------------------
+
+# Planner tool ids (mirror backend/agents/planner_schema.py KNOWN_TOOLS).
+# Kept local so graph stays importable even if planner_schema is missing.
+TOOL_FIND_FISH = "find_fishing_zones"
+TOOL_OCEAN = "check_ocean_state"
+TOOL_WEATHER = "check_weather"
+TOOL_GEOFENCE = "check_geofence"
+_ALL_PLANNER_TOOLS: tuple[str, ...] = (
+    TOOL_FIND_FISH,
+    TOOL_OCEAN,
+    TOOL_WEATHER,
+    TOOL_GEOFENCE,
+)
+
+
+def _is_tool_selected(state: ORCAState, tool: str) -> bool:
+    """True when the planner selected ``tool`` (or legacy run-all).
+
+    ``selected_tools=None`` = deterministic/offline fallback → run all
+    (preserves existing mock/offline paths). An explicit list (incl. [])
+    is respected verbatim — non-selected specialists passthrough in <1ms
+    with no tool I/O.
+    """
+    sel = state.get("selected_tools")
+    if sel is None:
+        return True
+    try:
+        return tool in sel
+    except Exception:
+        return True
+
+
+def _needs_clarification_short_circuit(state: ORCAState) -> bool:
+    """True when planner gated clarification — downstream must not run tools."""
+    return bool(state.get("needs_clarification"))
+
+
+def _intent_from_planner_intents(intents: list[str] | None) -> dict | None:
+    """Map LLM intent vocabulary to {wants_fish, wants_safety}.
+
+    Returns None when ``intents`` is empty/unknown so callers fall back
+    to deterministic ``_parse_intent`` (never emit a dead both-False
+    pipeline from an empty LLM list).
+    """
+    if not intents:
+        return None
+    lowered = [str(i).strip().lower() for i in intents if isinstance(i, str)]
+    wants_fish = any(
+        i in ("find_fish", "wants_fish", "find_fishing", "fish", "pfz")
+        for i in lowered
+    )
+    wants_safety = any(
+        i
+        in (
+            "check_safety",
+            "wants_safety",
+            "check_sea",
+            "check_weather",
+            "safety",
+            "safe",
+        )
+        for i in lowered
+    )
+    if not wants_fish and not wants_safety:
+        return None
+    return {"wants_fish": bool(wants_fish), "wants_safety": bool(wants_safety)}
+
+
+# ---------------------------------------------------------------------------
 # Supervisor / Planner — decides intent + location, selects tools
 # ---------------------------------------------------------------------------
 
 async def planner_node(state: ORCAState) -> dict:
     """
-    Supervisor/Planner sub-agent.
+    Supervisor/Planner sub-agent (ticket #32 — LLM supervisor wiring).
 
     Responsibilities (SIH26176: planning, reasoning, tool selection):
       - detect intent (wants_fish, wants_safety) — autonomous decision
       - resolve user_location via tools: explicit GPS > COASTAL_PORTS fast-path > Redis session reuse > relative offset
-      - select which downstream agents to invoke (via returned intent)
+      - select which downstream agents to invoke (via selected_tools)
+      - gate clarification (needs_clarification → short-circuit, no downstream tools)
     Tools conceptually used: _resolve_location (deterministic geocoding), redis.get_session
+
+    Integration (map #30, #31 → #32):
+      - Tries Gemini 2.5 Flash Structured Planner
+        (backend/agents/planner_service.py :: plan_query, 500ms SLA) first.
+      - On success: intent/location/language/selected_tools/reasoning_trace
+        come from the LLM PlannerOutput (Code Trumps LLM still holds —
+        PostGIS/combiner scoring downstream is never overridden here).
+      - On PlannerTimeout/API/Config error: falls back to the deterministic
+        baseline below (preserves mock/offline paths) AND surfaces the
+        explicit SSE error event via ``planner_error`` (fallback:none) so
+        #34 SSE can stream it — never a silent fallback. Non-streaming
+        callers keep the deterministic result.
+      - Clarification (needs_clarification=True): downstream nodes
+        passthrough in <1ms (see _is_tool_selected) and decision_agent +
+        orchestrate_via_graph return the vernacular clarification payload
+        with explicit evidence.
     """
     query = state.get("query", "") or ""
     location = state.get("location")
     session_id = state.get("session_id") or uuid.uuid4().hex
     language = state.get("language", "en")
 
-    intent = _parse_intent(query)
+    # ---- Lazy deterministic baseline (MAJ-01: only on fallback path) ----
+    # Eager baseline previously paid _resolve_location + 1.0s Redis on every
+    # query even when plan_query succeeds with its own 50ms history. Now the
+    # LLM is tried first; deterministic tools run only on ImportError /
+    # plan_query exception, or when LLM coords are missing (fallback).
+    async def _deterministic_baseline():
+        intent_det = _parse_intent(query)
+        # 1. try explicit + port lookup (tool: deterministic geocoding)
+        resolved = _resolve_location(query, location)
+        cached_session = None
+        degraded = False
 
-    # 1. try explicit + port lookup (tool: deterministic geocoding)
-    resolved = _resolve_location(query, location)
-    cached_session = None
-    degraded = False
+        # 2. tool: redis.get_session for multi-turn reuse (1.0s, fallback only)
+        if resolved is None and session_id:
+            try:
+                from backend.db import redis as redis_mod  # type: ignore
 
-    # 2. tool: redis.get_session for multi-turn reuse
-    if resolved is None and session_id:
+                try:
+                    cached_session = await asyncio.wait_for(redis_mod.get_session(session_id), timeout=1.0)
+                except asyncio.TimeoutError:
+                    logger.warning("graph.planner: get_session timeout %s", session_id)
+                except Exception as exc:
+                    logger.warning("graph.planner: get_session failed %s: %s", session_id, exc)
+            except Exception:
+                cached_session = None
+
+            if isinstance(cached_session, dict) and cached_session.get("lat") is not None:
+                try:
+                    cached_lat = float(cached_session["lat"])
+                    cached_lon = float(cached_session["lon"])
+                    # tool: _parse_relative_offset
+                    offset = _parse_relative_offset(query, cached_lat, cached_lon)
+                    if offset is not None:
+                        resolved = offset
+                    else:
+                        resolved = (cached_lat, cached_lon)
+                except Exception as e:
+                    logger.warning("graph.planner: cached coords invalid %s: %s", cached_session, e)
+                    resolved = None
+
+        user_location_det = {"lat": float(resolved[0]), "lon": float(resolved[1])} if resolved else None
+        return intent_det, user_location_det, cached_session, degraded
+
+    # ---- LLM supervisor attempt (500ms SLA, explicit errors) ----
+    try:
+        from backend.agents.planner_service import (  # type: ignore
+            plan_query,
+            planner_error_to_sse_event,
+        )
+    except ImportError as exc:
+        logger.warning("graph.planner: planner_service unavailable, deterministic fallback (%s)", exc)
+        intent_det, user_location_det, cached_session, degraded = await _deterministic_baseline()
+        return {
+            "intent": intent_det,
+            "user_location": user_location_det,
+            "cached_session": cached_session,
+            "session_id": session_id,
+            "degraded": degraded,
+            "query": query,
+            "language": language,
+            "selected_tools": None,
+            "reasoning_trace": [
+                f"planner fallback: planner_service unavailable ({exc}) — using deterministic intent/location"
+            ],
+            "needs_clarification": False,
+            "clarification_text": None,
+            "planner_status": "fallback_deterministic",
+            "planner_error": {
+                "type": "error",
+                "agent": "planner",
+                "message": f"planner failed: {exc}",
+                "fallback": "none",
+                "elapsed_ms": 0,
+            },
+            "planner_elapsed_ms": 0,
+            "planner_confidence": 0.0,
+        }
+
+    try:
+        envelope = await plan_query(query, language, location, session_id)
+    except Exception as exc:
+        # No Silent Fallback: keep deterministic result BUT surface the
+        # explicit SSE error event for #34 streaming (fallback:none).
         try:
-            from backend.db import redis as redis_mod  # type: ignore
+            from backend.agents.planner_service import (  # type: ignore
+                planner_error_to_sse_event,
+            )
 
-            try:
-                cached_session = await asyncio.wait_for(redis_mod.get_session(session_id), timeout=1.0)
-            except asyncio.TimeoutError:
-                logger.warning("graph.planner: get_session timeout %s", session_id)
-            except Exception as exc:
-                logger.warning("graph.planner: get_session failed %s: %s", session_id, exc)
+            sse_err = planner_error_to_sse_event(exc)
         except Exception:
-            cached_session = None
+            sse_err = {
+                "type": "error",
+                "agent": "planner",
+                "message": f"planner failed: {exc}",
+                "fallback": "none",
+                "elapsed_ms": int(getattr(exc, "elapsed_ms", 0) or 0),
+            }
+        logger.warning("graph.planner: LLM planner failed, deterministic fallback (%s)", exc)
+        intent_det, user_location_det, cached_session, degraded = await _deterministic_baseline()
+        return {
+            "intent": intent_det,
+            "user_location": user_location_det,
+            "cached_session": cached_session,
+            "session_id": session_id,
+            "degraded": degraded,
+            "query": query,
+            "language": language,
+            "selected_tools": None,
+            "reasoning_trace": [
+                f"planner fallback: {exc} — using deterministic intent/location"
+            ],
+            "needs_clarification": False,
+            "clarification_text": None,
+            "planner_status": "fallback_deterministic",
+            "planner_error": sse_err,
+            "planner_elapsed_ms": int(getattr(exc, "elapsed_ms", 0) or 0),
+            "planner_confidence": 0.0,
+        }
 
-        if isinstance(cached_session, dict) and cached_session.get("lat") is not None:
+    # ---- LLM success: map PlannerOutput → graph state ----
+    # MAJ-01: success path uses plan_query's 50ms history only — no 1.0s
+    # Redis fetch. Deterministic baseline is computed lazily below only
+    # when LLM coords are missing/invalid (fallback) or intent mapping needs
+    # it. SEC-01: needs_clarification forces user_location=None (never
+    # persist regex coords); clarification prompt still carries place names
+    # via clarification_text.
+    plan = envelope.get("plan")
+    needs_clarification = bool(envelope.get("needs_clarification", False))
+    clarification_text = envelope.get("clarification_text")
+    elapsed_ms = int(envelope.get("elapsed_ms") or 0)
+    try:
+        plan_intents = list(getattr(plan, "intents", []) or [])
+    except Exception:
+        plan_intents = []
+    mapped_intent = _intent_from_planner_intents(plan_intents)
+
+    try:
+        llm_lat = getattr(getattr(plan, "target_location", None), "lat", None)
+        llm_lon = getattr(getattr(plan, "target_location", None), "lon", None)
+    except Exception:
+        llm_lat = llm_lon = None
+
+    degraded = False
+    cached_session = None
+    if needs_clarification:
+        intent = mapped_intent if mapped_intent is not None else _parse_intent(query)
+        user_location = None
+    else:
+        intent = mapped_intent if mapped_intent is not None else _parse_intent(query)
+        if llm_lat is not None and llm_lon is not None:
             try:
-                cached_lat = float(cached_session["lat"])
-                cached_lon = float(cached_session["lon"])
-                # tool: _parse_relative_offset
-                offset = _parse_relative_offset(query, cached_lat, cached_lon)
-                if offset is not None:
-                    resolved = offset
-                else:
-                    resolved = (cached_lat, cached_lon)
-            except Exception as e:
-                logger.warning("graph.planner: cached coords invalid %s: %s", cached_session, e)
-                resolved = None
+                user_location = {"lat": float(llm_lat), "lon": float(llm_lon)}
+            except (TypeError, ValueError):
+                _, user_location_det, cached_det, _deg = await _deterministic_baseline()
+                user_location = user_location_det
+                cached_session = cached_det
+                degraded = bool(_deg)
+                if mapped_intent is None:
+                    intent = _parse_intent(query)
+        else:
+            _, user_location_det, cached_det, _deg = await _deterministic_baseline()
+            user_location = user_location_det
+            cached_session = cached_det
+            degraded = bool(_deg)
 
-    user_location = {"lat": float(resolved[0]), "lon": float(resolved[1])} if resolved else None
+    try:
+        llm_lang = getattr(plan, "detected_language", None)
+    except Exception:
+        llm_lang = None
+    final_language = llm_lang if isinstance(llm_lang, str) and llm_lang else language
+
+    try:
+        selected_tools: list[str] | None = list(getattr(plan, "selected_tools", []) or [])
+    except Exception:
+        selected_tools = None
+    try:
+        reasoning_trace: list[str] = list(getattr(plan, "reasoning_trace", []) or [])
+    except Exception:
+        reasoning_trace = []
+    try:
+        planner_confidence = float(getattr(plan, "confidence", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        planner_confidence = 0.0
+
+    # Guard: confident plan with empty toolset would deadlock the pipeline
+    # (no fish → no decision). Default to full dispatch with an auditable note.
+    if not needs_clarification and not selected_tools:
+        selected_tools = list(_ALL_PLANNER_TOOLS)
+        reasoning_trace = list(reasoning_trace) + [
+            "planner note: empty selected_tools on confident plan — defaulted to full dispatch (auditable)"
+        ]
 
     return {
         "intent": intent,
@@ -200,7 +454,15 @@ async def planner_node(state: ORCAState) -> dict:
         "session_id": session_id,
         "degraded": degraded,
         "query": query,
-        "language": language,
+        "language": final_language,
+        "selected_tools": selected_tools,
+        "reasoning_trace": reasoning_trace,
+        "needs_clarification": needs_clarification,
+        "clarification_text": clarification_text,
+        "planner_status": "success",
+        "planner_error": None,
+        "planner_elapsed_ms": elapsed_ms,
+        "planner_confidence": planner_confidence,
     }
 
 
@@ -216,7 +478,33 @@ async def fish_finder(state: ORCAState) -> dict:
       - find_pfz_near (PostGIS ST_DWithin) — primary
       - _geojson_fallback (haversine on data/pfz-today.geojson) — fallback
     Decision: radius expansion 80->120->160km autonomously until zones found.
+    Selective dispatch (#32): skipped in <1ms (no I/O) when the LLM
+    planner omitted ``find_fishing_zones`` (safety-only) or gated
+    clarification. ``selected_tools=None`` = legacy run-all.
     """
+    # Zero-latency passthrough — no tool I/O, no timeouts.
+    if _needs_clarification_short_circuit(state):
+        return {"fish_results": []}
+    if not _is_tool_selected(state, TOOL_FIND_FISH):
+        # MAJ-03: safety-only deadlock guard — sea/weather/danger early-return
+        # on empty fish, so provide a synthetic current-location point when any
+        # safety tool is selected and user_location is known. Synthetic zone is
+        # non-empty so downstream nodes proceed; fish-only consumers never see
+        # it (TOOL_FIND_FISH unselected means fish branch is intentionally off).
+        try:
+            _sel = state.get("selected_tools")
+            _safety_on = isinstance(_sel, list) and any(
+                t in _sel for t in (TOOL_OCEAN, TOOL_WEATHER, TOOL_GEOFENCE)
+            )
+        except Exception:
+            _safety_on = False
+        _ul = state.get("user_location")
+        if _safety_on and isinstance(_ul, dict) and _ul.get("lat") is not None and _ul.get("lon") is not None:
+            try:
+                return {"fish_results": [{"zone_id": "current_location", "place": "Current Location", "lat": float(_ul["lat"]), "lon": float(_ul["lon"])}]}
+            except (TypeError, ValueError):
+                pass
+        return {"fish_results": []}
     user_location = state.get("user_location")
     if not user_location:
         return {"fish_results": []}
@@ -245,7 +533,13 @@ async def sea_checker(state: ORCAState) -> dict:
     Tools:
       - fetch_osf_wave_current / get_wave_current (OSF 06Z Zarr + heuristic fallback)
     Decision: classifies wave <1.5 safe / 1.5-2.5 caution / >2.5 danger, current >2/>3.
+    Selective dispatch (#32): skipped in <1ms when planner omitted
+    ``check_ocean_state`` (fish-only) or gated clarification.
     """
+    if _needs_clarification_short_circuit(state):
+        return {"sea_results": []}
+    if not _is_tool_selected(state, TOOL_OCEAN):
+        return {"sea_results": []}
     fish = state.get("fish_results") or []
     if not fish:
         return {"sea_results": []}
@@ -269,7 +563,13 @@ async def weather_agent(state: ORCAState) -> dict:
     Tools:
       - fetch_imd_wind, fetch_imd_cyclones / get_wind, get_cyclone_alert
     Decision: wind <15 safe / 15-25 caution / >25 danger, cyclone within 500km → danger.
+    Selective dispatch (#32): skipped in <1ms when planner omitted
+    ``check_weather`` (fish-only) or gated clarification.
     """
+    if _needs_clarification_short_circuit(state):
+        return {"weather_results": []}
+    if not _is_tool_selected(state, TOOL_WEATHER):
+        return {"weather_results": []}
     fish = state.get("fish_results") or []
     if not fish:
         return {"weather_results": []}
@@ -295,7 +595,13 @@ async def danger_agent(state: ORCAState) -> dict:
       - ray_cast_eez/mpa (fallback GeoJSON)
       - distance_to_imbl (2km buffer)
     Decision: inside_mpa / outside_eez → danger, within 2km IMBL → caution, emits warnings[].
+    Selective dispatch (#32): skipped in <1ms when planner omitted
+    ``check_geofence`` or gated clarification.
     """
+    if _needs_clarification_short_circuit(state):
+        return {"danger_results": []}
+    if not _is_tool_selected(state, TOOL_GEOFENCE):
+        return {"danger_results": []}
     fish = state.get("fish_results") or []
     if not fish:
         return {"danger_results": []}
@@ -352,6 +658,40 @@ async def decision_agent(state: ORCAState) -> dict:
     danger = state.get("danger_results") or []
     user_location = state.get("user_location") or {"lat": 0, "lon": 0}
     language = state.get("language") or "en"
+
+    # ---- Clarification short-circuit (ticket #32) ----------------------
+    # Planner gated needs_clarification → no downstream tools ran (all
+    # passthrough <1ms). Return the vernacular GPS prompt directly with
+    # explicit evidence (no silent fallback). Topology stays linear
+    # (planner -> fish -> parallel -> decision); skipping is via
+    # passthrough, not new edges.
+    if bool(state.get("needs_clarification")):
+        clarification_text = state.get("clarification_text") or (
+            "Please share your GPS location (latitude, longitude) or mention a nearby "
+            "coastal place like Kochi, Munambam, Beypore, Kollam, Vizag, Veraval, or "
+            "Chennai so I can find safe fishing zones near you."
+        )
+        reasoning_trace = list(state.get("reasoning_trace") or [])
+        evidence_clar: list[str] = ["Clarification requested — GPS/location required for PFZ search"]
+        for line in reasoning_trace:
+            if isinstance(line, str) and line and line not in evidence_clar:
+                evidence_clar.append(line)
+        return {
+            "combined": None,
+            "best": None,
+            "ranked_zones": [],
+            "citation": "INCOIS TextData (no zones — clarification requested)",
+            "explanation": str(clarification_text),
+            "reply": str(clarification_text),
+            "map": {"center": None, "pfz_features": [], "route": []},
+            "safety": {"waves_m": None, "wind_kts": None, "danger": "unknown", "badge": "amber"},
+            "evidence": evidence_clar,
+            "confidence": DEGRADED_CONFIDENCE,
+            "synthesis_status": "skipped",
+            "synthesis_error": None,
+            "synthesis_elapsed_ms": 0,
+            "masked_spans": 0,
+        }
 
     try:
         from backend.agents import combiner as cb  # type: ignore
@@ -434,6 +774,17 @@ async def decision_agent(state: ORCAState) -> dict:
                 evidence.append(str(w))
         if not any("MPA" in e or "EEZ" in e for e in evidence):
             evidence.append("No EEZ/MPA violation")
+
+    # Evidence & trace propagation (ticket #32): planner reasoning_trace
+    # rides in graph state and is appended to final evidence citations
+    # (after the INCOIS citation so evidence[0] stays stable for tests).
+    try:
+        _trace = state.get("reasoning_trace") or []
+        for _line in _trace:
+            if isinstance(_line, str) and _line and _line not in evidence:
+                evidence.append(_line)
+    except Exception:
+        pass
 
     degraded = bool(state.get("degraded"))
     confidence = DEGRADED_CONFIDENCE if degraded or not best else DEFAULT_CONFIDENCE
@@ -535,7 +886,13 @@ async def parallel_analysis_node(state: ORCAState) -> dict:
     This preserves LangGraph node topology (planner -> fish -> parallel
     -> decision) while guaranteeing P95<2s and mock compatibility
     (tests patch backend.agents.*.check_*).
+
+    Selective dispatch (#32): individual specialists already passthrough
+    in <1ms when unselected; this node short-circuits immediately on
+    clarification so no gather overhead is paid.
     """
+    if _needs_clarification_short_circuit(state):
+        return {"sea_results": [], "weather_results": [], "danger_results": []}
     # Run 3 agents concurrently — true parallel, not sequential Send
     results = await asyncio.gather(
         sea_checker(state),
@@ -629,6 +986,44 @@ async def orchestrate_via_graph(
     # Handle no-location early (planner will set user_location=None)
     final = await graph.ainvoke(init_state)
 
+    # ---- Clarification short-circuit (ticket #32) ---------------------
+    # Planner gated needs_clarification → vernacular GPS prompt, no
+    # downstream tools ran. Explicit evidence (no silent fallback).
+    if bool(final.get("needs_clarification")):
+        sid = final.get("session_id") or init_state["session_id"]
+        clarification_text = final.get("clarification_text") or (
+            "Please share your GPS location (latitude, longitude) or mention a nearby "
+            "coastal place like Kochi, Munambam, Beypore, Kollam, Vizag, Veraval, or "
+            "Chennai so I can find safe fishing zones near you."
+        )
+        reasoning_trace = list(final.get("reasoning_trace") or [])
+        evidence_clar: list[str] = ["Clarification requested — GPS/location required for PFZ search"]
+        for _line in reasoning_trace:
+            if isinstance(_line, str) and _line and _line not in evidence_clar:
+                evidence_clar.append(_line)
+        # Merge decision_agent evidence when present (already includes trace).
+        for _e in final.get("evidence") or []:
+            if _e not in evidence_clar:
+                evidence_clar.append(str(_e))
+        return {
+            "reply": str(clarification_text),
+            "map": {"center": None, "pfz_features": [], "route": []},
+            "safety": {"waves_m": None, "wind_kts": None, "danger": "unknown", "badge": "amber"},
+            "evidence": evidence_clar,
+            "language": final.get("language") or language,
+            "confidence": DEGRADED_CONFIDENCE,
+            "session_id": sid,
+            "intent": final.get("intent") or {"wants_fish": True, "wants_safety": True},
+            "needs_clarification": True,
+            "clarification_text": str(clarification_text),
+            "selected_tools": final.get("selected_tools"),
+            "reasoning_trace": reasoning_trace,
+            "planner_status": final.get("planner_status"),
+            "planner_error": final.get("planner_error"),
+            "planner_elapsed_ms": final.get("planner_elapsed_ms"),
+            "planner_confidence": final.get("planner_confidence"),
+        }
+
     # If planner could not resolve location, return prompting payload (no fish branch)
     if not final.get("user_location"):
         sid = final.get("session_id") or init_state["session_id"]
@@ -641,6 +1036,13 @@ async def orchestrate_via_graph(
             "confidence": DEGRADED_CONFIDENCE,
             "session_id": sid,
             "intent": final.get("intent") or {"wants_fish": True, "wants_safety": True},
+            "needs_clarification": bool(final.get("needs_clarification", False)),
+            "selected_tools": final.get("selected_tools"),
+            "reasoning_trace": list(final.get("reasoning_trace") or []),
+            "planner_status": final.get("planner_status"),
+            "planner_error": final.get("planner_error"),
+            "planner_elapsed_ms": final.get("planner_elapsed_ms"),
+            "planner_confidence": final.get("planner_confidence"),
         }
 
     # Persist session (best-effort, mirrors orchestrator)
@@ -689,6 +1091,13 @@ async def orchestrate_via_graph(
         "session_id": final.get("session_id"),
         "intent": final.get("intent"),
         "combined": final.get("combined"),  # for debugging
+        "needs_clarification": bool(final.get("needs_clarification", False)),
+        "selected_tools": final.get("selected_tools"),
+        "reasoning_trace": list(final.get("reasoning_trace") or []),
+        "planner_status": final.get("planner_status"),
+        "planner_error": final.get("planner_error"),
+        "planner_elapsed_ms": final.get("planner_elapsed_ms"),
+        "planner_confidence": final.get("planner_confidence"),
     }
 
 
@@ -929,6 +1338,15 @@ async def orchestrate_stream_via_graph(
                 }
 
             if name == "planner":
+                # CRIT-01: surface explicit planner_error (fallback:none) — never
+                # silent. Yield before done status; pipeline still continues
+                # (offline must still work — surfacing, not blocking).
+                try:
+                    _perr = output.get("planner_error") if isinstance(output, dict) else None
+                except Exception:
+                    _perr = None
+                if isinstance(_perr, dict) and _perr:
+                    yield dict(_perr)
                 ul = output.get("user_location") if isinstance(output, dict) else None
                 if isinstance(ul, dict) and ul.get("lat") is not None and ul.get("lon") is not None:
                     try:
@@ -1056,7 +1474,15 @@ async def orchestrate_stream_via_graph(
             prompt = "Please share your GPS location or mention a coastal place like Kochi, Veraval, or Chennai to find nearby fishing zones."
             for chunk in _chunk_text(prompt):
                 yield {"type": "token", "text": chunk + " "}
-        yield {"type": "evidence", "items": ["Location not provided — cannot search PFZ zones"]}
+        # MAJ-02: clarification tail surfaces decision evidence when present.
+        _tail_ev = decision_out.get("evidence") if isinstance(decision_out, dict) else None
+        if isinstance(_tail_ev, list) and any(_tail_ev):
+            _tail_items = [str(e) for e in _tail_ev if e]
+        elif isinstance(_tail_ev, str) and _tail_ev:
+            _tail_items = [_tail_ev]
+        else:
+            _tail_items = ["Location not provided — cannot search PFZ zones"]
+        yield {"type": "evidence", "items": _tail_items or ["Location not provided — cannot search PFZ zones"]}
         yield {"type": "done", "language": final_state.get("language") or language, "confidence": DEGRADED_CONFIDENCE, "session_id": final_state.get("session_id") or sid}
         return
 
