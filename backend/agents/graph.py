@@ -61,6 +61,18 @@ _NATIVE_PLACEHOLDER_RE = re.compile(r"__M[A-Za-z0-9_]+__")
 # State
 # ---------------------------------------------------------------------------
 
+def _degraded_or(a: bool | None, b: bool | None) -> bool:
+    """OR reducer for ``degraded`` across Send fan-out branches.
+
+    Ticket #20 (Send fan-out): ``sea_checker`` / ``weather_agent`` /
+    ``danger_agent`` run as parallel Send branches converging on
+    ``decision_agent``. When >=2 branches return ``degraded`` in the same
+    super-step, LangGraph requires a reducer (else ``InvalidUpdateError``).
+    Single-writer steps set the value directly; multi-writer steps OR.
+    """
+    return bool(a) or bool(b)
+
+
 class ORCAState(TypedDict, total=False):
     # inputs
     query: str
@@ -71,7 +83,7 @@ class ORCAState(TypedDict, total=False):
     intent: dict  # {wants_fish, wants_safety}
     user_location: dict | None  # {lat, lon} resolved
     cached_session: dict | None
-    degraded: bool
+    degraded: Annotated[bool, _degraded_or]
     # fan-out
     fish_results: list[dict]
     sea_results: list[dict]
@@ -901,18 +913,21 @@ async def decision_agent(state: ORCAState) -> dict:
 
 async def parallel_analysis_node(state: ORCAState) -> dict:
     """
-    Collaborative analysis node — invokes 3 specialized sub-agents
-    *in parallel* via asyncio.gather on the SAME fish_results
-    (shared list idea per ORCA_GeoJSON_Architecture.md).
+    Collaborative analysis node — DEPRECATED as a graph node (ticket #20).
+
+    Kept as a direct-call helper (same ``asyncio.gather`` over the SAME
+    fish_results, shared list per ORCA_GeoJSON_Architecture.md) for
+    backward compatibility. The compiled graph no longer routes through
+    this node — ``fish_finder`` fans out via LangGraph ``Send()`` to the
+    ``sea_checker`` / ``weather_agent`` / ``danger_agent`` nodes instead
+    (see :func:`route_after_fish_finder`), so each sub-agent is a discrete
+    LangSmith span. Direct callers get identical merge semantics
+    (``degraded`` OR-propagated).
 
     Each sub-agent decides autonomously and calls its own tools:
       sea_checker -> get_wave_current (OSF/heuristic)
       weather_agent -> get_wind / get_cyclone_alert
       danger_agent -> check_geofence / ray_cast
-
-    This preserves LangGraph node topology (planner -> fish -> parallel
-    -> decision) while guaranteeing P95<2s and mock compatibility
-    (tests patch backend.agents.*.check_*).
 
     Selective dispatch (#32): individual specialists already passthrough
     in <1ms when unselected; this node short-circuits immediately on
@@ -935,18 +950,73 @@ async def parallel_analysis_node(state: ORCAState) -> dict:
     return merged
 
 
+def route_after_fish_finder(state: ORCAState):
+    """Conditional Send fan-out after ``fish_finder`` (ticket #20).
+
+    True Agentic AI parallel dispatch in graph topology (visible as
+    discrete ``sea_checker`` / ``weather_agent`` / ``danger_agent`` spans
+    in the LangSmith trace) while preserving mock compatibility and the
+    #32 selective-dispatch contract:
+
+    - Clarification short-circuit (``needs_clarification``) routes
+      straight to ``decision_agent`` (string route — full state preserved,
+      zero tool I/O downstream).
+    - Only the planner-selected tools are Sent to; unselected specialists
+      are never invoked (zero I/O by construction, stronger than the
+      <1ms in-node passthrough which remains as a direct-call guard).
+    - ``selected_tools=None`` (legacy/offline run-all) Sends to all three.
+    - No selection at all (empty after guards) routes to ``decision_agent``.
+
+    Send isolation note (verified on langgraph 1.1.2): a ``Send`` target
+    sees ONLY its ``arg`` payload, not the parent state — so the shared
+    ``fish_results`` (+ selection/location/clarification flags the workers
+    read) are forwarded explicitly. Worker outputs merge back into the
+    main state; ``decision_agent`` (reached via static worker edges, or via
+    the direct string route) always sees the full merged state.
+    """
+    if _needs_clarification_short_circuit(state):
+        return "decision_agent"
+    wants_ocean = _is_tool_selected(state, TOOL_OCEAN)
+    wants_weather = _is_tool_selected(state, TOOL_WEATHER)
+    wants_geofence = _is_tool_selected(state, TOOL_GEOFENCE)
+    if not (wants_ocean or wants_weather or wants_geofence):
+        return "decision_agent"
+    if Send is None:  # pragma: no cover — langgraph unavailable
+        return "decision_agent"
+    _sel = state.get("selected_tools")
+    base: dict = {
+        "fish_results": list(state.get("fish_results") or []),
+        "selected_tools": list(_sel) if isinstance(_sel, list) else None,
+        "needs_clarification": bool(state.get("needs_clarification")),
+        # Read-only for workers (lat/lon) — pass reference, never mutated.
+        "user_location": state.get("user_location"),
+    }
+    sends: list = []
+    if wants_ocean:
+        sends.append(Send("sea_checker", dict(base)))
+    if wants_weather:
+        sends.append(Send("weather_agent", dict(base)))
+    if wants_geofence:
+        sends.append(Send("danger_agent", dict(base)))
+    if not sends:  # defensive — never deadlock the pipeline
+        return "decision_agent"
+    return sends
+
+
 def build_orca_graph():
     """
     Build and compile the ORCA StateGraph.
 
     Nodes (SIH26176): planner (supervisor, tool: redis + geocoding)
       -> fish_finder (tools: PostGIS + GeoJSON)
-      -> parallel_analysis_node (3 sub-agents in parallel, each with own tools)
+      -> Send fan-out to {sea_checker, weather_agent, danger_agent}
+         (each with own tools, conditional on selected_tools)
       -> decision_agent (tool: combiner)
 
-    Parallelism is via asyncio.gather inside parallel_analysis_node
-    (auditable, mock-friendly, P95<2s). Alternative Send fan-out
-    is reserved for future when langgraph Send semantics stabilize.
+    Parallelism is true LangGraph ``Send()`` fan-out from ``fish_finder``
+    (auditable per-agent LangSmith spans, mock-friendly, P95<2s).
+    ``parallel_analysis_node`` is retained only as a direct-call helper;
+    it is NOT part of the compiled topology.
 
     Returns:
       CompiledGraph or None if langgraph not installed.
@@ -959,13 +1029,17 @@ def build_orca_graph():
 
     graph.add_node("planner", planner_node)
     graph.add_node("fish_finder", fish_finder)
-    graph.add_node("parallel_analysis", parallel_analysis_node)
+    graph.add_node("sea_checker", sea_checker)
+    graph.add_node("weather_agent", weather_agent)
+    graph.add_node("danger_agent", danger_agent)
     graph.add_node("decision_agent", decision_agent)
 
     graph.add_edge(START, "planner")
     graph.add_edge("planner", "fish_finder")
-    graph.add_edge("fish_finder", "parallel_analysis")
-    graph.add_edge("parallel_analysis", "decision_agent")
+    graph.add_conditional_edges("fish_finder", route_after_fish_finder)
+    graph.add_edge("sea_checker", "decision_agent")
+    graph.add_edge("weather_agent", "decision_agent")
+    graph.add_edge("danger_agent", "decision_agent")
     graph.add_edge("decision_agent", END)
 
     return graph.compile()
