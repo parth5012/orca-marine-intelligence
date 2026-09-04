@@ -20,6 +20,18 @@ Edge Cases:
     - All spots unsafe → return warning with all_unsafe=True, advisory DO NOT SAIL
     - No spots → empty ranked_zones, best=None
     - Tie in score → lower wave wins, then closer distance
+
+Multilingual (wayfinder #28, M-A & M-E):
+    - ``combine_and_rank(..., detected_language="ml"|"ta"|"te"|"hi")``
+      renders a same-language grounded advisory OFFLINE via
+      ``backend/agents/lexical_mask.py`` (MarineGlossaryMasker +
+      vernacular templates ported from research 02 §4 + 03 §3-§5).
+    - Masking is applied pre-stream at this combiner level with cheap
+      regex (no external calls, P95<2.0s); placeholders are token-safe
+      (no spaces) so graph.py SSE ``_chunk_text`` never splits them.
+      graph.py is intentionally NOT modified.
+    - Code trumps LLM: the deterministic all_unsafe DO NOT SAIL veto is
+      preserved — only its *rendering* is localized, never overridden.
 """
 
 from datetime import datetime, timezone
@@ -82,12 +94,44 @@ def _build_lookup(results: list[dict] | None) -> dict[str, dict]:
     return lookup
 
 
+_SUPPORTED_LANGS = ("en", "ml", "ta", "te", "hi")
+
+# Offline canned "no zones" advisories (native script, Arabic digits n/a).
+# Used when fish_results is empty but the query language is non-English,
+# so Global Test queries still get same-language responses offline.
+_EMPTY_ADVISORIES: dict[str, str] = {
+    "ml": "സമീപത്ത് മീൻപിടിത്ത മേഖലകൾ കണ്ടെത്തിയില്ല. തിരച്ചിൽ പരിധി വർദ്ധിപ്പിച്ച് വീണ്ടും ശ്രമിക്കുക.",
+    "ta": "அருகில் மீன்பிடி மண்டலங்கள் எதுவும் கிடைக்கவில்லை. தேடல் எல்லையை விரிவுபடுத்தி மீண்டும் முயலுங்கள்.",
+    "te": "సమీపంలో చేపల మండలాలు కనుగొనబడలేదు. శోధన పరిధిని పెంచి మళ్లీ ప్రయత్నించండి.",
+    "hi": "आस-पास कोई मत्स्य क्षेत्र नहीं मिला। खोज दायरा बढ़ाकर पुनः प्रयास करें।",
+}
+
+
+def _normalize_lang_code(lang: Any) -> str:
+    """Normalize to en|ml|ta|te|hi (unknown/None → en)."""
+    if not lang or not isinstance(lang, str):
+        return "en"
+    code = lang.strip().lower().split("-")[0].split("_")[0]
+    return code if code in _SUPPORTED_LANGS else "en"
+
+
+def _localize_empty_advisory(lang: Any) -> str | None:
+    """Native-script no-zone advisory, or None when English/fallback."""
+    code = _normalize_lang_code(lang)
+    if code == "en":
+        return None
+    return _EMPTY_ADVISORIES.get(code)
+
+
 def combine_and_rank(
     fish_results: list[dict],
     sea_results: list[dict],
     weather_results: list[dict],
     danger_results: list[dict],
     user_location: dict,
+    detected_language: str = "en",
+    port_name: str | None = None,
+    species_list: list | None = None,
 ) -> dict:
     """
     Rank PFZ zones by composite safety and proximity score.
@@ -98,12 +142,25 @@ def combine_and_rank(
         weather_results: Wind/tide data from WeatherAgent.
         danger_results: Geofence/cyclone checks from DangerAgent.
         user_location: {"lat": float, "lon": float} of the fisherman.
+        detected_language: BCP-47-ish code from planner_schema
+            (en|ml|ta|te|hi). Non-English renders ``explanation`` in the
+            target native script OFFLINE via lexical_mask grounding
+            templates; English source is preserved as ``explanation_en``.
+            Unknown codes fall back to "en". Token-safe: applied here
+            pre-stream so graph.py SSE needs no change.
+        port_name: Optional canonical port for grounding (defaults to
+            best place).
+        species_list: Optional commercial species names to localize via
+            the coastal fish glossary (research 03 §2).
 
     Returns:
         {
             "ranked_zones": [...],
             "best": {"place": str, "lat": float, "lon": float, "score": float},
-            "explanation": str,
+            "explanation": str,          # localized when non-en (streamed)
+            "explanation_en": str,       # English source (non-en only)
+            "localized_reply": str,      # alias of explanation
+            "detected_language": str,    # normalized code
             "citation": str,
             "all_unsafe": bool,
             "score_breakdown": dict
@@ -132,10 +189,26 @@ def combine_and_rank(
     # Empty case
     if not fish_results:
         citation = f"INCOIS TextData {date_str}"
+        _empty_en = "No fishing zones found within search radius. Try expanding the search area or check back later."
+        _empty_loc = _localize_empty_advisory(detected_language)
+        if _empty_loc is not None:
+            return {
+                "ranked_zones": [],
+                "best": None,
+                "explanation": _empty_loc,
+                "explanation_en": _empty_en,
+                "localized_reply": _empty_loc,
+                "detected_language": _normalize_lang_code(detected_language),
+                "citation": citation,
+                "all_unsafe": False,
+                "score_breakdown": {},
+            }
         return {
             "ranked_zones": [],
             "best": None,
-            "explanation": "No fishing zones found within search radius. Try expanding the search area or check back later.",
+            "explanation": _empty_en,
+            "localized_reply": _empty_en,
+            "detected_language": "en",
             "citation": citation,
             "all_unsafe": False,
             "score_breakdown": {},
@@ -386,11 +459,149 @@ def combine_and_rank(
 
     top_breakdown = best["score_breakdown"] if best else {}
 
+    lang_code = _normalize_lang_code(detected_language)
+    if lang_code != "en" and best_out is not None:
+        # Same-language grounded rendering (offline, token-safe, pre-stream).
+        # Code trumps LLM: all_unsafe veto already computed above; the
+        # renderer only localizes it via lexical_mask (never overrides).
+        try:
+            from backend.agents import lexical_mask as _lm
+
+            _metrics = {
+                "place": port_name or best_out.get("place"),
+                "lat": best_out.get("lat"),
+                "lon": best_out.get("lon"),
+                "distance_km": best_out.get("distance_km"),
+                "bearing_deg": best_out.get("bearing"),
+                "direction": best_out.get("direction"),
+                "wave_height_m": best_out.get("wave_height_m"),
+                "wind_kts": best_out.get("wind_kt"),
+                "all_unsafe": all_unsafe,
+                "citation": citation,
+                "inside_eez": best_out.get("inside_eez"),
+                "inside_mpa": best_out.get("inside_mpa"),
+                "species_list": species_list or [],
+            }
+            _localized = _lm.render_grounded_advisory(_metrics, lang_code)
+            return {
+                "ranked_zones": ranked,
+                "best": best_out,
+                "explanation": _localized,
+                "explanation_en": explanation,
+                "localized_reply": _localized,
+                "detected_language": lang_code,
+                "citation": citation,
+                "all_unsafe": all_unsafe,
+                "score_breakdown": top_breakdown,
+            }
+        except Exception:
+            pass  # fall through to English explanation (graceful degrade)
+
     return {
         "ranked_zones": ranked,
         "best": best_out,
         "explanation": explanation,
+        "localized_reply": explanation,
+        "detected_language": lang_code,
         "citation": citation,
         "all_unsafe": all_unsafe,
         "score_breakdown": top_breakdown,
     }
+
+
+def build_localized_advisory(
+    best: dict | None,
+    detected_language: str = "en",
+    citation: str = "INCOIS TextData",
+    all_unsafe: bool = False,
+    port_name: str | None = None,
+    species_list: list | None = None,
+) -> dict:
+    """Render a same-language grounded advisory (offline canned).
+
+    Thin combiner-level hook over ``lexical_mask.render_grounded_advisory``
+    so M-E chat / tests get an envelope without touching graph.py.
+
+    Args:
+        best: combiner ``best`` zone dict (or None for empty search).
+        detected_language: en|ml|ta|te|hi (unknown → en).
+        citation: INCOIS citation string preserved verbatim in the reply.
+        all_unsafe: deterministic veto flag — forces DANGER closing.
+        port_name: override display place (defaults to best place).
+        species_list: commercial species names for glossary localization.
+
+    Returns:
+        Envelope ``{"status","summary","next_actions","artifacts",
+        "reply","detected_language","safety_tier","elapsed_ms"}``.
+        Never raises: falls back to English with status "warning".
+    """
+    import time as _time
+
+    t0 = _time.perf_counter()
+    lang_code = _normalize_lang_code(detected_language)
+    try:
+        from backend.agents import lexical_mask as _lm
+
+        if best is None:
+            empty = _localize_empty_advisory(lang_code)
+            reply = empty if empty is not None else (
+                "No fishing zones found within search radius. "
+                "Try expanding the search area or check back later."
+            )
+            tier = "UNKNOWN"
+        else:
+            metrics = {
+                "place": port_name or best.get("place"),
+                "lat": best.get("lat"),
+                "lon": best.get("lon"),
+                "distance_km": best.get("distance_km", best.get("distance_from_user_km")),
+                "bearing_deg": best.get("bearing_deg", best.get("bearing")),
+                "direction": best.get("direction", best.get("dir")),
+                "wave_height_m": best.get("wave_height_m", best.get("wave_m")),
+                "wind_kts": best.get("wind_kts", best.get("wind_kt", best.get("wind_speed_kt"))),
+                "all_unsafe": all_unsafe,
+                "citation": citation,
+                "inside_eez": best.get("inside_eez"),
+                "inside_mpa": best.get("inside_mpa"),
+                "species_list": species_list or best.get("species_list") or [],
+            }
+            reply = _lm.render_grounded_advisory(metrics, lang_code)
+            tier = _lm.derive_safety_tier(
+                metrics.get("wave_height_m"),
+                metrics.get("wind_kts"),
+                all_unsafe,
+                bool(metrics.get("inside_mpa"))
+                or (metrics.get("inside_eez") is False),
+            )
+        elapsed_ms = int((_time.perf_counter() - t0) * 1000)
+        return {
+            "status": "success",
+            "summary": f"grounded {lang_code} advisory ({tier}) in {elapsed_ms}ms",
+            "next_actions": ["stream reply tokens via graph.py (unchanged)"],
+            "artifacts": [],
+            "reply": reply,
+            "detected_language": lang_code,
+            "safety_tier": tier,
+            "elapsed_ms": elapsed_ms,
+        }
+    except Exception as exc:
+        elapsed_ms = int((_time.perf_counter() - t0) * 1000)
+        fallback = (
+            "No fishing zones found within search radius."
+            if best is None
+            else f"Recommended: {(best or {}).get('place', 'Unknown')} — see map for details."
+        )
+        return {
+            "status": "warning",
+            "summary": f"localization fallback to en ({exc})",
+            "next_actions": ["serve English advisory + warn"],
+            "artifacts": [],
+            "reply": fallback,
+            "detected_language": "en",
+            "safety_tier": "UNKNOWN",
+            "elapsed_ms": elapsed_ms,
+        }
+
+
+# Backwards-compatible alias (map #22 wording: multilingual synthesis).
+synthesize_multilingual_advisory = build_localized_advisory
