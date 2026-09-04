@@ -30,197 +30,47 @@ Dependencies:
 import asyncio
 import datetime
 import logging
-import math
-import re
 import time
 import uuid
 from typing import Any, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
-# Deterministic coastal port lookup — fast-path before any LLM
-COASTAL_PORTS: dict[str, list[float]] = {
-    "Kochi": [9.93, 76.26],
-    "Veraval": [21.6, 69.6],
-    "Chennai": [13.08, 80.27],
-}
+# ---------------------------------------------------------------------------
+# Legacy regex decommission (#35) — archived in fallback.py
+# ---------------------------------------------------------------------------
+# COASTAL_PORTS / _parse_intent / _resolve_location / _parse_relative_offset
+# (+ _parse_explicit_location / _coastal_port_lookup / _is_temporal_followup)
+# are ARCHIVED in backend/agents/fallback.py for offline/edge dev reference
+# only. They are re-exported here SOLELY for backward compatibility
+# (existing tests import orchestrator._parse_intent etc.) and MUST NOT be
+# used by the primary execution path below (orchestrate/orchestrate_stream
+# delegate straight to the LLM graph — no silent regex heuristics).
+# graph.py imports its lazy deterministic baseline from fallback.py directly.
+try:
+    from backend.agents.fallback import (  # noqa: F401 (deprecated re-exports)
+        COASTAL_PORTS,
+        _coastal_port_lookup,
+        _is_temporal_followup,
+        _parse_explicit_location,
+        _parse_intent,
+        _parse_relative_offset,
+        _resolve_location,
+    )
+except ImportError:
+    from fallback import (  # type: ignore # noqa: F401 (direct script runs)
+        COASTAL_PORTS,
+        _coastal_port_lookup,
+        _is_temporal_followup,
+        _parse_explicit_location,
+        _parse_intent,
+        _parse_relative_offset,
+        _resolve_location,
+    )
 
 TIMEOUT_S = 10.0
 DEFAULT_CONFIDENCE = 0.87
 DEGRADED_CONFIDENCE = 0.62
-
-
-# ---------------------------------------------------------------------------
-# Location resolution helpers
-# ---------------------------------------------------------------------------
-
-def _parse_explicit_location(location: dict | None) -> tuple[float, float] | None:
-    if not isinstance(location, dict):
-        return None
-    # Support multiple key variants
-    lat = None
-    lon = None
-    for k in ("lat", "latitude", "y"):
-        if location.get(k) is not None:
-            try:
-                lat = float(location[k])
-                break
-            except (TypeError, ValueError):
-                continue
-    for k in ("lon", "lng", "longitude", "x"):
-        if location.get(k) is not None:
-            try:
-                lon = float(location[k])
-                break
-            except (TypeError, ValueError):
-                continue
-    if lat is None or lon is None:
-        return None
-    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-        return None
-    return float(lat), float(lon)
-
-
-def _coastal_port_lookup(query: str) -> tuple[float, float] | None:
-    if not query or not isinstance(query, str):
-        return None
-    q = query.lower()
-    for port, coords in COASTAL_PORTS.items():
-        if port.lower() in q:
-            return float(coords[0]), float(coords[1])
-    return None
-
-
-def _resolve_location(query: str, location: dict | None) -> tuple[float, float] | None:
-    # 1. Explicit location dict wins
-    explicit = _parse_explicit_location(location)
-    if explicit is not None:
-        return explicit
-    # 2. Substring match on query vs COASTAL_PORTS
-    port_match = _coastal_port_lookup(query)
-    if port_match is not None:
-        return port_match
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Follow-up contextualization helpers (#10, #17)
-# ---------------------------------------------------------------------------
-
-# 0.09 deg ≈ 10km (111km per degree). lon adjusted by cos(lat).
-_DEG_PER_10KM = 0.09
-
-def _parse_relative_offset(query: str, cached_lat: float, cached_lon: float) -> tuple[float, float] | None:
-    """Parse relative spatial offset like '10km south', '20km further north'.
-
-    Returns (new_lat, new_lon) if offset detected, else None.
-    Supports directions: south/north/east/west with distance in km.
-    """
-    if not query or not isinstance(query, str):
-        return None
-    q = query.lower()
-    # Pattern: <num> km [further] <direction>, also handle "further south 10km" variants
-    # Primary: "10km south" / "20 km further south" / "10km further east"
-    m = re.search(r"(\d+(?:\.\d+)?)\s*km\s*(?:further\s*)?(south|north|east|west)\b", q)
-    if not m:
-        # Secondary: "further south 10km" or "south 10km"
-        m = re.search(r"(south|north|east|west)\s*(?:further\s*)?(\d+(?:\.\d+)?)\s*km", q)
-        if m:
-            direction = m.group(1)
-            try:
-                km = float(m.group(2))
-            except (TypeError, ValueError):
-                return None
-        else:
-            # Also handle "10km further south" where further after km but before direction already covered
-            # Check for direction without distance but with 'further' keyword -> default 10km
-            if re.search(r"\bfurther\s+(south|north|east|west)\b", q):
-                dm = re.search(r"\bfurther\s+(south|north|east|west)\b", q)
-                direction = dm.group(1) if dm else None
-                km = 10.0
-                if direction is None:
-                    return None
-            else:
-                return None
-        if 'direction' not in locals():
-            return None
-    else:
-        try:
-            km = float(m.group(1))
-        except (TypeError, ValueError):
-            return None
-        direction = m.group(2)
-
-    factor = km / 10.0
-    delta_deg = _DEG_PER_10KM * factor
-    new_lat = float(cached_lat)
-    new_lon = float(cached_lon)
-    if direction == "south":
-        new_lat = cached_lat - delta_deg
-    elif direction == "north":
-        new_lat = cached_lat + delta_deg
-    elif direction == "east":
-        # Adjust lon by cos(lat)
-        try:
-            cos_lat = math.cos(math.radians(cached_lat))
-            if abs(cos_lat) < 0.1:
-                cos_lat = 0.1 if cos_lat >= 0 else -0.1
-            new_lon = cached_lon + delta_deg / cos_lat
-        except Exception:
-            new_lon = cached_lon + delta_deg
-    elif direction == "west":
-        try:
-            cos_lat = math.cos(math.radians(cached_lat))
-            if abs(cos_lat) < 0.1:
-                cos_lat = 0.1 if cos_lat >= 0 else -0.1
-            new_lon = cached_lon - delta_deg / cos_lat
-        except Exception:
-            new_lon = cached_lon - delta_deg
-    else:
-        return None
-    # Clamp to valid ranges
-    new_lat = max(-90.0, min(90.0, new_lat))
-    # Normalize lon to -180..180
-    while new_lon > 180:
-        new_lon -= 360
-    while new_lon < -180:
-        new_lon += 360
-    return float(new_lat), float(new_lon)
-
-
-def _is_temporal_followup(query: str) -> bool:
-    """Detect temporal follow-up phrases that should reuse cached coords."""
-    if not query or not isinstance(query, str):
-        return False
-    q = query.lower()
-    temporal_keywords = [
-        "tomorrow", "morning", "evening", "tonight", "afternoon",
-        "next", "later", "safe", "safety", "weather", "sea",
-    ]
-    # If query is short follow-up (e.g., "Is it safe tomorrow morning?") reuse
-    # We treat any query containing temporal keyword as temporal reuse candidate
-    # when location is missing — the caller checks cached existence.
-    return any(k in q for k in temporal_keywords)
-
-
-# ---------------------------------------------------------------------------
-# Intent helper (independent flags per #8)
-# ---------------------------------------------------------------------------
-
-def _parse_intent(query: str) -> dict:
-    q = (query or "").lower()
-    # wants_fish: keywords for fish/PFZ
-    fish_keywords = ["fish", "pfz", "catch", "fishing", "zone", "மீன்", "മത്സ്യം", "machhli", "chepa"]
-    # wants_safety: wave, wind, cyclone, safe, danger, tide, weather, storm
-    safety_keywords = ["safe", "danger", "wave", "wind", "cyclone", "storm", "tide", "weather", "sea", "current", "lightning"]
-    # For W1, if query is short or unknown, default both true (independent)
-    wants_fish = any(k in q for k in fish_keywords)
-    wants_safety = any(k in q for k in safety_keywords)
-    # If neither keyword matched, assume user wants both (fish + safety)
-    if not wants_fish and not wants_safety:
-        wants_fish = True
-        wants_safety = True
-    return {"wants_fish": wants_fish, "wants_safety": wants_safety}
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +232,12 @@ async def orchestrate(query: str, language: str, location: dict | None = None, s
     OSF, IMD, GeoJSON). Deterministic gather fallback is isolated in
     backend/agents/fallback.py for future edge/offline use.
 
+    No Silent Fallback (#35): this primary path NEVER calls archived regex
+    heuristics (fallback._parse_intent / _resolve_location). LLM failures
+    surface explicitly via planner_error / synthesis_error (fallback:none)
+    in the returned payload; uncaught exceptions propagate to the caller
+    (never masked by a heuristic result).
+
     Args:
         query: User's question in any of 22 supported languages.
         language: Detected language code (e.g., "ml" for Malayalam).
@@ -392,11 +248,19 @@ async def orchestrate(query: str, language: str, location: dict | None = None, s
         Combined advisory with map reference, evidence, and translated response
         matching POST /api/chat contract:
         {reply, map, safety, evidence, language, confidence, session_id}
+
+    Raises:
+        Any exception from the graph pipeline propagates transparently —
+        callers must NOT mask it with regex heuristics.
     """
     # Always via LangGraph supervisor (PS SIH26176 — agents decide, tools fetch)
     from backend.agents.graph import orchestrate_via_graph  # type: ignore
 
-    return await orchestrate_via_graph(query, language, location, session_id)
+    try:
+        return await orchestrate_via_graph(query, language, location, session_id)
+    except Exception:
+        logger.warning("orchestrator.orchestrate: uncaught pipeline error", exc_info=True)
+        raise
 
 
 async def orchestrate_stream(
@@ -407,10 +271,26 @@ async def orchestrate_stream(
 
     Yields dict events with a ``type`` field in strict order:
         status (running/done) -> map (early onMapHighlight) -> safety -> token(s) -> evidence -> done
+
+    Transparent errors (#35): planner/synthesizer LLM failures flow through
+    verbatim as ``{type:error, fallback:none}`` events from the graph (never
+    hidden). Any UNCAUGHT exception in this primary path is emitted here as
+    ``{type:error, agent:orchestrator, message:..., fallback:unknown}`` —
+    never a silent heuristic fallback. ``error`` events are ignored for
+    streaming-order assertions per docs/API.md.
     """
     # Always via LangGraph supervisor streaming
     from backend.agents.graph import orchestrate_stream_via_graph  # type: ignore
 
-    async for evt in orchestrate_stream_via_graph(query, language, location, session_id):
-        yield evt
+    try:
+        async for evt in orchestrate_stream_via_graph(query, language, location, session_id):
+            yield evt
+    except Exception as exc:
+        logger.warning("orchestrator.stream: uncaught error (%s)", exc, exc_info=True)
+        yield {
+            "type": "error",
+            "agent": "orchestrator",
+            "message": f"orchestrator stream failed: {exc}",
+            "fallback": "unknown",
+        }
 

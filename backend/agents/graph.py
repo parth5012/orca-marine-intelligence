@@ -16,7 +16,7 @@ Agents (nodes) vs Tools (stateless fetchers):
   - decision_agent        -> tools: score_zones (combiner.combine_and_rank), citation builder
 
 Supervisor (planner) performs autonomous intent decomposition
-(wants_fish, wants_safety per orchestrator._parse_intent) and routes
+(wants_fish, wants_safety per fallback._parse_intent archived baseline) and routes
 via Send() for parallel tool-augmented execution.
 
 The deterministic *.py helpers are preserved as TOOL layer so the graph
@@ -24,8 +24,10 @@ remains auditable, testable (tests/test_agents.py 41 tests), and
 offline-capable. The graph merely demonstrates Agentic AI principles:
 planning, reasoning, tool selection, collaboration, explainability.
 
-LangGraph is optional at runtime — orchestrator.py falls back to
-asyncio.gather if langgraph is not installed (P95<2s guarantee).
+LangGraph is optional at runtime — when unavailable, orchestrate_via_graph
+raises transparently via backend/agents/fallback.py (archived legacy gather,
+NotImplementedError) and orchestrate_stream_via_graph emits an explicit SSE
+``{type:error, fallback:unknown}`` event (never a silent regex fallback).
 
 Refs:
   PS SIH26176 — ORCA Marine EcOsystem Reasoning with Collaborative Agents
@@ -122,15 +124,32 @@ except ImportError:
     END = "END"  # type: ignore
     Send = None  # type: ignore
     _HAS_LANGGRAPH = False
-    logger.info("graph: langgraph not installed — graph will be disabled, falling back to orchestrator gather")
+    logger.warning("graph: langgraph not installed — supervisor unavailable")
 
-# Reuse helpers from orchestrator (single source of truth)
+# Legacy deterministic baseline (#35 — archived in fallback.py, NOT orchestrator).
+# graph.py lazy baseline is INTENTIONAL offline support (per #32 fix): the LLM
+# planner is tried first; these regex helpers run ONLY on plan_query failure
+# (surfacing planner_error fallback:none, never silent). Import from fallback
+# directly so orchestrator.py primary path stays decommissioned.
 try:
-    from backend.agents.orchestrator import (
+    from backend.agents.fallback import (
         COASTAL_PORTS,
         _parse_intent,
         _resolve_location,
         _parse_relative_offset,
+    )
+except ImportError:
+    # fallback for direct script runs
+    from fallback import (  # type: ignore
+        COASTAL_PORTS,
+        _parse_intent,
+        _resolve_location,
+        _parse_relative_offset,
+    )
+
+# Shared formatting/degraded helpers (single source of truth: orchestrator).
+try:
+    from backend.agents.orchestrator import (
         _to_geojson_features,
         _badge_for_best,
         _degraded_sea,
@@ -144,10 +163,6 @@ try:
 except ImportError:
     # fallback for direct script runs
     from orchestrator import (  # type: ignore
-        COASTAL_PORTS,
-        _parse_intent,
-        _resolve_location,
-        _parse_relative_offset,
         _to_geojson_features,
         _badge_for_best,
         _degraded_sea,
@@ -979,14 +994,19 @@ async def orchestrate_via_graph(
     """
     Run the full LangGraph pipeline and return POST /api/chat payload.
 
-    Falls back to direct tool calls if graph is unavailable.
+    No Silent Fallback (#35): when the compiled graph is unavailable
+    (langgraph not installed) this raises transparently via the archived
+    ``fallback.fallback_orchestrate`` (NotImplementedError) instead of
+    recursing into orchestrator or masking the failure with regex heuristics.
     """
     graph = get_orca_graph()
     if graph is None:
-        # Fallback — import orchestrator at call time to avoid circular import
-        from backend.agents.orchestrator import orchestrate as fallback_orchestrate  # type: ignore
+        # Transparent failure — legacy gather is archived in fallback.py
+        # (offline/edge only, raises NotImplementedError). Never recurse
+        # into orchestrator.orchestrate (infinite loop) or regex heuristics.
+        from backend.agents.fallback import fallback_orchestrate as _archived_fallback  # type: ignore
 
-        return await fallback_orchestrate(query, language, location, session_id)
+        return await _archived_fallback(query, language, location, session_id)
 
     init_state: ORCAState = {
         "query": query or "",
@@ -1157,7 +1177,8 @@ async def orchestrate_stream_via_graph(
       - After the stream drains -> ``evidence`` -> ``done``.
       - No-location path (planner yields no user_location) uses empty map /
         amber safety / location-prompt tokens, same order.
-      - ``graph is None`` falls back to ``orchestrator.orchestrate_stream``.
+      - ``graph is None`` emits a transparent ``{type:error,
+        fallback:unknown}`` event (#35, never a silent regex fallback).
         If the installed langgraph lacks ``astream_events`` (pre-1.x),
         degrade gracefully to non-streaming ``orchestrate_via_graph`` +
         validated chunk replay while preserving ordering + buffering.
@@ -1165,8 +1186,8 @@ async def orchestrate_stream_via_graph(
     Timeouts (map decision #26: 1.4s sub-agent budget, P95<2.0s):
       per-node budget is OBSERVED only — an ``error`` event is emitted when a
       node exceeds 1.4s but the slow node is NOT preempted (LangGraph stream
-      mode has no per-node cancel; true preemption needs Send fan-out +
-      per-task wait_for like the orchestrator fallback). Total P95 is logged,
+       mode has no per-node cancel; true preemption needs Send fan-out +
+       per-task wait_for like the archived fallback gather). Total P95 is logged,
       not enforced — early provisional ``map``/``safety`` keep TTFB <1.4s
       even when the synthesizer uses its full 1.4s SLA.
 
@@ -1203,10 +1224,16 @@ async def orchestrate_stream_via_graph(
     """
     graph = get_orca_graph()
     if graph is None:
-        from backend.agents.orchestrator import orchestrate_stream as fallback_stream  # type: ignore
-
-        async for evt in fallback_stream(query, language, location, session_id):
-            yield evt
+        # Transparent error (#35): langgraph unavailable. Emit explicit SSE
+        # error (fallback:unknown) — never recurse into
+        # orchestrator.orchestrate_stream (infinite loop) or regex heuristics.
+        logger.warning("graph.stream: langgraph not installed — emitting transparent error")
+        yield {
+            "type": "error",
+            "agent": "orchestrator",
+            "message": "stream failed: langgraph not installed (graph unavailable)",
+            "fallback": "unknown",
+        }
         return
 
     # Graceful degrade: very old langgraph without astream_events — replay

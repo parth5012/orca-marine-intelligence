@@ -24,7 +24,7 @@ Scope (ticket #31 — root node, standalone; wiring into graph.py is #32):
   5. STRICT INVARIANT (No Silent Fallback): on LLM timeout (>500ms) or API
      failure this module RAISES (PlannerTimeoutError / PlannerAPIError)
      with an explicit SSE error event payload. It NEVER calls legacy
-     regex heuristics (orchestrator._parse_intent / _resolve_location)
+      regex heuristics (fallback._parse_intent / _resolve_location)
      on the failure path — callers must surface the error event.
 
 Envelope: public entry points return

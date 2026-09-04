@@ -37,7 +37,7 @@ TOOL_WEATHER = "check_weather"
 TOOL_GEOFENCE = "check_geofence"
 KNOWN_TOOLS: tuple[str, ...] = (TOOL_FIND_FISH, TOOL_OCEAN, TOOL_WEATHER, TOOL_GEOFENCE)
 
-# Coastal ports registry (draft - extends orchestrator.COASTAL_PORTS which
+# Coastal ports registry (draft - extends fallback.COASTAL_PORTS which
 # today only has Kochi/Veraval/Chennai). Coords are approximate WGS84.
 COASTAL_PORTS_REGISTRY: dict[str, list[float]] = {
     "Kochi": [9.93, 76.26],
