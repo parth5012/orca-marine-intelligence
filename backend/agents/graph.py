@@ -75,6 +75,11 @@ class ORCAState(TypedDict, total=False):
     safety: dict
     evidence: list[str]
     confidence: float
+    # masked-LLM synthesis observability (ticket #33, M-A only)
+    synthesis_status: str
+    synthesis_error: dict | None
+    synthesis_elapsed_ms: int
+    masked_spans: int
 
 TIMEOUT_S = 10.0
 
@@ -331,14 +336,22 @@ async def decision_agent(state: ORCAState) -> dict:
 
     Tools:
       - combiner.combine_and_rank (weighted scoring + citation)
+      - lexical_mask.MarineGlossaryMasker (metric masking pre-LLM)
+      - synthesizer_service.synthesize_advisory (Gemini 2.5 Flash wording)
     Decision: picks best zone via closest*0.4+safe_sea*0.3+wind_ok*0.2+not_banned*0.1,
               tie-breaker wave→distance, all_unsafe→DO NOT SAIL, INCOIS citation.
+    Synthesis (ticket #33, map #30): deterministic combiner scoring/veto is
+              Code ground truth; Gemini 2.5 Flash only synthesizes wording
+              from masked placeholders (__MBEARING_/__MKNOTS_/__MDIST_/
+              __MCOORD_). LLM timeout/fail surfaces an explicit SSE error
+              event (fallback:none) — never a silent regex fallback.
     """
     fish = state.get("fish_results") or []
     sea = state.get("sea_results") or []
     weather = state.get("weather_results") or []
     danger = state.get("danger_results") or []
     user_location = state.get("user_location") or {"lat": 0, "lon": 0}
+    language = state.get("language") or "en"
 
     try:
         from backend.agents import combiner as cb  # type: ignore
@@ -425,17 +438,82 @@ async def decision_agent(state: ORCAState) -> dict:
     degraded = bool(state.get("degraded"))
     confidence = DEGRADED_CONFIDENCE if degraded or not best else DEFAULT_CONFIDENCE
 
+    # ---- Masked LLM advisory synthesis (ticket #33) ---------------------
+    # Req 1: explicit metric lexical masking in decision_agent using
+    # lexical_mask.py (bearings/knots/distances/coords -> __M*__).
+    # Req 2-4: Gemini 2.5 Flash wording via synthesizer_service with
+    # strict DO NOT SAIL veto + unmask/post-validate + explicit error.
+    # Code Trumps LLM: deterministic `explanation` stays ground truth;
+    # LLM output only becomes `reply` after validation. On LLM failure
+    # reply falls back to the deterministic explanation BUT the failure
+    # is surfaced explicitly via `synthesis_error` (SSE error event,
+    # fallback:none) — never a silent regex swap.
+    synthesis_status = "skipped"
+    synthesis_error: dict | None = None
+    synthesis_elapsed_ms = 0
+    masked_spans = 0
+    reply_text = explanation or "No fishing zones found nearby. Try expanding the search area."
+    # ARCH-01: avoid double masking — the synthesis path reuses the envelope
+    # table for masked_spans; preview-mask only the skipped path.
+    if best is None or not explanation:
+        try:
+            from backend.agents.lexical_mask import MarineGlossaryMasker
+
+            _masker = MarineGlossaryMasker()
+            _masked_preview, _mask_table = _masker.mask(explanation or "")
+            masked_spans = len(_mask_table)
+        except Exception as exc:
+            logger.warning("graph.decision: lexical mask preview failed %s", exc)
+            masked_spans = 0
+    if best is not None and explanation:
+        try:
+            from backend.agents import synthesizer_service as _synth
+
+            _envelope = await _synth.synthesize_advisory(
+                combined, language=language, user_location=user_location,
+            )
+            _llm_reply = str(_envelope.get("reply") or "").strip()
+            if _llm_reply:
+                reply_text = _llm_reply
+            synthesis_status = "success"
+            synthesis_elapsed_ms = int(_envelope.get("elapsed_ms") or 0)
+            masked_spans = len(_envelope.get("table") or {})
+        except Exception as exc:
+            # No Silent Fallback: surface the explicit SSE error event.
+            synthesis_status = "error"
+            try:
+                from backend.agents.synthesizer_service import (
+                    SynthesizerError,
+                    synthesizer_error_to_sse_event,
+                )
+
+                synthesis_error = synthesizer_error_to_sse_event(exc)
+                if isinstance(exc, SynthesizerError):
+                    synthesis_elapsed_ms = int(getattr(exc, "elapsed_ms", 0) or 0)
+            except Exception:
+                synthesis_error = {
+                    "type": "error",
+                    "agent": "decision_agent",
+                    "message": f"synthesizer failed: {exc}",
+                    "fallback": "none",
+                }
+            logger.warning("graph.decision: synthesis failed, keeping deterministic reply: %s", exc)
+
     return {
         "combined": combined,
         "best": best,
         "ranked_zones": ranked,
         "citation": citation,
         "explanation": explanation,
-        "reply": explanation or "No fishing zones found nearby. Try expanding the search area.",
+        "reply": reply_text,
         "map": {"center": center, "pfz_features": pfz_features, "route": route},
         "safety": safety,
         "evidence": evidence,
         "confidence": confidence,
+        "synthesis_status": synthesis_status,
+        "synthesis_error": synthesis_error,
+        "synthesis_elapsed_ms": synthesis_elapsed_ms,
+        "masked_spans": masked_spans,
     }
 
 
@@ -954,6 +1032,10 @@ async def orchestrate_stream_via_graph(
                 for idx, ch in enumerate(chunks):
                     suffix = " " if idx < len(chunks) - 1 else ""
                     yield {"type": "token", "text": ch + suffix}
+                # CORR-04: explicit synthesis error — never silent (fallback:none).
+                _synth_err = decision_out.get("synthesis_error")
+                if isinstance(_synth_err, dict) and _synth_err:
+                    yield _synth_err
 
     except Exception as exc:
         logger.warning("graph.stream PROTOTYPE failed: %s", exc)
