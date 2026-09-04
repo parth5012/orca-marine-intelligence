@@ -1,0 +1,248 @@
+"""
+PROTOTYPE - awaiting human approval (wayfinder #25, map #22). ROUGH DRAFT only.
+
+Dynamic planner schema for Gemini 2.5 Flash (<500ms) selective dispatch.
+
+Design (draft, to react to):
+  - Planner (LLM) picks a SUBSET of 4 specialists per query instead of
+    always running all 4 (see orchestrator.py asyncio.gather today).
+  - Combiner keeps deterministic hard veto (banned/unsafe zones never win).
+  - Clarification threshold: confidence < 0.6 -> ask GPS (do NOT fabricate).
+  - SSE order stays: status -> map -> safety -> tokens -> evidence -> done.
+  - Tools below are stubs / thin mock wrappers (no external API calls);
+    reasoning_trace records WHY each tool was selected (auditable).
+
+Do NOT wire into graph.py / orchestrator.py until human approves direction.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal, Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+# ---------------------------------------------------------------------------
+# Planner contract constants (draft - human to confirm)
+# ---------------------------------------------------------------------------
+
+PLANNER_MODEL = "gemini-2.5-flash"  # primary; <500ms budget per ticket #25
+PLANNER_TIMEOUT_MS = 500
+
+CLARIFICATION_THRESHOLD = 0.6  # confidence < 0.6 -> ask GPS, never guess
+
+# Tool ids the planner may select (subset per query - selective dispatch).
+TOOL_FIND_FISH = "find_fishing_zones"
+TOOL_OCEAN = "check_ocean_state"
+TOOL_WEATHER = "check_weather"
+TOOL_GEOFENCE = "check_geofence"
+KNOWN_TOOLS: tuple[str, ...] = (TOOL_FIND_FISH, TOOL_OCEAN, TOOL_WEATHER, TOOL_GEOFENCE)
+
+# Coastal ports registry (draft - extends orchestrator.COASTAL_PORTS which
+# today only has Kochi/Veraval/Chennai). Coords are approximate WGS84.
+COASTAL_PORTS_REGISTRY: dict[str, list[float]] = {
+    "Munambam": [10.18, 76.17],
+    "Beypore": [11.16, 75.80],
+    "Kollam": [8.88, 76.57],
+    "Vizag": [17.69, 83.29],  # Visakhapatnam alias
+    "Visakhapatnam": [17.69, 83.29],
+    "Veraval": [21.60, 69.60],
+}
+
+PLANNER_SYSTEM_PROMPT: str = """You are ORCA's dynamic query planner (model: gemini-2.5-flash, budget <500ms).
+Pick the MINIMAL subset of specialist tools needed for the user query. Be deterministic and auditable.
+
+Available tools (exact names):
+- find_fishing_zones(lat, lon, radius_km): PFZ discovery. Run when user asks where fish / zones / catch.
+- check_ocean_state(zones): waves + currents (OSF). Run when safety/sea/sail question OR when fish zones need a safety badge.
+- check_weather(zones): wind + cyclone 500km (IMD). Run when weather/wind/cyclone/safety question OR fish zones need badge.
+- check_geofence(zones): EEZ/MPA/IMBL legality. Run ALWAYS when recommending a zone to sail to (Combiner hard-vetoes banned zones).
+
+Coastal ports registry (lat, lon) - resolve port mentions to GPS, record confidence:
+- Munambam: 10.18, 76.17
+- Beypore: 11.16, 75.80
+- Kollam: 8.88, 76.57
+- Vizag (Visakhapatnam): 17.69, 83.29
+- Veraval: 21.60, 69.60
+(Also known: Kochi 9.93, 76.26; Chennai 13.08, 80.27.)
+
+Rules:
+1. Output ONLY the PlannerOutput JSON schema (detected_language, target_location{lat,lon,port_name,confidence}, intents, confidence, reasoning_trace, selected_tools).
+2. reasoning_trace MUST have one line per selected/skipped tool explaining WHY (auditable).
+3. If target_location.confidence < 0.6 or overall confidence < 0.6, select NO tools and ask for GPS (clarification). Never fabricate coordinates.
+4. Safety questions without fish intent skip find_fishing_zones; reuse caller-supplied zones.
+5. Downstream SSE order is fixed: status -> map -> safety -> tokens -> evidence -> done. Combiner hard-vetoes unsafe/banned zones regardless of planner scores.
+6. Keep <500ms: short trace lines, no prose outside schema.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schema
+# ---------------------------------------------------------------------------
+
+
+class TargetLocation(BaseModel):
+    """Resolved fishing / safety location (None lat/lon = unknown -> clarify)."""
+
+    lat: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    lon: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
+    port_name: Optional[str] = Field(default=None, description="Matched registry port, if any")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class PlannerOutput(BaseModel):
+    """LLM planner decision - which tools to run and why (auditable)."""
+
+    detected_language: str = Field(default="en", description="BCP-47-ish code, e.g. en/ml/ta/hi")
+    target_location: TargetLocation = Field(default_factory=TargetLocation)
+    intents: list[str] = Field(default_factory=list, description="e.g. ['find_fish','check_safety']")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reasoning_trace: list[str] = Field(
+        default_factory=list,
+        description="One string per tool decision (selected or skipped + why).",
+    )
+    selected_tools: list[str] = Field(
+        default_factory=list,
+        description="Subset of [find_fishing_zones, check_ocean_state, check_weather, check_geofence]",
+    )
+
+    @field_validator("selected_tools")
+    @classmethod
+    def _known_tools(cls, v: list[str]) -> list[str]:
+        unknown = [t for t in v if t not in KNOWN_TOOLS]
+        if unknown:
+            raise ValueError(f"unknown tools {unknown}; known={list(KNOWN_TOOLS)}")
+        # de-dupe, preserve order
+        seen: list[str] = []
+        for t in v:
+            if t not in seen:
+                seen.append(t)
+        return seen
+
+    def needs_clarification(self, threshold: float = CLARIFICATION_THRESHOLD) -> bool:
+        """True when planner must ask for GPS instead of dispatching tools."""
+        if self.confidence < threshold:
+            return True
+        loc = self.target_location
+        if loc.lat is None or loc.lon is None:
+            return True
+        if loc.confidence < threshold:
+            return True
+        return False
+
+    def to_tool_plan(self) -> list[dict[str, Any]]:
+        """Human-readable dispatch plan for demo/logging (no side effects).
+
+        Matches each selected tool to the trace line mentioning it, so
+        SKIP lines for non-selected tools never misalign the display.
+        """
+        plan: list[dict[str, Any]] = []
+        for t in self.selected_tools:
+            why = next((line for line in self.reasoning_trace if t in line), "")
+            plan.append({"tool": t, "why": why})
+        return plan
+
+
+# ---------------------------------------------------------------------------
+# Typed tool signatures (PROTOTYPE stubs - mock-only, no external calls)
+# ---------------------------------------------------------------------------
+# NOTE: names intentionally mirror the 4 specialists. They are thin wrappers
+# over backend/ingest/mock_fetchers.py so the demo runs offline. Real wiring
+# (PostGIS/OSF/IMD) happens only after human approves this shape.
+
+
+def find_fishing_zones(lat: float, lon: float, radius_km: float = 80.0) -> dict:
+    """PROTOTYPE stub: find PFZ zones near (lat, lon) within radius_km.
+
+    Mock-only: delegates to mock_fetch_incois_pfz (SEC005, 5 zones).
+    Returns envelope {status, summary, next_actions, artifacts, features}.
+    """
+    try:
+        from backend.ingest.mock_fetchers import mock_fetch_incois_pfz
+
+        return mock_fetch_incois_pfz(sector="SEC005", center_lat=lat, center_lon=lon, count=5)
+    except Exception as exc:  # offline-safe hardcoded fallback
+        return {
+            "status": "success",
+            "summary": f"PROTOTYPE fallback PFZ near ({lat},{lon}) r={radius_km}km ({exc})",
+            "next_actions": ["call combiner"],
+            "artifacts": ["data/pfz-today.geojson"],
+            "features": [],
+        }
+
+
+def check_ocean_state(zones: list[dict], scenario: str = "normal") -> dict:
+    """PROTOTYPE stub: wave/current per zone (mock OSF SWAN 06Z).
+
+    Args:
+        zones: shared candidate points (flat or GeoJSON Features).
+        scenario: normal | rough_seas | cyclone_warning | border_violation.
+    Returns mock_fetch_osf_ocean_state envelope (deterministic, offline).
+    """
+    try:
+        from backend.ingest.mock_fetchers import mock_fetch_osf_ocean_state
+
+        return mock_fetch_osf_ocean_state(zones or [], scenario=scenario)
+    except Exception as exc:
+        return {
+            "status": "error",
+            "summary": f"PROTOTYPE ocean fallback ({exc})",
+            "next_actions": ["mark sea unknown, downgrade confidence 0.87->0.62"],
+            "artifacts": [],
+            "results": [],
+        }
+
+
+def check_weather(zones: list[dict], scenario: str = "normal") -> dict:
+    """PROTOTYPE stub: wind + 500km cyclone alert per zone (mock IMD).
+
+    Returns mock_fetch_imd_marine_weather envelope (deterministic, offline).
+    """
+    try:
+        from backend.ingest.mock_fetchers import mock_fetch_imd_marine_weather
+
+        return mock_fetch_imd_marine_weather(zones or [], scenario=scenario)
+    except Exception as exc:
+        return {
+            "status": "error",
+            "summary": f"PROTOTYPE weather fallback ({exc})",
+            "next_actions": ["mark wind unknown, downgrade confidence 0.87->0.62"],
+            "artifacts": [],
+            "results": [],
+            "cyclones": [],
+        }
+
+
+def check_geofence(zones: list[dict], scenario: str = "normal") -> dict:
+    """PROTOTYPE stub: EEZ/MPA/IMBL legality per zone (mock boundaries).
+
+    Returns mock_check_geofence_boundaries envelope. Combiner applies hard
+    veto on restricted zones regardless of planner scores (deterministic).
+    """
+    try:
+        from backend.ingest.mock_fetchers import mock_check_geofence_boundaries
+
+        return mock_check_geofence_boundaries(zones or [], scenario=scenario)
+    except Exception as exc:
+        return {
+            "status": "error",
+            "summary": f"PROTOTYPE geofence fallback ({exc})",
+            "next_actions": ["treat zones as restricted, ask human"],
+            "artifacts": [],
+            "results": [],
+        }
+
+
+__all__ = [
+    "CLARIFICATION_THRESHOLD",
+    "COASTAL_PORTS_REGISTRY",
+    "KNOWN_TOOLS",
+    "PLANNER_MODEL",
+    "PLANNER_SYSTEM_PROMPT",
+    "PLANNER_TIMEOUT_MS",
+    "PlannerOutput",
+    "TargetLocation",
+    "find_fishing_zones",
+    "check_ocean_state",
+    "check_weather",
+    "check_geofence",
+]

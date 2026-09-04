@@ -16,8 +16,8 @@ It is retained for:
 
 For current production, `orchestrator.orchestrate()` delegates to
 `backend/agents/graph.py:orchestrate_via_graph` where sub-agents
-(planner, fish_discovery_agent, ocean_analytics_agent,
-weather_intel_agent, geospatial_risk_agent, decision_agent)
+(planner, fish_finder, sea_checker,
+weather_agent, danger_agent, decision_agent)
 decide and call tools (PostGIS, OSF, IMD, GeoJSON).
 
 TODO (future):

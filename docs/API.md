@@ -254,7 +254,7 @@ X-Accel-Buffering: no
 
 | `type` | When | Payload | Frontend Action |
 |--------|------|---------|-----------------|
-| `status` | Agent start/done | `{"type":"status","agent":"fish_finder|sea_checker|weather_agent|danger_agent","state":"running|done|timeout","elapsed_ms":123}` | Show spinner in `ChatPanel` |
+| `status` | Agent start/done | `{"type":"status","agent":"planner|fish_finder|sea_checker|weather_agent|danger_agent|parallel_analysis|decision_agent","state":"running|done|timeout","elapsed_ms":123}` | Show spinner in `ChatPanel` |
 | `token` | Reply chunk (Bhashini-translated) | `{"type":"token","text":"Pallithottam "}` | Append to streaming bubble |
 | `map` | Combiner picks winner | `{"type":"map","center":[76.167,8.555],"pfz_features":[...],"route":[[76.27,9.93],[76.167,8.555]]}` | `onMapHighlight(features)` → `MapView.tsx:30` flyTo + draw route |
 | `safety` | After sea/weather/danger | `{"type":"safety","waves_m":0.8,"wind_kts":8,"danger":"none","badge":"green"}` | Update `SafetyBadge.tsx` |

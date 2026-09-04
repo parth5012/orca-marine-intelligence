@@ -377,8 +377,8 @@ async def orchestrate(query: str, language: str, location: dict | None = None, s
     """
     Main entry point for the ORCA brain — always via LangGraph supervisor.
 
-    SIH26176 Agentic AI: sub-agents (planner, fish_discovery, ocean,
-    weather, geospatial, decision) decide and call tools (PostGIS,
+    SIH26176 Agentic AI: sub-agents (planner, fish_finder, sea_checker,
+    weather_agent, danger_agent, decision) decide and call tools (PostGIS,
     OSF, IMD, GeoJSON). Deterministic gather fallback is isolated in
     backend/agents/fallback.py for future edge/offline use.
 
