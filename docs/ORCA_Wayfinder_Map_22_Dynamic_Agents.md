@@ -20,7 +20,7 @@ Transform ORCA's multi-agent system into a true dynamic reasoning Agentic AI pla
 
 ## Next Wayfinder Map
 
-- [Map 30: Full Dynamic LLM Reasoning Implementation](file:///D:/work/projects/orca-marine-intelligence/docs/ORCA_Wayfinder_Map_30_LLM_Reasoning_Implementation.md) — Follow-up AFK implementation plan spawned from Ticket #24 grilling.
+- [Map 30: Full Dynamic LLM Reasoning Implementation](https://github.com/parth5012/orca-marine-intelligence/issues/30) — Follow-up AFK implementation plan spawned from Ticket #24 grilling.
 
 ## Completed Tickets in Map 22
 
