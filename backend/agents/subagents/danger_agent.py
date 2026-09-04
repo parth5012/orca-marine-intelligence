@@ -49,16 +49,19 @@ TIMEOUT_S = 10.0
 
 # Resolve GeoJSON files relative to project root
 _GEOJSON_CANDIDATES_EEZ = [
+    Path(__file__).resolve().parents[3] / "data" / "eez.geojson",
     Path(__file__).resolve().parents[2] / "data" / "eez.geojson",
     Path(__file__).resolve().parents[1] / ".." / "data" / "eez.geojson",
     Path.cwd() / "data" / "eez.geojson",
 ]
 _GEOJSON_CANDIDATES_MPA = [
+    Path(__file__).resolve().parents[3] / "data" / "mpa.geojson",
     Path(__file__).resolve().parents[2] / "data" / "mpa.geojson",
     Path(__file__).resolve().parents[1] / ".." / "data" / "mpa.geojson",
     Path.cwd() / "data" / "mpa.geojson",
 ]
 _GEOJSON_CANDIDATES_IMBL = [
+    Path(__file__).resolve().parents[3] / "data" / "imbl.geojson",
     Path(__file__).resolve().parents[2] / "data" / "imbl.geojson",
     Path(__file__).resolve().parents[1] / ".." / "data" / "imbl.geojson",
     Path.cwd() / "data" / "imbl.geojson",

@@ -38,6 +38,9 @@ docker-compose.override.yml
 # Data (large files — keep only .geojson samples)
 data/*.csv
 data/*.nc
+data/*.zip
+data/*.parquet
+data/marine_data_package/
 
 # Harness — per-member work logs (gitignored to avoid merge conflicts between M-A/B/C/D/E)
 # General harness is tracked: AGENTS.md, docs/notion/*

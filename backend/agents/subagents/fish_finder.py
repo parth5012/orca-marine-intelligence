@@ -27,8 +27,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Resolved GeoJSON path — backend/agents/fish_finder.py -> project root / data/pfz-today.geojson
+# Resolved GeoJSON path — backend/agents/subagents/fish_finder.py -> project root / data/pfz-today.geojson
 _GEOJSON_CANDIDATES = [
+    Path(__file__).resolve().parents[3] / "data" / "pfz-today.geojson",
     Path(__file__).resolve().parents[2] / "data" / "pfz-today.geojson",
     Path(__file__).resolve().parents[1] / ".." / "data" / "pfz-today.geojson",
     Path.cwd() / "data" / "pfz-today.geojson",

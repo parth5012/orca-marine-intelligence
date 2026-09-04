@@ -218,7 +218,7 @@ async def fish_finder(state: ORCAState) -> dict:
     lat = float(user_location["lat"])
     lon = float(user_location["lon"])
     try:
-        from backend.agents import fish_finder as ff  # type: ignore
+        from backend.agents.subagents import fish_finder as ff  # type: ignore
 
         res = await asyncio.wait_for(ff.find_fishing_zones(lat=lat, lon=lon, radius_km=80.0), timeout=TIMEOUT_S)
         if not isinstance(res, list):
@@ -245,7 +245,7 @@ async def sea_checker(state: ORCAState) -> dict:
     if not fish:
         return {"sea_results": []}
     try:
-        from backend.agents import sea_checker as sc  # type: ignore
+        from backend.agents.subagents import sea_checker as sc  # type: ignore
 
         res = await asyncio.wait_for(sc.check_sea_conditions(fish), timeout=TIMEOUT_S)
         return {"sea_results": res if isinstance(res, list) else _degraded_sea(fish)}
@@ -269,7 +269,7 @@ async def weather_agent(state: ORCAState) -> dict:
     if not fish:
         return {"weather_results": []}
     try:
-        from backend.agents import weather_agent as wa  # type: ignore
+        from backend.agents.subagents import weather_agent as wa  # type: ignore
 
         res = await asyncio.wait_for(wa.check_weather(fish), timeout=TIMEOUT_S)
         return {"weather_results": res if isinstance(res, list) else _degraded_weather(fish)}
@@ -295,7 +295,7 @@ async def danger_agent(state: ORCAState) -> dict:
     if not fish:
         return {"danger_results": []}
     try:
-        from backend.agents import danger_agent as da  # type: ignore
+        from backend.agents.subagents import danger_agent as da  # type: ignore
 
         # Use batch helper if available (preserves order, respects shared points)
         if hasattr(da, "check_safety_batch"):
