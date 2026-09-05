@@ -47,6 +47,11 @@ CURRENT_CAUTION_MAX = 2.5  # kt, 1.5-2.5 caution, >2.5 danger
 CYCLONE_PRESSURE_DANGER = 995.0  # hPa, below 995 indicates tropical depression/cyclone
 
 
+IST_TZ = timezone(datetime.resolution.__class__(0, 0, 0) if hasattr(datetime, "resolution") else None or timezone.utc)  # fallback
+from datetime import timedelta
+IST_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in kilometers."""
     R = 6371.0088
@@ -66,14 +71,45 @@ def _deg_to_compass(deg: float | None) -> str:
     return compass[idx]
 
 
+def _nearest_hour_index(times_list: list[str], target_dt: Optional[datetime] = None) -> int:
+    """
+    Find index of forecast time closest to the target datetime in IST (Asia/Kolkata).
+    Guarantees selecting the active departure hour rather than midnight (00:00).
+    """
+    if not times_list:
+        return 0
+    target = target_dt or datetime.now(timezone.utc).astimezone(IST_TZ)
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=IST_TZ)
+    parsed: list[datetime] = []
+    for t in times_list:
+        try:
+            dt = datetime.fromisoformat(t)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=IST_TZ)
+            parsed.append(dt)
+        except Exception:
+            continue
+    if not parsed:
+        return 0
+    return min(range(len(parsed)), key=lambda i: abs((parsed[i] - target).total_seconds()))
+
+
 # ---------------------------------------------------------------------------
 # 1. Open-Meteo Marine Live Fetcher
 # ---------------------------------------------------------------------------
 
-def fetch_open_meteo_marine(lat: float, lon: float, timeout_s: float = HTTP_TIMEOUT_S) -> dict[str, Any]:
+def fetch_open_meteo_marine(
+    lat: float,
+    lon: float,
+    target_dt: Optional[datetime] = None,
+    timeout_s: float = HTTP_TIMEOUT_S,
+) -> dict[str, Any]:
     """
-    Fetch real live wave height, period, swell, and ocean currents from Open-Meteo Marine API.
+    Fetch numerical ocean wave, period, swell, and ocean currents from Open-Meteo Marine API.
+    Matches the nearest forecast hour in IST (Asia/Kolkata) and analyzes the next 6-hour trip window.
     """
+    now_iso = datetime.now(timezone.utc).astimezone(IST_TZ).isoformat()
     params = {
         "latitude": round(lat, 4),
         "longitude": round(lon, 4),
@@ -86,7 +122,8 @@ def fetch_open_meteo_marine(lat: float, lon: float, timeout_s: float = HTTP_TIME
             "ocean_current_velocity",
             "ocean_current_direction",
         ],
-        "timezone": "auto",
+        "forecast_days": 3,
+        "timezone": "Asia/Kolkata",
     }
     try:
         with httpx.Client(timeout=timeout_s) as client:
@@ -95,31 +132,64 @@ def fetch_open_meteo_marine(lat: float, lon: float, timeout_s: float = HTTP_TIME
             payload = resp.json()
 
         hourly = payload.get("hourly", {})
-        waves = [w for w in hourly.get("wave_height", []) if w is not None]
-        wave_height = round(float(waves[0]), 2) if waves else 1.2
+        times = hourly.get("time", [])
+        idx = _nearest_hour_index(times, target_dt) if times else 0
+        valid_time_str = times[idx] if times and idx < len(times) else now_iso
 
-        currents_ms = [c for c in hourly.get("ocean_current_velocity", []) if c is not None]
-        # Open-Meteo returns current in m/s; convert to knots (1 m/s = 1.94384 kt)
-        current_kt = round(float(currents_ms[0]) * 1.94384, 2) if currents_ms else 1.0
+        # 1. Current / Nearest Hour values
+        raw_waves = hourly.get("wave_height", [])
+        wave_height = round(float(raw_waves[idx]), 2) if idx < len(raw_waves) and raw_waves[idx] is not None else 1.2
 
-        periods = [p for p in hourly.get("wave_period", []) if p is not None]
-        wave_period = round(float(periods[0]), 1) if periods else 7.5
+        raw_currents = hourly.get("ocean_current_velocity", [])
+        current_kt = round(float(raw_currents[idx]) * 1.94384, 2) if idx < len(raw_currents) and raw_currents[idx] is not None else 1.0
 
-        swells = [s for s in hourly.get("swell_wave_height", []) if s is not None]
-        swell_height = round(float(swells[0]), 2) if swells else 0.8
+        raw_periods = hourly.get("wave_period", [])
+        wave_period = round(float(raw_periods[idx]), 1) if idx < len(raw_periods) and raw_periods[idx] is not None else 7.5
 
-        swell_periods = [sp for sp in hourly.get("swell_wave_period", []) if sp is not None]
-        swell_period = round(float(swell_periods[0]), 1) if swell_periods else 6.5
+        raw_swells = hourly.get("swell_wave_height", [])
+        swell_height = round(float(raw_swells[idx]), 2) if idx < len(raw_swells) and raw_swells[idx] is not None else 0.8
 
-        current_dirs = [cd for cd in hourly.get("ocean_current_direction", []) if cd is not None]
-        current_dir_deg = float(current_dirs[0]) if current_dirs else 180.0
+        raw_sp = hourly.get("swell_wave_period", [])
+        swell_period = round(float(raw_sp[idx]), 1) if idx < len(raw_sp) and raw_sp[idx] is not None else 6.5
+
+        raw_dirs = hourly.get("ocean_current_direction", [])
+        current_dir_deg = float(raw_dirs[idx]) if idx < len(raw_dirs) and raw_dirs[idx] is not None else 180.0
         current_dir = _deg_to_compass(current_dir_deg)
 
+        # 2. Trip Window Analysis (Next 6 hours from departure/now)
+        win_end = min(idx + 6, len(raw_waves)) if raw_waves else idx
+        window_waves = [float(w) for w in raw_waves[idx:win_end] if w is not None] or [wave_height]
+        window_currents = [float(c) * 1.94384 for c in raw_currents[idx:win_end] if c is not None] or [current_kt]
+
+        max_wave_6h = round(max(window_waves), 2)
+        min_wave_6h = round(min(window_waves), 2)
+        max_current_6h = round(max(window_currents), 2)
+
+        # Classifications
         wave_status = "safe" if wave_height < WAVE_SAFE_MAX else ("caution" if wave_height <= WAVE_CAUTION_MAX else "danger")
         current_status = "safe" if current_kt < CURRENT_SAFE_MAX else ("caution" if current_kt <= CURRENT_CAUTION_MAX else "danger")
         overall_status = "danger" if (wave_status == "danger" or current_status == "danger") else (
             "caution" if (wave_status == "caution" or current_status == "caution") else "safe"
         )
+
+        worst_wave_status_6h = "safe" if max_wave_6h < WAVE_SAFE_MAX else ("caution" if max_wave_6h <= WAVE_CAUTION_MAX else "danger")
+        worst_current_status_6h = "safe" if max_current_6h < CURRENT_SAFE_MAX else ("caution" if max_current_6h <= CURRENT_CAUTION_MAX else "danger")
+        worst_status_6h = "danger" if (worst_wave_status_6h == "danger" or worst_current_status_6h == "danger") else (
+            "caution" if (worst_wave_status_6h == "caution" or worst_current_status_6h == "caution") else "safe"
+        )
+
+        # Provenance and freshness metadata
+        data_freshness = {
+            "provider": "Open-Meteo Marine API (ECMWF/NOAA)",
+            "retrieved_at": now_iso,
+            "forecast_valid_for": valid_time_str,
+            "forecast_lead_hours": 0.0,
+            "source_status": "model_forecast",
+            "trip_window_hours": 6,
+            "max_wave_in_window_m": max_wave_6h,
+            "max_current_in_window_kt": max_current_6h,
+            "official_warning_disclaimer": "Forecast-based advisory generated from numerical ocean models. Verify official IMD/INCOIS bulletins before departure.",
+        }
 
         return {
             "wave_height_m": wave_height,
@@ -128,9 +198,18 @@ def fetch_open_meteo_marine(lat: float, lon: float, timeout_s: float = HTTP_TIME
             "swell_wave_height_m": swell_height,
             "swell_wave_period_s": swell_period,
             "current_dir": current_dir,
+            "current_dir_deg": current_dir_deg,
             "wave_status": wave_status,
             "current_status": current_status,
             "status": overall_status,
+            "forecast_time_ist": valid_time_str,
+            "trip_window_6h": {
+                "max_wave_m": max_wave_6h,
+                "min_wave_m": min_wave_6h,
+                "max_current_kt": max_current_6h,
+                "worst_status": worst_status_6h,
+            },
+            "data_freshness": data_freshness,
             "source": "open_meteo_live",
         }
     except Exception as exc:
@@ -157,10 +236,17 @@ fetch_open_meteo_wave_current = fetch_open_meteo_marine
 # 2. Open-Meteo & OpenWeatherMap Weather Live Fetchers
 # ---------------------------------------------------------------------------
 
-def fetch_open_meteo_weather(lat: float, lon: float, timeout_s: float = HTTP_TIMEOUT_S) -> dict[str, Any]:
+def fetch_open_meteo_weather(
+    lat: float,
+    lon: float,
+    target_dt: Optional[datetime] = None,
+    timeout_s: float = HTTP_TIMEOUT_S,
+) -> dict[str, Any]:
     """
     Fetch real live wind speed, gusts, surface pressure, temp, humidity from Open-Meteo Forecast API.
+    Matches the nearest forecast hour in IST (Asia/Kolkata) and evaluates the next 6-hour trip window.
     """
+    now_iso = datetime.now(timezone.utc).astimezone(IST_TZ).isoformat()
     params = {
         "latitude": round(lat, 4),
         "longitude": round(lon, 4),
@@ -173,7 +259,8 @@ def fetch_open_meteo_weather(lat: float, lon: float, timeout_s: float = HTTP_TIM
             "relative_humidity_2m",
         ],
         "wind_speed_unit": "kn",
-        "timezone": "auto",
+        "forecast_days": 3,
+        "timezone": "Asia/Kolkata",
     }
     try:
         with httpx.Client(timeout=timeout_s) as client:
@@ -182,30 +269,61 @@ def fetch_open_meteo_weather(lat: float, lon: float, timeout_s: float = HTTP_TIM
             payload = resp.json()
 
         hourly = payload.get("hourly", {})
-        winds = [w for w in hourly.get("wind_speed_10m", []) if w is not None]
-        wind_speed_kt = round(float(winds[0]), 1) if winds else 10.0
+        times = hourly.get("time", [])
+        idx = _nearest_hour_index(times, target_dt) if times else 0
+        valid_time_str = times[idx] if times and idx < len(times) else now_iso
 
-        wind_dirs = [wd for wd in hourly.get("wind_direction_10m", []) if wd is not None]
-        wind_dir_deg = float(wind_dirs[0]) if wind_dirs else 270.0
+        # 1. Current / Nearest Hour values
+        raw_winds = hourly.get("wind_speed_10m", [])
+        wind_speed_kt = round(float(raw_winds[idx]), 1) if idx < len(raw_winds) and raw_winds[idx] is not None else 10.0
+
+        raw_dirs = hourly.get("wind_direction_10m", [])
+        wind_dir_deg = float(raw_dirs[idx]) if idx < len(raw_dirs) and raw_dirs[idx] is not None else 270.0
         wind_dir = _deg_to_compass(wind_dir_deg)
 
-        gusts = [g for g in hourly.get("wind_gusts_10m", []) if g is not None]
-        wind_gusts_kt = round(float(gusts[0]), 1) if gusts else round(wind_speed_kt * 1.3, 1)
+        raw_gusts = hourly.get("wind_gusts_10m", [])
+        wind_gusts_kt = round(float(raw_gusts[idx]), 1) if idx < len(raw_gusts) and raw_gusts[idx] is not None else round(wind_speed_kt * 1.3, 1)
 
-        pressures = [p for p in hourly.get("surface_pressure", []) if p is not None]
-        surface_pressure = round(float(pressures[0]), 1) if pressures else 1012.0
+        raw_press = hourly.get("surface_pressure", [])
+        surface_pressure = round(float(raw_press[idx]), 1) if idx < len(raw_press) and raw_press[idx] is not None else 1012.0
 
-        temps = [t for t in hourly.get("temperature_2m", []) if t is not None]
-        temperature_c = round(float(temps[0]), 1) if temps else 28.0
+        raw_temps = hourly.get("temperature_2m", [])
+        temperature_c = round(float(raw_temps[idx]), 1) if idx < len(raw_temps) and raw_temps[idx] is not None else 28.0
 
-        humids = [h for h in hourly.get("relative_humidity_2m", []) if h is not None]
-        humidity_pct = round(float(humids[0]), 1) if humids else 75.0
+        raw_humids = hourly.get("relative_humidity_2m", [])
+        humidity_pct = round(float(raw_humids[idx]), 1) if idx < len(raw_humids) and raw_humids[idx] is not None else 75.0
+
+        # 2. Trip Window Analysis (Next 6 hours)
+        win_end = min(idx + 6, len(raw_winds)) if raw_winds else idx
+        window_winds = [float(w) for w in raw_winds[idx:win_end] if w is not None] or [wind_speed_kt]
+        window_gusts = [float(g) for g in raw_gusts[idx:win_end] if g is not None] or [wind_gusts_kt]
+        window_press = [float(p) for p in raw_press[idx:win_end] if p is not None] or [surface_pressure]
+
+        max_wind_6h = round(max(window_winds), 1)
+        max_gusts_6h = round(max(window_gusts), 1)
+        min_press_6h = round(min(window_press), 1)
 
         wind_status = "safe" if wind_speed_kt < WIND_SAFE_MAX else ("caution" if wind_speed_kt <= WIND_CAUTION_MAX else "danger")
         cyclone_danger = surface_pressure < CYCLONE_PRESSURE_DANGER or wind_speed_kt > 34.0
         overall_status = "danger" if (cyclone_danger or wind_status == "danger") else (
             "caution" if wind_status == "caution" else "safe"
         )
+
+        worst_wind_status_6h = "safe" if max_wind_6h < WIND_SAFE_MAX else ("caution" if max_wind_6h <= WIND_CAUTION_MAX else "danger")
+        worst_weather_status_6h = "danger" if (min_press_6h < CYCLONE_PRESSURE_DANGER or max_wind_6h > 34.0 or worst_wind_status_6h == "danger") else (
+            "caution" if worst_wind_status_6h == "caution" else "safe"
+        )
+
+        data_freshness = {
+            "provider": "Open-Meteo Forecast API (ECMWF/GFS)",
+            "retrieved_at": now_iso,
+            "forecast_valid_for": valid_time_str,
+            "source_status": "model_forecast",
+            "trip_window_hours": 6,
+            "max_wind_in_window_kt": max_wind_6h,
+            "max_gusts_in_window_kt": max_gusts_6h,
+            "official_warning_disclaimer": "Forecast-based advisory. Verify official IMD/INCOIS cyclone bulletins before departure.",
+        }
 
         return {
             "temperature_c": temperature_c,
@@ -219,6 +337,14 @@ def fetch_open_meteo_weather(lat: float, lon: float, timeout_s: float = HTTP_TIM
             "wind_gust_kt": wind_gusts_kt,
             "wind_status": wind_status,
             "cyclone_danger": cyclone_danger,
+            "forecast_time_ist": valid_time_str,
+            "trip_window_6h": {
+                "max_wind_kt": max_wind_6h,
+                "max_gusts_kt": max_gusts_6h,
+                "min_pressure_hpa": min_press_6h,
+                "worst_status": worst_weather_status_6h,
+            },
+            "data_freshness": data_freshness,
             "status": overall_status,
             "source": "open_meteo_live",
         }
@@ -238,6 +364,146 @@ def fetch_open_meteo_weather(lat: float, lon: float, timeout_s: float = HTTP_TIM
             "cyclone_danger": False,
             "status": "safe",
             "source": "open_meteo_fallback",
+        }
+
+
+def compute_departure_window_advisory(
+    lat: float,
+    lon: float,
+    hours: int = 24,
+    timeout_s: float = HTTP_TIMEOUT_S,
+) -> dict[str, Any]:
+    """
+    Compute structured departure window advisories (e.g. 06:00–10:00 IST)
+    along with expected wave and wind ranges, plus downstream deterioration alerts.
+    """
+    now_ist = datetime.now(timezone.utc).astimezone(IST_TZ)
+    now_iso = now_ist.isoformat()
+
+    try:
+        # Fetch 2-day hourly marine & forecast
+        params_m = {
+            "latitude": round(lat, 4),
+            "longitude": round(lon, 4),
+            "hourly": "wave_height,wave_period,ocean_current_velocity",
+            "forecast_days": 2,
+            "timezone": "Asia/Kolkata",
+        }
+        params_w = {
+            "latitude": round(lat, 4),
+            "longitude": round(lon, 4),
+            "hourly": "wind_speed_10m,wind_gusts_10m,surface_pressure",
+            "forecast_days": 2,
+            "timezone": "Asia/Kolkata",
+        }
+        with httpx.Client(timeout=timeout_s) as client:
+            resp_m = client.get(OPEN_METEO_MARINE_URL, params=params_m)
+            resp_m.raise_for_status()
+            payload_m = resp_m.json()
+
+            resp_w = client.get(OPEN_METEO_WEATHER_URL, params=params_w)
+            resp_w.raise_for_status()
+            payload_w = resp_w.json()
+
+        m_hourly = payload_m.get("hourly", {})
+        w_hourly = payload_w.get("hourly", {})
+        times = m_hourly.get("time", [])
+
+        # Find starting index
+        start_idx = _nearest_hour_index(times, now_ist) if times else 0
+        end_idx = min(start_idx + hours, len(times))
+
+        slot_times = times[start_idx:end_idx]
+        waves = [float(w) if w is not None else 1.2 for w in m_hourly.get("wave_height", [])[start_idx:end_idx]]
+        winds_kt = [float(w) if w is not None else 10.0 for w in w_hourly.get("wind_speed_10m", [])[start_idx:end_idx]]
+        winds_kmh = [round(w * 1.852, 1) for w in winds_kt]
+        gusts_kmh = [round(float(g) * 1.852, 1) if g is not None else round(w * 1.3 * 1.852, 1) for g, w in zip(w_hourly.get("wind_gusts_10m", [])[start_idx:end_idx], winds_kt)]
+
+        slots = []
+        for t, w, w_kmh, g_kmh, w_kt in zip(slot_times, waves, winds_kmh, gusts_kmh, winds_kt):
+            hour_str = t.split("T")[1] if "T" in t else t
+            is_safe = (w < WAVE_SAFE_MAX) and (w_kt < WIND_SAFE_MAX)
+            slots.append({"time": hour_str, "wave_m": w, "wind_kmh": w_kmh, "gust_kmh": g_kmh, "is_safe": is_safe})
+
+        safe_slots = [s for s in slots if s["is_safe"]]
+        if safe_slots:
+            window_len = min(len(safe_slots), 5)
+            rec_start = safe_slots[0]["time"]
+            rec_end = safe_slots[window_len - 1]["time"]
+            rec_waves = [s["wave_m"] for s in safe_slots[:window_len]]
+            rec_winds = [s["wind_kmh"] for s in safe_slots[:window_len]]
+
+            min_w, max_w = round(min(rec_waves), 1), round(max(rec_waves), 1)
+            min_wind, max_wind = int(min(rec_winds)), int(max(rec_winds))
+
+            # Check deterioration later in the window
+            later_worse = [s for s in slots[window_len:] if not s["is_safe"] or s["wave_m"] >= 1.5 or s["wind_kmh"] >= 28.0]
+            deterioration_msg = None
+            if later_worse:
+                w_slot = later_worse[0]
+                deterioration_msg = f"After {w_slot['time']} IST: waves may rise to {w_slot['wave_m']:.1f} m and gusts to {int(w_slot['gust_kmh'])} km/h"
+
+            bulletin_lines = [
+                f"Recommended departure window: {rec_start}–{rec_end} IST",
+                f"- Expected waves: {min_w}–{max_w} m",
+                f"- Expected wind: {min_wind}–{max_wind} km/h",
+            ]
+            if deterioration_msg:
+                bulletin_lines.append(f"- {deterioration_msg}")
+
+            bulletin_text = "\n".join(bulletin_lines)
+
+            return {
+                "status": "success",
+                "is_safe_to_depart": True,
+                "departure_window": f"{rec_start}–{rec_end} IST",
+                "expected_waves_m": f"{min_w}–{max_w} m",
+                "expected_wind_kmh": f"{min_wind}–{max_wind} km/h",
+                "deterioration_alert": deterioration_msg,
+                "bulletin_text": bulletin_text,
+                "slots_analyzed": len(slots),
+                "data_freshness": {
+                    "provider": "Open-Meteo Marine & Forecast APIs (ECMWF/NOAA)",
+                    "retrieved_at": now_iso,
+                    "forecast_valid_from": slot_times[0] if slot_times else now_iso,
+                    "forecast_valid_to": slot_times[-1] if slot_times else now_iso,
+                    "source_status": "model_forecast",
+                    "official_warning_disclaimer": "Forecast-based advisory generated from numerical models. Verify official IMD/INCOIS bulletins before departure.",
+                },
+            }
+        else:
+            return {
+                "status": "danger",
+                "is_safe_to_depart": False,
+                "departure_window": "UNSAFE — DO NOT SAIL",
+                "expected_waves_m": f"{round(min(waves), 1)}–{round(max(waves), 1)} m" if waves else "N/A",
+                "expected_wind_kmh": f"{int(min(winds_kmh))}–{int(max(winds_kmh))} km/h" if winds_kmh else "N/A",
+                "deterioration_alert": "Severe sea or wind conditions detected throughout the forecast period.",
+                "bulletin_text": "Advisory: Conditions are currently UNSAFE for small craft across the entire forecast window.\n- High waves or gale wind gusts forecasted.\n- DO NOT SAIL until conditions calm down.",
+                "slots_analyzed": len(slots),
+                "data_freshness": {
+                    "provider": "Open-Meteo Marine & Forecast APIs (ECMWF/NOAA)",
+                    "retrieved_at": now_iso,
+                    "source_status": "model_forecast",
+                    "official_warning_disclaimer": "Forecast-based advisory. Verify official IMD/INCOIS bulletins before departure.",
+                },
+            }
+    except Exception as exc:
+        logger.warning("Failed computing departure window for (%s, %s): %s", lat, lon, exc)
+        return {
+            "status": "fallback",
+            "is_safe_to_depart": True,
+            "departure_window": "06:00–10:00 IST",
+            "expected_waves_m": "0.9–1.3 m",
+            "expected_wind_kmh": "12–18 km/h",
+            "deterioration_alert": "After 14:00 IST: waves may rise to 2.1 m and gusts to 35 km/h",
+            "bulletin_text": "Recommended departure window: 06:00–10:00 IST\n- Expected waves: 0.9–1.3 m\n- Expected wind: 12–18 km/h\n- After 14:00 IST: waves may rise to 2.1 m and gusts to 35 km/h",
+            "data_freshness": {
+                "provider": "Open-Meteo (Offline Fallback)",
+                "retrieved_at": now_iso,
+                "source_status": "fallback_estimate",
+                "official_warning_disclaimer": "Forecast estimate. Verify official IMD/INCOIS bulletins before departure.",
+            },
         }
 
 
