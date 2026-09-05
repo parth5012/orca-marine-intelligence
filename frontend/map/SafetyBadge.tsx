@@ -1,44 +1,108 @@
 /**
  * SafetyBadge Component
  *
- * Owner: M-D (Frontend & Maps) � green/yellow/red badge
+ * Owner: M-D (Frontend & Maps) - green/amber/red safety badge
  * Module: frontend/map/SafetyBadge.tsx
  *
  * Visual safety indicator showing sea conditions at a glance.
- * Displays wave height, wind speed, and danger status with
+ * Displays wave height, wind speed, danger status with
  * color-coded badges (green/amber/red).
- *
- * Color coding:
- *     - Green  — Safe: waves < 1.5m, wind < 20kts, no geofence violations
- *     - Amber  — Caution: waves 1.5-2.5m OR wind 20-30kts
- *     - Red    — Danger: waves > 2.5m OR wind > 30kts OR geofence violation
- *
- * Props:
- *     - waves: number — wave height in meters
- *     - wind: number — wind speed in knots
- *     - danger: 'none' | 'eez' | 'mpa' | 'cyclone'
- *     - language: string — display language code
- *
- * TODO:
- *     - [ ] Implement color-coded badge rendering
- *     - [ ] Add wave/wind threshold configuration
- *     - [ ] Implement icon set for different danger types
- *     - [ ] Add animation for danger state transitions
- *     - [ ] Support multilingual labels (22 languages)
  */
 
+'use client';
+
+import React from 'react';
+
 export interface SafetyBadgeProps {
-  waves?: number;
-  wind?: number;
-  danger?: 'none' | 'eez' | 'mpa' | 'cyclone';
+  waves?: number | null;
+  wind?: number | null;
+  danger?: 'none' | 'caution' | 'danger' | 'eez' | 'mpa' | 'cyclone' | string;
+  badge?: 'green' | 'amber' | 'red' | string;
   language?: string;
+  compact?: boolean;
 }
 
-export default function SafetyBadge({ waves = 0, wind = 0, danger = 'none', language = 'en' }: SafetyBadgeProps) {
-  // TODO: Implement SafetyBadge component
+export default function SafetyBadge({
+  waves = 0,
+  wind = 0,
+  danger = 'none',
+  badge,
+  language = 'en',
+  compact = false,
+}: SafetyBadgeProps) {
+  const safeWaves = waves ?? 0.8;
+  const safeWind = wind ?? 10;
+  const dangerStr = String(danger || 'none').toLowerCase();
+
+  const isDanger =
+    badge === 'red' ||
+    dangerStr === 'danger' ||
+    dangerStr === 'cyclone' ||
+    safeWaves >= 2.5 ||
+    safeWind >= 30;
+
+  const isCaution =
+    !isDanger &&
+    (badge === 'amber' ||
+      dangerStr === 'caution' ||
+      dangerStr === 'eez' ||
+      dangerStr === 'mpa' ||
+      safeWaves >= 1.5 ||
+      safeWind >= 20);
+
+  const statusType: 'safe' | 'caution' | 'danger' = isDanger
+    ? 'danger'
+    : isCaution
+    ? 'caution'
+    : 'safe';
+
   return (
-    <div className="safety-badge">
-      <span>SafetyBadge — coming soon</span>
+    <div
+      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-all shadow-sm ${
+        statusType === 'danger'
+          ? 'bg-red-950/90 border-red-500/80 text-red-200 animate-pulse'
+          : statusType === 'caution'
+          ? 'bg-amber-950/80 border-amber-500/70 text-amber-200'
+          : 'bg-emerald-950/80 border-emerald-500/70 text-emerald-200'
+      }`}
+      title={`Sea Status: ${statusType.toUpperCase()} | Waves: ${safeWaves}m | Wind: ${safeWind} kts`}
+    >
+      <span className="flex h-2 w-2 relative">
+        <span
+          className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+            statusType === 'danger'
+              ? 'bg-red-400'
+              : statusType === 'caution'
+              ? 'bg-amber-400'
+              : 'bg-emerald-400'
+          }`}
+        />
+        <span
+          className={`relative inline-flex rounded-full h-2 w-2 ${
+            statusType === 'danger'
+              ? 'bg-red-500'
+              : statusType === 'caution'
+              ? 'bg-amber-500'
+              : 'bg-emerald-500'
+          }`}
+        />
+      </span>
+
+      <span className="font-bold uppercase tracking-wider text-xs">
+        {statusType === 'danger'
+          ? dangerStr === 'cyclone'
+            ? 'CYCLONE ALERT'
+            : 'DO NOT SAIL'
+          : statusType === 'caution'
+          ? 'CAUTION'
+          : 'SEA SAFE'}
+      </span>
+
+      {!compact && (
+        <span className="hidden md:inline text-[11px] opacity-80 font-mono border-l border-current/30 pl-2">
+          🌊 {safeWaves}m • 💨 {safeWind}kts
+        </span>
+      )}
     </div>
   );
 }

@@ -1,48 +1,47 @@
 /**
  * MapView Component
  *
- * Owner: M-D (Frontend & Maps) � Leaflet map + 437 circles
+ * Owner: M-D (Frontend & Maps) — Leaflet map with PFZ circles & maritime boundaries
  * Module: frontend/map/MapView.tsx
  *
- * Interactive map showing PFZ zones, EEZ/MPA boundaries,
- * agent recommendation overlays, and user location.
- * Uses React Leaflet with vector tile support.
- *
- * Features:
- *     - PFZ zone polygons with intensity coloring (low/medium/high)
- *     - EEZ boundary lines (dashed, gray)
- *     - MPA restricted zones (red overlay)
- *     - Agent recommendation highlight (green polygon with pulse)
- *     - User GPS location marker
- *     - Bearing and distance lines to recommended zone
- *     - Zoom-to-zone on chat response
- *
- * Map layers:
- *     - pfz        — PFZ zone polygons (GeoJSON overlay)
- *     - eez        — EEZ boundaries (vector tiles)
- *     - mpa        — MPA zones (vector tiles)
- *     - recommend  — Agent recommendation highlight
- *
- * TODO:
- *     - [ ] Initialize React Leaflet map centered on Indian coast
- *     - [ ] Add PFZ GeoJSON layer with popup for zone details
- *     - [ ] Add EEZ/MPA boundary layers from vector tiles
- *     - [ ] Implement recommendation highlight with fly-to animation
- *     - [ ] Add GPS location tracking with device API
- *     - [ ] Implement bearing/distance line overlay
+ * Client-side dynamic wrapper around MapInner to prevent SSR `window is not defined`
+ * errors with Leaflet.
  */
 
-export interface MapViewProps {
-  center?: [number, number];   // [lat, lon] default: Kochi [9.93, 76.27]
-  zoom?: number;
-  highlightFeatures?: any[];
-}
+'use client';
 
-export default function MapView({ center = [9.93, 76.27], zoom = 8, highlightFeatures }: MapViewProps) {
-  // TODO: Implement MapView component with React Leaflet
+import React from 'react';
+import dynamic from 'next/dynamic';
+import type { MapInnerProps, MapLayerToggles } from './MapInner';
+
+export type { MapLayerToggles };
+
+export type MapViewProps = MapInnerProps & {
+  className?: string;
+  style?: React.CSSProperties;
+};
+
+const MapInner = dynamic(() => import('./MapInner'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full min-h-[400px] flex items-center justify-center bg-slate-950 text-cyan-400 border border-slate-800">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-9 h-9 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+        <div className="text-xs font-mono tracking-wider uppercase text-slate-300">
+          Loading ORCA Ocean Map...
+        </div>
+      </div>
+    </div>
+  ),
+});
+
+export default function MapView({ className, style, ...props }: MapViewProps) {
   return (
-    <div className="map-view" style={{ height: '100vh', width: '100%' }}>
-      <p>MapView — coming soon</p>
+    <div
+      className={`map-view relative w-full h-full overflow-hidden ${className || ''}`}
+      style={style}
+    >
+      <MapInner {...props} />
     </div>
   );
 }
