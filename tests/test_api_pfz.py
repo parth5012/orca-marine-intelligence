@@ -274,7 +274,7 @@ def test_get_pfz_today_sector_filtering(client):
 def test_get_pfz_today_bbox_filtering(client):
     """Verify bounding box filtering (min_lon,min_lat,max_lon,max_lat)."""
     # Maharashtra coast box
-    bbox_str = "72.0,19.0,73.5,21.0"
+    bbox_str = "71.5,18.5,73.5,21.0"
     response = client.get(f"/api/pfz/today?bbox={bbox_str}")
     assert response.status_code == 200
     data = response.json()
@@ -282,8 +282,8 @@ def test_get_pfz_today_bbox_filtering(client):
 
     for feat in data["features"]:
         lon, lat = feat["geometry"]["coordinates"]
-        assert 72.0 <= lon <= 73.5
-        assert 19.0 <= lat <= 21.0
+        assert 71.5 <= lon <= 73.5
+        assert 18.5 <= lat <= 21.0
 
     # Invalid bbox format test
     bad_resp = client.get("/api/pfz/today?bbox=invalid_bbox")
