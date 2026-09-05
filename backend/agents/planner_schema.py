@@ -169,41 +169,47 @@ class PlannerOutput(BaseModel):
 
 
 def find_fishing_zones(lat: float, lon: float, radius_km: float = 80.0) -> dict:
-    """PROTOTYPE stub: find PFZ zones near (lat, lon) within radius_km.
+    """Find PFZ zones near (lat, lon) within radius_km using live INCOIS data.
 
-    Mock-only: delegates to mock_fetch_incois_pfz (SEC005, 5 zones).
+    Live data: delegates to fetch_live_incois_pfz with mock fallback.
     Returns envelope {status, summary, next_actions, artifacts, features}.
     """
     try:
-        from backend.ingest.mock_fetchers import mock_fetch_incois_pfz
-
-        return mock_fetch_incois_pfz(sector="SEC005", center_lat=lat, center_lon=lon, count=5)
-    except Exception as exc:  # offline-safe hardcoded fallback
-        return {
-            "status": "success",
-            "summary": f"PROTOTYPE fallback PFZ near ({lat},{lon}) r={radius_km}km ({exc})",
-            "next_actions": ["call combiner"],
-            "artifacts": ["data/pfz-today.geojson"],
-            "features": [],
-        }
+        from backend.ingest.live_fetchers import fetch_live_incois_pfz
+        return fetch_live_incois_pfz(sector="SEC005", center_lat=lat, center_lon=lon, count=5)
+    except Exception:
+        try:
+            from backend.ingest.mock_fetchers import mock_fetch_incois_pfz
+            return mock_fetch_incois_pfz(sector="SEC005", center_lat=lat, center_lon=lon, count=5)
+        except Exception as exc:
+            return {
+                "status": "success",
+                "summary": f"Fallback PFZ near ({lat},{lon}) r={radius_km}km ({exc})",
+                "next_actions": ["call combiner"],
+                "artifacts": ["data/pfz-today.geojson"],
+                "features": [],
+            }
 
 
 def check_ocean_state(zones: list[dict], scenario: str = "normal") -> dict:
-    """PROTOTYPE stub: wave/current per zone (mock OSF SWAN 06Z).
+    """Wave and ocean current analysis per zone.
 
-    Args:
-        zones: shared candidate points (flat or GeoJSON Features).
-        scenario: normal | rough_seas | cyclone_warning | border_violation.
-    Returns mock_fetch_osf_ocean_state envelope (deterministic, offline).
+    Live data: fetches Open-Meteo Marine API when scenario is normal.
+    Fallback: mock_fetch_osf_ocean_state for simulated scenarios.
     """
+    if scenario == "normal":
+        try:
+            from backend.ingest.live_fetchers import fetch_live_ocean_state
+            return fetch_live_ocean_state(zones or [])
+        except Exception:
+            pass
     try:
         from backend.ingest.mock_fetchers import mock_fetch_osf_ocean_state
-
         return mock_fetch_osf_ocean_state(zones or [], scenario=scenario)
     except Exception as exc:
         return {
             "status": "error",
-            "summary": f"PROTOTYPE ocean fallback ({exc})",
+            "summary": f"Ocean fallback ({exc})",
             "next_actions": ["mark sea unknown, downgrade confidence 0.87->0.62"],
             "artifacts": [],
             "results": [],
@@ -211,43 +217,55 @@ def check_ocean_state(zones: list[dict], scenario: str = "normal") -> dict:
 
 
 def check_weather(zones: list[dict], scenario: str = "normal") -> dict:
-    """PROTOTYPE stub: wind + 500km cyclone alert per zone (mock IMD).
+    """Wind and cyclone analysis per zone.
 
-    Returns mock_fetch_imd_marine_weather envelope (deterministic, offline).
+    Live data: fetches Open-Meteo Weather API when scenario is normal.
+    Fallback: mock_fetch_imd_marine_weather for simulated scenarios.
     """
+    if scenario == "normal":
+        try:
+            from backend.ingest.live_fetchers import fetch_live_marine_weather
+            return fetch_live_marine_weather(zones or [])
+        except Exception:
+            pass
     try:
         from backend.ingest.mock_fetchers import mock_fetch_imd_marine_weather
-
         return mock_fetch_imd_marine_weather(zones or [], scenario=scenario)
     except Exception as exc:
         return {
             "status": "error",
-            "summary": f"PROTOTYPE weather fallback ({exc})",
-            "next_actions": ["mark wind unknown, downgrade confidence 0.87->0.62"],
+            "summary": f"Weather fallback ({exc})",
+            "next_actions": ["mark weather unknown, downgrade confidence 0.87->0.62"],
             "artifacts": [],
             "results": [],
-            "cyclones": [],
         }
 
 
 def check_geofence(zones: list[dict], scenario: str = "normal") -> dict:
-    """PROTOTYPE stub: EEZ/MPA/IMBL legality per zone (mock boundaries).
+    """EEZ / MPA boundary check per zone.
 
-    Returns mock_check_geofence_boundaries envelope. Combiner applies hard
-    veto on restricted zones regardless of planner scores (deterministic).
+    Live data: verifies spatial polygons against data/eez.geojson & data/mpa.geojson.
+    Fallback: mock_check_geofence_boundaries for simulated scenarios.
     """
+    if scenario == "normal":
+        try:
+            from backend.ingest.live_fetchers import fetch_live_geofence_boundaries
+            return fetch_live_geofence_boundaries(zones or [])
+        except Exception:
+            pass
     try:
         from backend.ingest.mock_fetchers import mock_check_geofence_boundaries
-
         return mock_check_geofence_boundaries(zones or [], scenario=scenario)
     except Exception as exc:
         return {
             "status": "error",
-            "summary": f"PROTOTYPE geofence fallback ({exc})",
-            "next_actions": ["treat zones as restricted, ask human"],
+            "summary": f"Geofence fallback ({exc})",
+            "next_actions": ["mark geofence unknown, flag potential border risk"],
             "artifacts": [],
             "results": [],
         }
+
+
 
 
 __all__ = [

@@ -189,20 +189,16 @@ def _heuristic_current(lat: float | None, lon: float | None, zone_id: str, idx: 
 
 async def fetch_osf_wave_current(lat: float, lon: float) -> tuple[float, float]:
     """
-    W2 real data fetcher: OSF/GOFS 06Z forecast.
-
-    In production this would use xarray/Zarr to read the OSF 06Z wave/current
-    grids (e.g., s3://osf-forecast/2026-09-03/06Z.zarr) and bilinear-interpolate
-    to (lat, lon). Currently not configured — raises NotImplementedError so
-    the wrapper falls back to the W1 heuristic.
-
-    Returns:
-        (wave_height_m, current_kt)
-
-    Raises:
-        NotImplementedError when OSF data source is not configured.
+    Live real data fetcher: Open-Meteo Marine wave & current.
+    Returns (wave_height_m, current_kt).
     """
-    raise NotImplementedError("OSF 06Z forecast not configured — use heuristic fallback")
+    try:
+        from backend.ingest.live_fetchers import fetch_open_meteo_wave_current
+        data = fetch_open_meteo_wave_current(lat, lon)
+        return float(data["wave_height_m"]), float(data["current_speed_kt"])
+    except Exception as exc:
+        logger.debug("Live ocean wave/current fetch failed for (%s, %s): %s", lat, lon, exc)
+        raise NotImplementedError("Live ocean fetch unavailable") from exc
 
 
 async def get_wave_current(
@@ -223,7 +219,7 @@ async def get_wave_current(
     if lat is not None and lon is not None:
         try:
             wave, current = await fetch_osf_wave_current(lat, lon)
-            return round(float(wave), 2), round(float(current), 2), "osf_06z"
+            return round(float(wave), 2), round(float(current), 2), "open_meteo_live"
         except NotImplementedError:
             pass
         except Exception as exc:

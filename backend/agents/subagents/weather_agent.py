@@ -166,12 +166,16 @@ def _heuristic_wind_deg(wind_dir: str) -> int | None:
 
 async def fetch_imd_wind(lat: float, lon: float) -> tuple[float, str]:
     """
-    W2 real fetcher: IMD wind from https://mausam.imd.gov.in.
-
-    Would scrape/parse IMD marine bulletins or GFS wind grids and return
-    (wind_speed_kt, wind_direction_compass). Stub raises NotImplementedError.
+    Live real wind fetcher via Open-Meteo Weather API.
+    Returns (wind_speed_kt, wind_direction_compass).
     """
-    raise NotImplementedError("IMD wind fetch not configured — use heuristic fallback")
+    try:
+        from backend.ingest.live_fetchers import fetch_open_meteo_weather
+        data = fetch_open_meteo_weather(lat, lon)
+        return float(data["wind_speed_kt"]), str(data["wind_direction"])
+    except Exception as exc:
+        logger.debug("Live wind fetch failed for (%s, %s): %s", lat, lon, exc)
+        raise NotImplementedError("Live wind fetch unavailable") from exc
 
 
 async def fetch_imd_cyclones() -> list[dict]:
@@ -203,7 +207,7 @@ async def get_wind(
         try:
             wind_kt, wind_dir = await fetch_imd_wind(lat, lon)
             deg = _heuristic_wind_deg(wind_dir)
-            return round(float(wind_kt), 1), str(wind_dir), deg, "imd"
+            return round(float(wind_kt), 1), str(wind_dir), deg, "open_meteo_live"
         except NotImplementedError:
             pass
         except Exception as exc:
