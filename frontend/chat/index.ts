@@ -1,12 +1,25 @@
 /**
- * Owner: M-E (Frontend Chat & App Shell) — barrel for chat
+ * Owner: M-E (Frontend Chat & App Shell) - barrel chat
  *
- * Chat â€” Barrel Export
- *
- * Re-exports core chat UI modules for clean imports:
- *   import { ChatPanel } from "@/chat"
+ * Chat Barrel Export
+ * Re-exports core chat modules for clean imports:
+ * import { ChatPanel, LanguageSwitch, useSSEChat } from "@/chat";
  */
 
-export { default as ChatPanel } from "./ChatPanel";
-export { default as LanguageSwitch } from "./LanguageSwitch";
-export * from "./bhashini";
+export { default as ChatPanel } from './ChatPanel';
+export type { ChatPanelProps } from './ChatPanel';
+
+export { default as LanguageSwitch, SUPPORTED_LANGUAGES } from './LanguageSwitch';
+export type { LanguageSwitchProps, LanguageOption } from './LanguageSwitch';
+
+export { useSSEChat } from './useSSEChat';
+export type {
+  ChatMessage,
+  ReasoningStep,
+  MarineZoneCard,
+  SafetyData,
+  MapEventData,
+  UseSSEChatOptions,
+} from './useSSEChat';
+
+export * from './bhashini';
