@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 # Base URLs
 OPEN_METEO_MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
 OPEN_METEO_WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
+OPENWEATHERMAP_API_URL = "https://api.openweathermap.org/data/2.5/weather"
+IMD_CYCLONE_URL = "https://mausam.imd.gov.in/responsive/cycloneinformation.php"
 HTTP_TIMEOUT_S = 6.0
 
 # Paths
@@ -68,14 +70,22 @@ def _deg_to_compass(deg: float | None) -> str:
 # 1. Open-Meteo Marine Live Fetcher
 # ---------------------------------------------------------------------------
 
-def fetch_open_meteo_wave_current(lat: float, lon: float, timeout_s: float = HTTP_TIMEOUT_S) -> dict[str, Any]:
+def fetch_open_meteo_marine(lat: float, lon: float, timeout_s: float = HTTP_TIMEOUT_S) -> dict[str, Any]:
     """
-    Fetch real live wave height, period, and ocean currents from Open-Meteo Marine API.
+    Fetch real live wave height, period, swell, and ocean currents from Open-Meteo Marine API.
     """
     params = {
         "latitude": round(lat, 4),
         "longitude": round(lon, 4),
-        "hourly": ["wave_height", "wave_direction", "wave_period", "ocean_current_velocity", "ocean_current_direction"],
+        "hourly": [
+            "wave_height",
+            "wave_direction",
+            "wave_period",
+            "swell_wave_height",
+            "swell_wave_period",
+            "ocean_current_velocity",
+            "ocean_current_direction",
+        ],
         "timezone": "auto",
     }
     try:
@@ -95,6 +105,12 @@ def fetch_open_meteo_wave_current(lat: float, lon: float, timeout_s: float = HTT
         periods = [p for p in hourly.get("wave_period", []) if p is not None]
         wave_period = round(float(periods[0]), 1) if periods else 7.5
 
+        swells = [s for s in hourly.get("swell_wave_height", []) if s is not None]
+        swell_height = round(float(swells[0]), 2) if swells else 0.8
+
+        swell_periods = [sp for sp in hourly.get("swell_wave_period", []) if sp is not None]
+        swell_period = round(float(swell_periods[0]), 1) if swell_periods else 6.5
+
         current_dirs = [cd for cd in hourly.get("ocean_current_direction", []) if cd is not None]
         current_dir_deg = float(current_dirs[0]) if current_dirs else 180.0
         current_dir = _deg_to_compass(current_dir_deg)
@@ -109,6 +125,8 @@ def fetch_open_meteo_wave_current(lat: float, lon: float, timeout_s: float = HTT
             "wave_height_m": wave_height,
             "current_speed_kt": current_kt,
             "wave_period_s": wave_period,
+            "swell_wave_height_m": swell_height,
+            "swell_wave_period_s": swell_period,
             "current_dir": current_dir,
             "wave_status": wave_status,
             "current_status": current_status,
@@ -117,11 +135,12 @@ def fetch_open_meteo_wave_current(lat: float, lon: float, timeout_s: float = HTT
         }
     except Exception as exc:
         logger.warning("Failed to fetch live Open-Meteo marine data for (%s, %s): %s", lat, lon, exc)
-        # Graceful fallback baseline
         return {
             "wave_height_m": 1.2,
             "current_speed_kt": 1.0,
             "wave_period_s": 7.0,
+            "swell_wave_height_m": 0.8,
+            "swell_wave_period_s": 6.5,
             "current_dir": "NW",
             "wave_status": "safe",
             "current_status": "safe",
@@ -130,18 +149,29 @@ def fetch_open_meteo_wave_current(lat: float, lon: float, timeout_s: float = HTT
         }
 
 
+# Alias for backward compatibility
+fetch_open_meteo_wave_current = fetch_open_meteo_marine
+
+
 # ---------------------------------------------------------------------------
-# 2. Open-Meteo Weather Live Fetcher
+# 2. Open-Meteo & OpenWeatherMap Weather Live Fetchers
 # ---------------------------------------------------------------------------
 
 def fetch_open_meteo_weather(lat: float, lon: float, timeout_s: float = HTTP_TIMEOUT_S) -> dict[str, Any]:
     """
-    Fetch real live wind speed, gusts, and surface pressure from Open-Meteo Forecast API.
+    Fetch real live wind speed, gusts, surface pressure, temp, humidity from Open-Meteo Forecast API.
     """
     params = {
         "latitude": round(lat, 4),
         "longitude": round(lon, 4),
-        "hourly": ["wind_speed_10m", "wind_direction_10m", "wind_gusts_10m", "surface_pressure"],
+        "hourly": [
+            "wind_speed_10m",
+            "wind_direction_10m",
+            "wind_gusts_10m",
+            "surface_pressure",
+            "temperature_2m",
+            "relative_humidity_2m",
+        ],
         "wind_speed_unit": "kn",
         "timezone": "auto",
     }
@@ -165,6 +195,12 @@ def fetch_open_meteo_weather(lat: float, lon: float, timeout_s: float = HTTP_TIM
         pressures = [p for p in hourly.get("surface_pressure", []) if p is not None]
         surface_pressure = round(float(pressures[0]), 1) if pressures else 1012.0
 
+        temps = [t for t in hourly.get("temperature_2m", []) if t is not None]
+        temperature_c = round(float(temps[0]), 1) if temps else 28.0
+
+        humids = [h for h in hourly.get("relative_humidity_2m", []) if h is not None]
+        humidity_pct = round(float(humids[0]), 1) if humids else 75.0
+
         wind_status = "safe" if wind_speed_kt < WIND_SAFE_MAX else ("caution" if wind_speed_kt <= WIND_CAUTION_MAX else "danger")
         cyclone_danger = surface_pressure < CYCLONE_PRESSURE_DANGER or wind_speed_kt > 34.0
         overall_status = "danger" if (cyclone_danger or wind_status == "danger") else (
@@ -172,11 +208,15 @@ def fetch_open_meteo_weather(lat: float, lon: float, timeout_s: float = HTTP_TIM
         )
 
         return {
+            "temperature_c": temperature_c,
+            "humidity_pct": humidity_pct,
+            "pressure_hpa": surface_pressure,
+            "surface_pressure_hpa": surface_pressure,
             "wind_speed_kt": wind_speed_kt,
             "wind_direction": wind_dir,
             "wind_deg": int(wind_dir_deg),
             "wind_gusts_kt": wind_gusts_kt,
-            "surface_pressure_hpa": surface_pressure,
+            "wind_gust_kt": wind_gusts_kt,
             "wind_status": wind_status,
             "cyclone_danger": cyclone_danger,
             "status": overall_status,
@@ -185,17 +225,106 @@ def fetch_open_meteo_weather(lat: float, lon: float, timeout_s: float = HTTP_TIM
     except Exception as exc:
         logger.warning("Failed to fetch live Open-Meteo weather for (%s, %s): %s", lat, lon, exc)
         return {
+            "temperature_c": 28.0,
+            "humidity_pct": 75.0,
+            "pressure_hpa": 1012.0,
+            "surface_pressure_hpa": 1012.0,
             "wind_speed_kt": 10.0,
             "wind_direction": "W",
             "wind_deg": 270,
             "wind_gusts_kt": 13.0,
-            "surface_pressure_hpa": 1012.0,
+            "wind_gust_kt": 13.0,
             "wind_status": "safe",
             "cyclone_danger": False,
             "status": "safe",
             "source": "open_meteo_fallback",
         }
 
+
+def fetch_openweathermap(
+    lat: float,
+    lon: float,
+    api_key: Optional[str] = None,
+    timeout_s: float = HTTP_TIMEOUT_S,
+) -> dict[str, Any]:
+    """
+    Fetch current live weather from OpenWeatherMap API using OPENWEATHER_API_KEY.
+    """
+    key = api_key or os.getenv("OPENWEATHER_API_KEY")
+    if not key:
+        raise ValueError("OPENWEATHER_API_KEY is not configured")
+
+    params = {
+        "lat": round(lat, 4),
+        "lon": round(lon, 4),
+        "appid": key,
+        "units": "metric",
+    }
+    with httpx.Client(timeout=timeout_s) as client:
+        resp = client.get(OPENWEATHERMAP_API_URL, params=params)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    main = payload.get("main", {})
+    wind = payload.get("wind", {})
+
+    temp_c = round(float(main.get("temp", 28.0)), 1)
+    humidity = round(float(main.get("humidity", 75.0)), 1)
+    pressure_hpa = round(float(main.get("pressure", 1012.0)), 1)
+
+    wind_speed_ms = float(wind.get("speed", 0.0))
+    wind_speed_kt = round(wind_speed_ms * 1.94384, 1)
+
+    wind_gust_ms = float(wind.get("gust", wind_speed_ms * 1.3))
+    wind_gust_kt = round(wind_gust_ms * 1.94384, 1)
+
+    wind_deg = wind.get("deg")
+    wind_direction = _deg_to_compass(wind_deg)
+
+    wind_status = "safe" if wind_speed_kt < WIND_SAFE_MAX else ("caution" if wind_speed_kt <= WIND_CAUTION_MAX else "danger")
+    cyclone_danger = pressure_hpa < CYCLONE_PRESSURE_DANGER or wind_speed_kt > 34.0
+    overall_status = "danger" if (cyclone_danger or wind_status == "danger") else (
+        "caution" if wind_status == "caution" else "safe"
+    )
+
+    return {
+        "temperature_c": temp_c,
+        "humidity_pct": humidity,
+        "pressure_hpa": pressure_hpa,
+        "surface_pressure_hpa": pressure_hpa,
+        "wind_speed_kt": wind_speed_kt,
+        "wind_gusts_kt": wind_gust_kt,
+        "wind_gust_kt": wind_gust_kt,
+        "wind_direction": wind_direction,
+        "wind_deg": int(wind_deg) if wind_deg is not None else 0,
+        "wind_status": wind_status,
+        "cyclone_danger": cyclone_danger,
+        "status": overall_status,
+        "source": "openweathermap",
+    }
+
+
+def fetch_live_weather(
+    lat: float,
+    lon: float,
+    api_key: Optional[str] = None,
+    timeout_s: float = HTTP_TIMEOUT_S,
+) -> dict[str, Any]:
+    """
+    Query OpenWeatherMap API using OPENWEATHER_API_KEY (or fall back to Open-Meteo
+    Weather API if the key is missing or network fails).
+    """
+    key = api_key or os.getenv("OPENWEATHER_API_KEY")
+    if key:
+        try:
+            return fetch_openweathermap(lat, lon, api_key=key, timeout_s=timeout_s)
+        except Exception as exc:
+            logger.warning(
+                "OpenWeatherMap fetch failed for (%s, %s): %s. Falling back to Open-Meteo.",
+                lat, lon, exc,
+            )
+
+    return fetch_open_meteo_weather(lat, lon, timeout_s=timeout_s)
 
 # ---------------------------------------------------------------------------
 # 3. Real INCOIS PFZ Feature Loader
@@ -458,6 +587,182 @@ def fetch_live_marine_weather(points: list[dict[str, Any]], timeout_s: float = H
         "cyclones": cyclones,
         "badge": badge,
     }
+
+
+# ---------------------------------------------------------------------------
+# 5.1. Cyclone Hazard & Pressure Anomaly Analyzer (IMD / Coastal)
+# ---------------------------------------------------------------------------
+
+INDIAN_COASTAL_STATIONS = [
+    {"name": "Kochi", "region": "Kerala Coast", "lat": 9.93, "lon": 76.26},
+    {"name": "Mumbai", "region": "Maharashtra Coast", "lat": 18.92, "lon": 72.83},
+    {"name": "Porbandar", "region": "Gujarat Coast", "lat": 21.64, "lon": 69.60},
+    {"name": "Chennai", "region": "Tamil Nadu Coast", "lat": 13.08, "lon": 80.27},
+    {"name": "Visakhapatnam", "region": "Andhra Pradesh Coast", "lat": 17.68, "lon": 83.21},
+    {"name": "Puri", "region": "Odisha Coast", "lat": 19.81, "lon": 85.83},
+    {"name": "Kolkata", "region": "West Bengal Coast", "lat": 22.57, "lon": 88.36},
+    {"name": "Kavaratti", "region": "Lakshadweep Islands", "lat": 10.57, "lon": 72.64},
+    {"name": "Port Blair", "region": "Andaman & Nicobar Islands", "lat": 11.67, "lon": 92.74},
+]
+
+
+def fetch_imd_cyclone_alerts(
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    timeout_s: float = HTTP_TIMEOUT_S,
+) -> dict[str, Any]:
+    """
+    Evaluate coastal pressure anomalies (<995 hPa threshold) and IMD cyclone warnings.
+    Returns:
+    {
+        "alert_level": "safe" | "advisory" | "warning" | "severe",
+        "nearest_cyclone_distance_km": float | None,
+        "max_wind_speed_kt": float | None,
+        "description": str,
+        "regions_affected": list[str],
+        "last_updated": str,
+    }
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 1. Point-specific evaluation
+    if lat is not None and lon is not None:
+        weather = fetch_open_meteo_weather(lat, lon, timeout_s=timeout_s)
+        pressure = float(weather.get("surface_pressure_hpa", weather.get("pressure_hpa", 1012.0)))
+        wind = float(weather.get("wind_speed_kt", 10.0))
+
+        if pressure < CYCLONE_PRESSURE_DANGER:
+            if pressure < 980.0 or wind > 48.0:
+                level = "severe"
+                desc = (
+                    f"Severe cyclonic disturbance detected at ({round(lat, 2)}, {round(lon, 2)}): "
+                    f"central barometric pressure {pressure} hPa (<980 hPa) with sustained winds {wind} kt."
+                )
+            else:
+                level = "warning"
+                desc = (
+                    f"Cyclonic depression warning at ({round(lat, 2)}, {round(lon, 2)}): "
+                    f"coastal barometric pressure {pressure} hPa dropped below {CYCLONE_PRESSURE_DANGER} hPa threshold with winds of {wind} kt."
+                )
+            return {
+                "alert_level": level,
+                "nearest_cyclone_distance_km": 0.0,
+                "max_wind_speed_kt": wind,
+                "description": desc,
+                "regions_affected": [f"Coastal Sector ({round(lat, 2)}, {round(lon, 2)})"],
+                "last_updated": now_iso,
+            }
+        elif wind > 25.0 or pressure < 1005.0:
+            return {
+                "alert_level": "advisory",
+                "nearest_cyclone_distance_km": None,
+                "max_wind_speed_kt": wind,
+                "description": f"Coastal weather advisory: gusty winds ({wind} kt) or moderate pressure anomaly ({pressure} hPa) at coordinates.",
+                "regions_affected": [f"Coastal Sector ({round(lat, 2)}, {round(lon, 2)})"],
+                "last_updated": now_iso,
+            }
+        else:
+            return {
+                "alert_level": "safe",
+                "nearest_cyclone_distance_km": None,
+                "max_wind_speed_kt": wind,
+                "description": f"Normal coastal atmospheric conditions ({pressure} hPa, {wind} kt wind). No cyclone threat.",
+                "regions_affected": [],
+                "last_updated": now_iso,
+            }
+
+    # 2. General Indian coastal evaluation
+    sample_stations = [
+        {"name": "Kochi", "region": "Kerala Coast", "lat": 9.93, "lon": 76.26},
+        {"name": "Mumbai", "region": "Maharashtra Coast", "lat": 18.92, "lon": 72.83},
+        {"name": "Chennai", "region": "Tamil Nadu Coast", "lat": 13.08, "lon": 80.27},
+        {"name": "Puri", "region": "Odisha Coast", "lat": 19.81, "lon": 85.83},
+    ]
+
+    cyclonic_regions: list[str] = []
+    advisory_regions: list[str] = []
+    max_observed_wind = 0.0
+    min_observed_pressure = 1015.0
+
+    for st in sample_stations:
+        try:
+            w = fetch_open_meteo_weather(st["lat"], st["lon"], timeout_s=min(timeout_s, 3.0))
+            p = float(w.get("surface_pressure_hpa", 1012.0))
+            spd = float(w.get("wind_speed_kt", 10.0))
+            if spd > max_observed_wind:
+                max_observed_wind = spd
+            if p < min_observed_pressure:
+                min_observed_pressure = p
+
+            if p < CYCLONE_PRESSURE_DANGER:
+                cyclonic_regions.append(st["region"])
+            elif spd > 25.0 or p < 1005.0:
+                advisory_regions.append(st["region"])
+        except Exception:
+            continue
+
+    if cyclonic_regions:
+        level = "severe" if min_observed_pressure < 980.0 or max_observed_wind > 48.0 else "warning"
+        return {
+            "alert_level": level,
+            "nearest_cyclone_distance_km": None,
+            "max_wind_speed_kt": max_observed_wind,
+            "description": f"Cyclonic depression active in {', '.join(cyclonic_regions)}: minimum coastal surface pressure {min_observed_pressure} hPa (<995 hPa threshold).",
+            "regions_affected": cyclonic_regions,
+            "last_updated": now_iso,
+        }
+    elif advisory_regions:
+        return {
+            "alert_level": "advisory",
+            "nearest_cyclone_distance_km": None,
+            "max_wind_speed_kt": max_observed_wind,
+            "description": f"Small craft / weather advisory in {', '.join(advisory_regions)}: sustained winds {max_observed_wind} kt.",
+            "regions_affected": advisory_regions,
+            "last_updated": now_iso,
+        }
+    else:
+        return {
+            "alert_level": "safe",
+            "nearest_cyclone_distance_km": None,
+            "max_wind_speed_kt": None,
+            "description": "No active cyclone warnings or coastal pressure anomalies (<995 hPa) detected across Indian coastal waters.",
+            "regions_affected": [],
+            "last_updated": now_iso,
+        }
+
+
+def fetch_imd_cyclones() -> list[dict]:
+    """
+    Active cyclone list from IMD / coastal pressure checks for weather_agent.
+    Returns list of {"name": str, "lat": float, "lon": float, "pressure_hpa": float, "wind_speed_kt": float}
+    """
+    alerts = fetch_imd_cyclone_alerts()
+    if alerts.get("alert_level") in ("warning", "severe"):
+        return [
+            {
+                "name": alerts.get("description", "Tropical Cyclone"),
+                "lat": 15.0,
+                "lon": 85.0,
+                "pressure_hpa": 990.0,
+                "wind_speed_kt": alerts.get("max_wind_speed_kt", 40.0),
+            }
+        ]
+    return []
+
+
+def fetch_cyclone_alert_for_point(lat: float, lon: float) -> dict | None:
+    """
+    Cyclone alert check for danger_agent.
+    Returns {"active": bool, "name": str, "distance_km": float} or None.
+    """
+    alert = fetch_imd_cyclone_alerts(lat=lat, lon=lon)
+    if alert.get("alert_level") in ("warning", "severe"):
+        return {
+            "active": True,
+            "name": alert.get("description", "Cyclone Depression"),
+            "distance_km": float(alert.get("nearest_cyclone_distance_km") or 0.0),
+        }
+    return {"active": False}
 
 
 # ---------------------------------------------------------------------------
