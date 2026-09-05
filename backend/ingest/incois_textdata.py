@@ -1,48 +1,378 @@
 """
-INCOIS TextData → GeoJSON Daily Ingestion
+INCOIS TextData GeoJSON Daily Ingestion
 
-Owner: M-B (Data Extractors & Storage) � INCOIS fetcher
+Owner: M-B (Data Extractors & Storage) — INCOIS fetcher
 Module: backend/ingest/incois_textdata.py
 
-Parses INCOIS TextData HTML tables published daily at ~11:30 AM IST
-and converts them into a unified GeoJSON FeatureCollection of PFZ zones.
-
-Flow:
-    1. Fetch TextData page using session cookie (INCOIS_JSESSIONID)
-    2. Parse HTML tables extracting zone names, lat/lon in DMS, and intensity
-    3. Convert DMS coordinates to decimal degrees
-    4. Build GeoJSON features with metadata (zone_id, area_km2, timestamp)
-    5. Write to data/pfz-today.geojson and upsert into PostGIS
-    6. Cache in Redis with 6-hour TTL (until next daily fetch)
-
-Dependencies:
-    - httpx for async HTTP fetch
-    - BeautifulSoup for HTML parsing
-    - PostGIS for spatial storage
-    - Redis for short-term cache
-
-TODO:
-    - [ ] Implement HTML table parser for TextData format
-    - [ ] Add DMS-to-decimal coordinate conversion
-    - [ ] Handle missing or malformed coordinates gracefully
-    - [ ] Add retry logic for INCOIS session expiry
-    - [ ] Implement PostGIS upsert (ON CONFLICT zone_id DO UPDATE)
-    - [ ] Add logging and metrics for ingest monitoring
+Parses INCOIS TextData HTML tables published daily (~11:30 IST) and
+converts to unified GeoJSON FeatureCollection PFZ zones.
+Supports sectors SEC001 through SEC014.
+Falls back to local data/pfz-today.geojson or Copernicus Marine fallback
+when INCOIS is offline or network fails.
 """
 
-from typing import Any
+import json
+import logging
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from scripts.dms_to_decimal import dms_to_decimal
+
+logger = logging.getLogger(__name__)
+
+# Sector mappings for all 14 INCOIS coastal sectors
+INCOIS_SECTORS: Dict[str, str] = {
+    "SEC001": "GUJARAT",
+    "SEC002": "MAHARASHTRA",
+    "SEC003": "GOA",
+    "SEC004": "KARNATAKA",
+    "SEC005": "KERALA",
+    "SEC006": "TAMILNADU_WEST",
+    "SEC007": "TAMILNADU_EAST",
+    "SEC008": "ANDHRA",
+    "SEC009": "ODISHA",
+    "SEC010": "WESTBENGAL",
+    "SEC011": "ANDAMAN",
+    "SEC012": "NICOBAR",
+    "SEC013": "LAKSHADWEEP",
+    "SEC014": "LAKSHADWEEP",
+}
+
+INCOIS_HOME_URL = "https://incois.gov.in/MarineFisheries/TextDataHome?mfid=1"
+INCOIS_SECTOR_URL = "https://incois.gov.in/MarineFisheries/TextData?secid={sector}"
 
 
-async def ingest_textdata(session_id: str) -> dict:
+def _get_pfz_data_path() -> Path:
+    """Resolve the path to data/pfz-today.geojson."""
+    cwd_path = Path("data/pfz-today.geojson")
+    if cwd_path.is_file():
+        return cwd_path.resolve()
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    data_path = repo_root / "data" / "pfz-today.geojson"
+    return data_path
+
+
+def load_local_pfz(sectors: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
-    Fetch and parse INCOIS TextData into GeoJSON features.
+    Load PFZ features from local data/pfz-today.geojson as fallback.
+    """
+    data_path = _get_pfz_data_path()
+    if not data_path.is_file():
+        # Also check pfz-all.json
+        alt_path = data_path.parent / "pfz-all.json"
+        if alt_path.is_file():
+            data_path = alt_path
+        else:
+            logger.warning("Local PFZ data file not found at %s", data_path)
+            return []
+
+    try:
+        with open(data_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+
+        features: List[Dict[str, Any]] = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if isinstance(raw, dict) and raw.get("type") == "FeatureCollection":
+            features = raw.get("features", [])
+        elif isinstance(raw, list):
+            # Convert raw list of dicts to GeoJSON features
+            for idx, item in enumerate(raw):
+                lat = float(item.get("lat", 0.0))
+                lon = float(item.get("lon", 0.0))
+                feat = {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    "properties": {
+                        "place": item.get("place", f"Point_{idx}"),
+                        "sector": item.get("sector", "SEC005"),
+                        "sector_name": item.get("sector_name", "KERALA"),
+                        "dir": item.get("dir", "W"),
+                        "direction": item.get("dir", "W"),
+                        "bearing": item.get("bearing", 270),
+                        "distance": str(item.get("distance", "")),
+                        "depth": str(item.get("depth", "")),
+                        "lat_dms": item.get("lat_dms", ""),
+                        "lon_dms": item.get("lon_dms", ""),
+                        "suitability": "high",
+                        "timestamp": now_iso,
+                        "source": "incois_textdata",
+                    },
+                }
+                features.append(feat)
+
+        # Standardize properties
+        norm_sector_set = {s.upper() for s in sectors} if sectors else None
+        valid_features = []
+        for feat in features:
+            props = feat.setdefault("properties", {})
+            feat_sec = str(props.get("sector", "")).upper()
+            feat_sec_name = str(props.get("sector_name", "")).upper()
+            if norm_sector_set and (feat_sec not in norm_sector_set and feat_sec_name not in norm_sector_set):
+                continue
+            props.setdefault("suitability", "high")
+            props.setdefault("timestamp", now_iso)
+            props.setdefault("source", "incois_textdata")
+            if "dir" in props and "direction" not in props:
+                props["direction"] = props["dir"]
+            elif "direction" in props and "dir" not in props:
+                props["dir"] = props["direction"]
+            valid_features.append(feat)
+
+        return valid_features
+    except Exception as exc:
+        logger.error("Failed loading local PFZ fallback from %s: %s", data_path, exc)
+        return []
+
+
+def parse_incois_table(content: str, sector: str, sector_name: str) -> List[Dict[str, Any]]:
+    """
+    Parse INCOIS HTML table or formatted text table rows into GeoJSON Point Features.
+    Expected 7 columns: Place, Direction, Bearing, Depth, Distance, Lat (DMS), Lon (DMS).
+    """
+    features: List[Dict[str, Any]] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if "<table" in content.lower() or "<tr" in content.lower():
+        try:
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(content, "html.parser")
+            tables = soup.find_all("table")
+            for table in tables:
+                for tr in table.find_all("tr"):
+                    cells = tr.find_all(["td", "th"])
+                    if len(cells) < 7:
+                        continue
+                    texts = [c.get_text(strip=True) for c in cells]
+                    # Filter out header rows
+                    col0_lower = texts[0].lower()
+                    if any(h in col0_lower for h in ["landing", "place", "centre", "sl.", "s.no", "sector"]):
+                        continue
+                    if any(h in texts[5].lower() for h in ["lat", "deg", "coordinates"]):
+                        continue
+
+                    place, direction, bearing_raw, depth, distance, lat_dms, lon_dms = texts[:7]
+                    lat = dms_to_decimal(lat_dms)
+                    lon = dms_to_decimal(lon_dms)
+                    if lat is None or lon is None:
+                        continue
+
+                    bearing = None
+                    if bearing_raw:
+                        m = re.search(r'\d+', bearing_raw)
+                        if m:
+                            bearing = int(m.group())
+
+                    feat = {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [round(lon, 5), round(lat, 5)],
+                        },
+                        "properties": {
+                            "place": place,
+                            "sector": sector,
+                            "sector_name": sector_name,
+                            "dir": direction,
+                            "direction": direction,
+                            "bearing": bearing,
+                            "distance": distance,
+                            "depth": depth,
+                            "lat_dms": lat_dms,
+                            "lon_dms": lon_dms,
+                            "suitability": "high",
+                            "timestamp": now_iso,
+                            "source": "incois_textdata",
+                        },
+                    }
+                    features.append(feat)
+        except Exception as exc:
+            logger.warning("Error parsing HTML table for sector %s: %s", sector, exc)
+    else:
+        # Plain text table / TSV parsing
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "\t" in line:
+                parts = [p.strip() for p in line.split("\t")]
+            elif "|" in line:
+                parts = [p.strip() for p in line.split("|")]
+            else:
+                parts = [p.strip() for p in re.split(r'\s{2,}', line)]
+
+            if len(parts) >= 7:
+                col0_lower = parts[0].lower()
+                if any(h in col0_lower for h in ["landing", "place", "centre", "sl.", "s.no", "sector"]):
+                    continue
+                place, direction, bearing_raw, depth, distance, lat_dms, lon_dms = parts[:7]
+                lat = dms_to_decimal(lat_dms)
+                lon = dms_to_decimal(lon_dms)
+                if lat is None or lon is None:
+                    continue
+
+                bearing = None
+                if bearing_raw:
+                    m = re.search(r'\d+', bearing_raw)
+                    if m:
+                        bearing = int(m.group())
+
+                feat = {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [round(lon, 5), round(lat, 5)],
+                    },
+                    "properties": {
+                        "place": place,
+                        "sector": sector,
+                        "sector_name": sector_name,
+                        "dir": direction,
+                        "direction": direction,
+                        "bearing": bearing,
+                        "distance": distance,
+                        "depth": depth,
+                        "lat_dms": lat_dms,
+                        "lon_dms": lon_dms,
+                        "suitability": "high",
+                        "timestamp": now_iso,
+                        "source": "incois_textdata",
+                    },
+                }
+                features.append(feat)
+
+    return features
+
+
+async def fetch_incois_sectors(
+    sectors: Optional[List[str]] = None, session_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Fetch INCOIS TextData from government portal for given sectors (SEC001 to SEC014).
+    If network fails, session expires, or portal is offline, loads latest local data/pfz-today.geojson.
+    If local data is also unavailable, falls back to Copernicus Marine fallback.
+    """
+    target_sectors = sectors or list(INCOIS_SECTORS.keys())
+    features: List[Dict[str, Any]] = []
+
+    # Attempt live web fetch from INCOIS
+    try:
+        import httpx
+
+        sess = session_id or os.getenv("INCOIS_JSESSIONID")
+        client_cookies = {"JSESSIONID": sess} if sess else {}
+
+        async with httpx.AsyncClient(
+            timeout=10.0, follow_redirects=True, cookies=client_cookies
+        ) as client:
+            # Attempt to initialize session cookie if not provided
+            if not sess:
+                try:
+                    home_resp = await client.get(INCOIS_HOME_URL, timeout=3.0)
+                    if "JSESSIONID" in home_resp.cookies:
+                        client.cookies.set("JSESSIONID", home_resp.cookies["JSESSIONID"])
+                except Exception:
+                    pass
+
+            for sec in target_sectors:
+                sec_name = INCOIS_SECTORS.get(sec, "COASTAL")
+                url = INCOIS_SECTOR_URL.format(sector=sec)
+                try:
+                    resp = await client.get(url, timeout=4.0)
+                    if resp.status_code == 200 and len(resp.text) > 100:
+                        parsed = parse_incois_table(resp.text, sec, sec_name)
+                        if parsed:
+                            features.extend(parsed)
+                except Exception as req_exc:
+                    logger.debug("Failed fetching sector %s: %s", sec, req_exc)
+    except Exception as exc:
+        logger.warning("Live INCOIS web scrape encounter error: %s", exc)
+
+    # If live fetch returned no features, load local data/pfz-today.geojson
+    if not features:
+        logger.info("INCOIS live scrape empty/offline; loading local data/pfz-today.geojson")
+        features = load_local_pfz(sectors=target_sectors)
+
+    # If still empty (e.g. fresh clone or missing file), invoke Copernicus Marine fallback
+    if not features:
+        logger.info("Primary INCOIS and local file empty; invoking Copernicus fallback")
+        from backend.ingest.copernicus_fallback import fetch_copernicus_fallback
+
+        cop_data = await fetch_copernicus_fallback()
+        cop_feats = cop_data.get("features", [])
+        if target_sectors:
+            sec_set = set(target_sectors)
+            cop_feats = [f for f in cop_feats if f.get("properties", {}).get("sector") in sec_set]
+        features = cop_feats
+
+    return features
+
+
+async def ingest_textdata(session_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Fetch and parse INCOIS TextData into unified GeoJSON FeatureCollection.
+    Writes data/pfz-today.geojson, upserts into PostGIS pfz_zones table if connected,
+    and caches in Redis with 6h TTL.
 
     Args:
-        session_id: Active INCOIS JSESSIONID cookie value.
+        session_id: Optional active INCOIS JSESSIONID cookie value.
 
     Returns:
-        dict with keys: "features" (list of GeoJSON Features),
-        "timestamp" (ISO 8601), "count" (int).
+        dict: GeoJSON FeatureCollection with properties and metadata.
     """
-    # TODO: Implement INCOIS TextData parsing
-    raise NotImplementedError("INCOIS TextData ingest not yet implemented")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    features = await fetch_incois_sectors(session_id=session_id)
+
+    # Determine primary source
+    source = "incois_textdata"
+    if features and features[0].get("properties", {}).get("source") == "copernicus_fallback":
+        source = "copernicus_fallback"
+
+    sector_set = {
+        f.get("properties", {}).get("sector")
+        for f in features
+        if f.get("properties", {}).get("sector")
+    }
+
+    geojson_doc: Dict[str, Any] = {
+        "type": "FeatureCollection",
+        "source": source,
+        "timestamp": now_iso,
+        "count": len(features),
+        "sector_count": len(sector_set),
+        "features": features,
+    }
+
+    # 1. Write data/pfz-today.geojson (only if features non-empty)
+    if features:
+        out_path = _get_pfz_data_path()
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(geojson_doc, f, indent=2)
+            logger.info("Saved %d PFZ features to %s", len(features), out_path)
+        except Exception as io_err:
+            logger.warning("Could not write %s: %s", out_path, io_err)
+
+    # 2. Upsert to PostGIS if connected
+    try:
+        from backend.db.postgis import upsert_pfz_features
+
+        upserted = await upsert_pfz_features(features)
+        logger.info("Upserted %d PFZ zones into PostGIS database", upserted)
+    except Exception as db_err:
+        logger.debug("PostGIS upsert skipped (offline/disconnected): %s", db_err)
+
+    # 3. Cache in Redis (6-hour TTL)
+    try:
+        from backend.db.redis import set_json
+
+        await set_json("pfz:today", geojson_doc, ttl_seconds=21600)
+    except Exception as redis_err:
+        logger.debug("Redis cache set skipped: %s", redis_err)
+
+    return geojson_doc
