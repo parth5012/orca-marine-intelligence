@@ -415,11 +415,15 @@ def _fallback_distance_to_imbl(lat: float, lon: float) -> float | None:
 
 async def fetch_imd_cyclone_alert(lat: float, lon: float) -> dict | None:
     """
-    W2 real fetcher: IMD cyclone data from https://mausam.imd.gov.in.
-    Stub raises NotImplementedError — wrapper falls back to no alert.
+    Live real fetcher: IMD cyclone data and coastal pressure anomalies via live_fetchers.
     Returns {"active": bool, "name": str, "distance_km": float} or None.
     """
-    raise NotImplementedError("IMD cyclone fetch not configured — W2")
+    try:
+        from backend.ingest.live_fetchers import fetch_cyclone_alert_for_point
+        return fetch_cyclone_alert_for_point(lat, lon)
+    except Exception as exc:
+        logger.debug("danger_agent: live cyclone check failed: %s", exc)
+        return {"active": False}
 
 
 async def fetch_imd_lightning_alert(lat: float, lon: float) -> dict | None:

@@ -166,12 +166,12 @@ def _heuristic_wind_deg(wind_dir: str) -> int | None:
 
 async def fetch_imd_wind(lat: float, lon: float) -> tuple[float, str]:
     """
-    Live real wind fetcher via Open-Meteo Weather API.
+    Live real wind fetcher via live_fetchers (OpenWeatherMap / Open-Meteo).
     Returns (wind_speed_kt, wind_direction_compass).
     """
     try:
-        from backend.ingest.live_fetchers import fetch_open_meteo_weather
-        data = fetch_open_meteo_weather(lat, lon)
+        from backend.ingest.live_fetchers import fetch_live_weather
+        data = fetch_live_weather(lat, lon)
         return float(data["wind_speed_kt"]), str(data["wind_direction"])
     except Exception as exc:
         logger.debug("Live wind fetch failed for (%s, %s): %s", lat, lon, exc)
@@ -180,15 +180,15 @@ async def fetch_imd_wind(lat: float, lon: float) -> tuple[float, str]:
 
 async def fetch_imd_cyclones() -> list[dict]:
     """
-    W2 real fetcher: active cyclone list from IMD.
-
+    Real fetcher: active cyclone list from IMD / live coastal fetcher.
     Returns list of {"name": str, "lat": float, "lon": float, "center": [lat, lon]}
-    Stub returns [] (no active cyclones) so heuristic path is deterministic.
-    In W2 this would scrape https://mausam.imd.gov.in/responsive/cycloneinformation.php
-    or use IMD API.
     """
-    # Intentionally return empty — no active cyclones in W1 mock
-    return []
+    try:
+        from backend.ingest.live_fetchers import fetch_imd_cyclones as live_cyclones
+        return live_cyclones()
+    except Exception as exc:
+        logger.debug("IMD cyclone fetch error: %s", exc)
+        return []
 
 
 async def get_wind(
