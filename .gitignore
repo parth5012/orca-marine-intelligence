@@ -53,7 +53,8 @@ BLOCKED_*.md
 LEARNINGS.md
 TECH_DEBT.md
 docs/wayfinder
-# Logs
+Logs
 *.log
 
+# Teaching workspace
 teach/
