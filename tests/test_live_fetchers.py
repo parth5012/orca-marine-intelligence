@@ -2,7 +2,7 @@
 Tests for Live Data Fetching Layer (Open-Meteo, INCOIS PFZ, Marine Regions).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from backend.ingest.live_fetchers import (
     fetch_open_meteo_wave_current,
@@ -185,12 +185,36 @@ class TestLiveFetchers:
         assert "12:00" in res["deterioration_alert"]
 
     def test_fetch_open_meteo_marine_lead_hours(self):
-        # If target_dt is 6 hours ahead of now, forecast_lead_hours should be approx 6.0
-        now_dt = datetime.now(timezone.utc).astimezone(IST_TZ)
-        target = now_dt + timedelta(hours=6)
-        res = fetch_open_meteo_marine(9.93, 76.26, target_dt=target)
-        if res.get("data_freshness"):
-            lead = res["data_freshness"].get("forecast_lead_hours")
-            assert lead is not None
-            assert 5.0 <= lead <= 7.0
+        # Deterministically test forecast_lead_hours when target_dt is 6 hours ahead of now
+        fixed_now = datetime(2026, 9, 6, 6, 0, tzinfo=IST_TZ)
+        target = fixed_now + timedelta(hours=6)
+        times = [
+            (fixed_now + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M")
+            for i in range(12)
+        ]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "hourly": {
+                "time": times,
+                "wave_height": [1.0] * 12,
+                "wave_direction": [180] * 12,
+                "wave_period": [8.0] * 12,
+                "swell_wave_height": [0.5] * 12,
+                "swell_wave_period": [7.0] * 12,
+                "ocean_current_velocity": [0.5] * 12,
+                "ocean_current_direction": [90] * 12,
+            }
+        }
+
+        with patch("httpx.Client.get", return_value=mock_resp):
+            with patch("backend.ingest.live_fetchers.datetime") as mock_dt:
+                mock_dt.now.return_value = fixed_now
+                mock_dt.fromisoformat = datetime.fromisoformat
+                mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+                res = fetch_open_meteo_marine(9.93, 76.26, target_dt=target)
+
+        assert res["status"] in ("safe", "caution", "danger")
+        assert "data_freshness" in res
+        lead = res["data_freshness"]["forecast_lead_hours"]
+        assert lead == 6.0
 

@@ -445,7 +445,7 @@ def compute_departure_window_advisory(
         slots = []
         for t, h_wave, w_kmh, g_kmh, w_kt in zip(slot_times, waves, winds_kmh, gusts_kmh, winds_kt):
             hour_str = t.split("T")[1] if "T" in t else t
-            is_safe = (h_wave <= WAVE_SAFE_MAX) and (w_kt <= WIND_SAFE_MAX)
+            is_safe = (h_wave < WAVE_SAFE_MAX) and (w_kt < WIND_SAFE_MAX)
             slots.append({"time": hour_str, "wave_m": h_wave, "wind_kmh": w_kmh, "gust_kmh": g_kmh, "is_safe": is_safe})
 
         # Longest contiguous run of safe hours
