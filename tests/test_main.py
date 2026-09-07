@@ -36,6 +36,7 @@ def test_routes_mounted():
     assert "/api/weather/current" in paths
     assert "/api/geofence/check" in paths
     assert "/api/tiles/{z}/{x}/{y}.pbf" in paths
+    assert "/api/tiles/config" in paths
 
 
 def test_cors_middleware_defaults(client):
