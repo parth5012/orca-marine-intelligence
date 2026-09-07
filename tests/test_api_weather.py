@@ -205,6 +205,13 @@ class TestCurrentWeatherEndpoint:
         resp = client.get("/api/weather/current?lat=invalid&lon=76.26")
         assert resp.status_code == 422
 
+    def test_current_weather_upstream_failure_returns_502(self, client):
+        """When upstream weather fetcher raises exception, returns 502 Bad Gateway."""
+        with patch("backend.routers.weather.fetch_live_weather", side_effect=RuntimeError("Upstream down")):
+            resp = client.get("/api/weather/current?lat=9.93&lon=76.26")
+            assert resp.status_code == 502
+            assert "upstream" in resp.json()["detail"].lower()
+
 
 class TestCycloneWarningsEndpoint:
     """Tests for GET /api/weather/cyclone."""
@@ -293,6 +300,13 @@ class TestCycloneWarningsEndpoint:
         # lat out of range
         resp = client.get("/api/weather/cyclone?lat=120.0&lon=76.26")
         assert resp.status_code == 400
+
+    def test_cyclone_warnings_upstream_failure_returns_502(self, client):
+        """When upstream cyclone fetcher raises exception, returns 502 Bad Gateway."""
+        with patch("backend.routers.weather.fetch_imd_cyclone_alerts", side_effect=RuntimeError("IMD down")):
+            resp = client.get("/api/weather/cyclone?lat=9.93&lon=76.26")
+            assert resp.status_code == 502
+            assert "upstream" in resp.json()["detail"].lower()
 
 
 class TestSubagentsCompatibility:

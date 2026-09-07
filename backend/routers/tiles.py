@@ -8,9 +8,15 @@ Serves basemap tile configuration metadata and vector tile endpoints for Leaflet
 """
 
 import json
+import logging
 import os
 from typing import Any, Dict
 from fastapi import APIRouter, Response
+
+from backend.db.postgis import get_mvt_tile
+from backend.db.redis import get_tile_cache, set_tile_cache
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tiles"])
 
@@ -102,20 +108,68 @@ async def get_tiles_config() -> Response:
 async def get_tile(z: int, x: int, y: int, layer: str = "pfz") -> Response:
     """
     Serve vector tile for coordinate (z, x, y).
-    Returns an empty MVT (Mapbox Vector Tile) byte sequence with 3600s caching
-    when dynamic PostGIS ST_AsMVT generation is in fallback/mock mode.
+    Queries PostGIS ST_AsMVT per layer when connected;
+    Caches in Redis under 'tiles:{layer}:{z}/{x}/{y}' for 3600s;
+    Falls back to EMPTY_MVT_BYTES with 'X-Tile-Fallback: true' header when DB/Redis is down.
     """
-    if z < 0 or z > 24:
+    if not (0 <= z <= 24):
         return Response(status_code=400, content="Invalid zoom level")
 
     max_coord = 2**z
-    if x < 0 or x >= max_coord or y < 0 or y >= max_coord:
+    if not (0 <= x < max_coord and 0 <= y < max_coord):
         return Response(status_code=400, content="Invalid tile coordinates")
 
     safe_layer = layer.strip().lower() if layer else "pfz"
     if safe_layer not in ALLOWED_LAYERS:
         safe_layer = "pfz"
 
+    cache_key = f"tiles:{safe_layer}:{z}/{x}/{y}"
+
+    # 1. Check Redis cache
+    cached_tile = None
+    try:
+        cached_tile = await get_tile_cache(cache_key)
+    except Exception as e:
+        logger.warning("Redis cache read error for %s: %s", cache_key, e)
+
+    if cached_tile is not None:
+        return Response(
+            content=cached_tile,
+            media_type="application/x-protobuf",
+            headers={
+                "Content-Type": "application/x-protobuf",
+                "Cache-Control": "public, max-age=3600",
+                "X-Tile-Layer": safe_layer,
+                "X-Tile-Coords": f"{z}/{x}/{y}",
+            },
+        )
+
+    # 2. Query PostGIS ST_AsMVT per layer
+    tile_bytes = None
+    try:
+        tile_bytes = await get_mvt_tile(safe_layer, z, x, y)
+    except Exception as e:
+        logger.warning("PostGIS ST_AsMVT error for %s: %s", cache_key, e)
+
+    # 3. If DB connected & returned tile, cache in Redis and return
+    if tile_bytes is not None:
+        try:
+            await set_tile_cache(cache_key, tile_bytes, ttl_seconds=3600)
+        except Exception as e:
+            logger.warning("Redis set_tile_cache failed for %s: %s", cache_key, e)
+
+        return Response(
+            content=tile_bytes,
+            media_type="application/x-protobuf",
+            headers={
+                "Content-Type": "application/x-protobuf",
+                "Cache-Control": "public, max-age=3600",
+                "X-Tile-Layer": safe_layer,
+                "X-Tile-Coords": f"{z}/{x}/{y}",
+            },
+        )
+
+    # 4. Fallback to EMPTY_MVT_BYTES with X-Tile-Fallback: true
     return Response(
         content=EMPTY_MVT_BYTES,
         media_type="application/x-protobuf",
@@ -124,5 +178,6 @@ async def get_tile(z: int, x: int, y: int, layer: str = "pfz") -> Response:
             "Cache-Control": "public, max-age=3600",
             "X-Tile-Layer": safe_layer,
             "X-Tile-Coords": f"{z}/{x}/{y}",
+            "X-Tile-Fallback": "true",
         },
     )

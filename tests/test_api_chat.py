@@ -285,19 +285,20 @@ class TestVoiceTranscriptionEndpoint:
         assert resp.status_code == 422
 
     def test_voice_offline_mock_fallback(self, client):
-        """Verify fallback transcription when GROQ_API_KEY is not configured."""
+        """Verify fallback transcription when GROQ_API_KEY not configured."""
         with patch.dict(os.environ, {}, clear=True):
             files = {"file": ("malayalam_sample.wav", b"RIFFFAKEWAVDATA", "audio/wav")}
             data = {"language": "ml", "session_id": "voice-sess-1"}
             resp = client.post("/api/chat/voice", files=files, data=data)
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["session_id"] == "voice-sess-1"
-        assert "malayalam_sample.wav" in body["transcription"]
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["session_id"] == "voice-sess-1"
+            assert "malayalam_sample.wav" in body["transcription"]
+            assert body.get("mock") is True
 
     def test_voice_groq_whisper_success(self, client):
-        """Verify Groq Whisper transcription API is called when GROQ_API_KEY is present."""
+        """Verify Groq Whisper transcription API called when GROQ_API_KEY present."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
@@ -314,6 +315,7 @@ class TestVoiceTranscriptionEndpoint:
                 body = resp.json()
                 assert body["transcription"] == "എവിടെ മത്സ്യം കിട്ടും? (Where is fish available?)"
                 assert "session_id" in body and body["session_id"]
+                assert body.get("mock") is False
 
                 # Verify httpx call parameters
                 assert mock_post.called
@@ -339,6 +341,15 @@ class TestVoiceTranscriptionEndpoint:
                 assert "transcription" in body
                 assert "query.wav" in body["transcription"]
                 assert "session_id" in body
+                assert body.get("mock") is True
+
+    def test_voice_oversized_file_returns_413(self, client):
+        """Verify audio file exceeding 25MB returns 413 HTTP status."""
+        oversized_data = b"x" * (25 * 1024 * 1024 + 1024)
+        files = {"file": ("oversized.wav", oversized_data, "audio/wav")}
+        resp = client.post("/api/chat/voice", files=files)
+        assert resp.status_code == 413
+        assert "25MB" in resp.json()["detail"]
 
 
 class TestChatIntegrationEndToEnd:

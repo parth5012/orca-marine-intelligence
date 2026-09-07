@@ -27,6 +27,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _redis_client = None
+_redis_binary_client = None
 _memory_store: dict[str, Any] = {}
 _memory_expiry: dict[str, float] = {}
 
@@ -44,7 +45,7 @@ def _is_expired(key: str) -> bool:
 
 async def init_redis(redis_url: str | None = None):
     """Initialize Redis connection."""
-    global _redis_client
+    global _redis_client, _redis_binary_client
     if _redis_client is not None:
         return _redis_client
     url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -52,6 +53,7 @@ async def init_redis(redis_url: str | None = None):
         import redis.asyncio as aioredis  # type: ignore
 
         _redis_client = aioredis.from_url(url, decode_responses=True)
+        _redis_binary_client = aioredis.from_url(url, decode_responses=False)
         # Quick ping with short timeout to verify connectivity
         try:
             import asyncio
@@ -61,9 +63,11 @@ async def init_redis(redis_url: str | None = None):
         except Exception as e:
             logger.warning("Redis ping failed, falling back to memory: %s", e)
             _redis_client = None
+            _redis_binary_client = None
     except Exception as e:
         logger.warning("Redis not available, using in-memory fallback: %s", e)
         _redis_client = None
+        _redis_binary_client = None
     return _redis_client
 
 
@@ -164,3 +168,71 @@ async def get_history(session_id: str, limit: int = 10) -> list:
     except Exception as e:
         logger.warning("get_history failed for %s: %s", session_id, e)
         return []
+
+
+async def get_tile_cache(key: str) -> bytes | None:
+    """Get binary tile bytes from Redis cache or in-memory fallback."""
+    if _redis_binary_client is not None:
+        try:
+            import asyncio
+
+            raw = await asyncio.wait_for(_redis_binary_client.get(key), timeout=1.0)
+            if raw is not None:
+                if isinstance(raw, bytes):
+                    return raw
+                if isinstance(raw, str):
+                    return raw.encode("latin1")
+                return bytes(raw)
+        except Exception as e:
+            logger.warning("Redis get_tile_cache failed for %s: %s, falling back to memory", key, e)
+    elif _redis_client is not None:
+        try:
+            import asyncio
+
+            raw = await asyncio.wait_for(_redis_client.get(key), timeout=1.0)
+            if raw is not None:
+                if isinstance(raw, bytes):
+                    return raw
+                if isinstance(raw, str):
+                    return raw.encode("latin1")
+        except Exception as e:
+            logger.warning("Redis get_tile_cache failed for %s: %s, falling back to memory", key, e)
+
+    # In-memory fallback
+    if _is_expired(key):
+        return None
+    val = _memory_store.get(key)
+    if val is None:
+        return None
+    if isinstance(val, bytes):
+        return val
+    if isinstance(val, str):
+        return val.encode("latin1")
+    if isinstance(val, (bytearray, memoryview)):
+        return bytes(val)
+    return None
+
+
+async def set_tile_cache(key: str, value: bytes, ttl_seconds: int = 3600) -> None:
+    """Set binary tile bytes in Redis cache or in-memory fallback."""
+    data = bytes(value) if not isinstance(value, bytes) else value
+    if _redis_binary_client is not None:
+        try:
+            import asyncio
+
+            await asyncio.wait_for(_redis_binary_client.set(key, data, ex=ttl_seconds), timeout=1.0)
+            return
+        except Exception as e:
+            logger.warning("Redis set_tile_cache failed for %s: %s, falling back to memory", key, e)
+    elif _redis_client is not None:
+        try:
+            import asyncio
+
+            await asyncio.wait_for(_redis_client.set(key, data.decode("latin1"), ex=ttl_seconds), timeout=1.0)
+            return
+        except Exception as e:
+            logger.warning("Redis set_tile_cache failed for %s: %s, falling back to memory", key, e)
+
+    _memory_store[key] = data
+    _memory_expiry[key] = time.time() + ttl_seconds
+

@@ -4,7 +4,7 @@ PFZ Data Proxy Router
 Owner: M-C (Backend API & Platform) — GET /api/pfz/today, GET /api/pfz/history
 Module: backend/routers/pfz.py
 
-Serves latest and historical PFZ GeoJSON data to frontend map and agent workflows.
+Serves latest and historical PFZ GeoJSON data for frontend map and agent workflows.
 Caches live INCOIS data in Redis (6h TTL) with automatic Copernicus Marine fallback.
 """
 
@@ -32,7 +32,7 @@ async def get_today_pfz(
 ) -> Dict[str, Any]:
     """
     Return today's PFZ GeoJSON FeatureCollection.
-    Checks Redis cache (6h TTL), loads live INCOIS data, and falls back to Copernicus Marine when needed.
+    Checks Redis cache (6h TTL), loads live INCOIS data, falls back to Copernicus Marine when needed.
     """
     # 1. Check Redis cache for 'pfz:today'
     base_data: Optional[Dict[str, Any]] = None
@@ -95,7 +95,7 @@ async def get_today_pfz(
     # 5. Apply limit
     limited_features = features[:limit]
 
-    # 6. Build response metadata
+    # 6. Build response with metadata
     source = base_data.get("source", "incois_textdata") if base_data else "incois_textdata"
     valid_until = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
     sector_count = len(
@@ -126,82 +126,98 @@ async def get_today_pfz(
 async def get_pfz_history(
     days: int = Query(7, ge=1, le=30, description="Number of historical days to return (1-30)"),
     sector: Optional[str] = Query(None, description="Optional INCOIS sector code filter"),
+    limit: int = Query(500, ge=1, le=5000, description="Max number of historical features to return"),
 ) -> Dict[str, Any]:
     """
     Return historical PFZ data for the last `days` days.
     Queries PostGIS if connected; otherwise constructs historical snapshots from local / fallback data.
     """
     history_features: List[Dict[str, Any]] = []
+    is_db_result = False
+    today_date = date.today()
+    sec_up = sector.strip().upper() if sector and sector.strip() else None
 
     # 1. Attempt PostGIS query if database is connected
     try:
-        from sqlalchemy import select
-
+        from sqlalchemy import func, select
         from backend.db.models import PFZZone
         from backend.db.session import AsyncSessionLocal
 
-        start_date = date.today() - timedelta(days=days)
+        start_date = today_date - timedelta(days=days)
         async with AsyncSessionLocal() as session:
             stmt = select(PFZZone).where(PFZZone.valid_date >= start_date)
-            if sector:
-                sec_up = sector.strip().upper()
-                stmt = stmt.where((PFZZone.sector == sec_up) | (PFZZone.sector_name == sec_up))
-            stmt = stmt.order_by(PFZZone.valid_date.desc()).limit(500)
+            if sec_up:
+                stmt = stmt.where(
+                    (func.upper(PFZZone.sector) == sec_up) | (func.upper(PFZZone.sector_name) == sec_up)
+                )
+            stmt = stmt.order_by(PFZZone.valid_date.desc(), PFZZone.id.asc()).limit(limit)
             res = await session.execute(stmt)
             zones = res.scalars().all()
 
-            for z in zones:
-                history_features.append(
-                    {
-                        "type": "Feature",
-                        "geometry": {"type": "Point", "coordinates": [z.lon, z.lat]},
-                        "properties": {
-                            "zone_id": z.zone_id,
-                            "place": z.place,
-                            "sector": z.sector,
-                            "sector_name": z.sector_name,
-                            "dir": z.direction,
-                            "direction": z.direction,
-                            "bearing": z.bearing,
-                            "distance": z.distance_km,
-                            "depth": z.depth_range,
-                            "valid_date": str(z.valid_date),
-                            "source": z.source,
-                        },
-                    }
-                )
+            if zones:
+                is_db_result = True
+                for z in zones:
+                    history_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [z.lon, z.lat]},
+                            "properties": {
+                                "zone_id": z.zone_id,
+                                "place": z.place,
+                                "sector": z.sector,
+                                "sector_name": z.sector_name,
+                                "dir": z.direction,
+                                "direction": z.direction,
+                                "bearing": z.bearing,
+                                "distance": z.distance_km,
+                                "depth": z.depth_range,
+                                "valid_date": str(z.valid_date),
+                                "source": z.source or "incois_textdata",
+                            },
+                        }
+                    )
     except Exception as db_exc:
         logger.debug("Database historical query skipped: %s", db_exc)
 
-    # 2. If no database records found, construct historical snapshots
-    today_date = date.today()
+    # 2. If no database records found, construct historical snapshots from fallback
     snapshots: List[Dict[str, Any]] = []
 
-    if not history_features:
-        base_feats = load_local_pfz(sectors=[sector] if sector else None)
+    if not is_db_result:
+        # DB-empty fallback clearly flagged: source: synthetic-duplicate + warning field
+        source = "synthetic-duplicate"
+        warning = "No historical records found in database; returning synthetic duplicate snapshots."
+
+        base_feats = load_local_pfz(sectors=[sec_up] if sec_up else None)
         if not base_feats:
-            cop_data = await fetch_copernicus_fallback(sector=sector)
+            cop_data = await fetch_copernicus_fallback(sector=sec_up)
             base_feats = cop_data.get("features", [])
 
         for d in range(days):
             hist_date = (today_date - timedelta(days=d)).isoformat()
             day_features = []
             for feat in base_feats:
+                if len(history_features) >= limit:
+                    break
                 feat_copy = json.loads(json.dumps(feat))
                 props = feat_copy.setdefault("properties", {})
                 props["valid_date"] = hist_date
                 props["timestamp"] = f"{hist_date}T11:30:00Z"
+                props["source"] = "synthetic-duplicate"
                 day_features.append(feat_copy)
                 history_features.append(feat_copy)
 
-            snapshots.append(
-                {
-                    "date": hist_date,
-                    "count": len(day_features),
-                    "features": day_features,
-                }
-            )
+            if day_features:
+                snapshots.append(
+                    {
+                        "date": hist_date,
+                        "count": len(day_features),
+                        "features": day_features,
+                    }
+                )
     else:
+        source = "postgis"
+        warning = None
+
         # Group database records into snapshots by valid_date
         date_groups: Dict[str, List[Dict[str, Any]]] = {}
         for feat in history_features:
@@ -217,13 +233,18 @@ async def get_pfz_history(
                 }
             )
 
-    return {
+    response: Dict[str, Any] = {
         "type": "FeatureCollection",
         "days": days,
         "sector": sector,
         "start_date": (today_date - timedelta(days=days)).isoformat(),
         "end_date": today_date.isoformat(),
+        "source": source,
         "snapshots": snapshots,
         "features": history_features,
         "count": len(history_features),
     }
+    if warning:
+        response["warning"] = warning
+
+    return response

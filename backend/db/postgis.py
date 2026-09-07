@@ -12,7 +12,7 @@ Provides spatial database queries for:
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import date
-from sqlalchemy import select, func, cast
+from sqlalchemy import select, func, cast, text
 from sqlalchemy.dialects.postgresql import insert
 from geoalchemy2 import Geometry
 from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_Contains, ST_MakePoint, ST_SetSRID
@@ -41,7 +41,13 @@ async def upsert_pfz_features(features: List[Dict[str, Any]], valid_date: Option
         coords = geom.get("coordinates", [0.0, 0.0])
         lon, lat = coords[0], coords[1]
 
-        zone_id = props.get("zone_id") or f"{props.get('sector', 'SEC')}_{props.get('place', 'zone')}_{idx}"
+        base_zone_id = props.get("zone_id") or f"{props.get('sector', 'SEC')}_{props.get('place', 'zone')}_{idx}"
+        date_str = str(valid_date)
+        if date_str not in base_zone_id:
+            zone_id = f"{base_zone_id}_{date_str}"
+        else:
+            zone_id = base_zone_id
+        zone_id = zone_id[:64]
         bearing_val = props.get("bearing")
         try:
             bearing_int = int(bearing_val) if bearing_val is not None else None
@@ -182,5 +188,134 @@ async def check_geofence(lat: float, lon: float) -> Dict[str, Any]:
             "inside_mpa": inside_mpa,
             "mpa_name": mpa_name,
             "status": status,
-            "reason": reason
+            "reason": reason,
         }
+
+
+MVT_LAYER_QUERIES: Dict[str, str] = {
+    "pfz": """
+        WITH mvtgeom AS (
+            SELECT
+                ST_AsMVTGeom(
+                    ST_Transform(geom, 3857),
+                    ST_TileEnvelope(:z, :x, :y),
+                    4096,
+                    64,
+                    true
+                ) AS geom,
+                zone_id,
+                place,
+                sector,
+                sector_name,
+                direction,
+                bearing,
+                depth_range,
+                distance_km,
+                lat,
+                lon,
+                intensity,
+                source,
+                CAST(valid_date AS TEXT) AS valid_date
+            FROM pfz_zones
+            WHERE geom && ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326)
+        )
+        SELECT ST_AsMVT(mvtgeom.*, :layer, 4096, 'geom') FROM mvtgeom;
+    """,
+    "eez": """
+        WITH mvtgeom AS (
+            SELECT
+                ST_AsMVTGeom(
+                    ST_Transform(geom, 3857),
+                    ST_TileEnvelope(:z, :x, :y),
+                    4096,
+                    64,
+                    true
+                ) AS geom,
+                id,
+                country,
+                boundary_name,
+                boundary_type
+            FROM eez_boundaries
+            WHERE geom && ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326)
+        )
+        SELECT ST_AsMVT(mvtgeom.*, :layer, 4096, 'geom') FROM mvtgeom;
+    """,
+    "mpa": """
+        WITH mvtgeom AS (
+            SELECT
+                ST_AsMVTGeom(
+                    ST_Transform(geom, 3857),
+                    ST_TileEnvelope(:z, :x, :y),
+                    4096,
+                    64,
+                    true
+                ) AS geom,
+                id,
+                mpa_name,
+                state,
+                restriction_level
+            FROM mpa_boundaries
+            WHERE geom && ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326)
+        )
+        SELECT ST_AsMVT(mvtgeom.*, :layer, 4096, 'geom') FROM mvtgeom;
+    """,
+    "recommendation": """
+        WITH mvtgeom AS (
+            SELECT
+                ST_AsMVTGeom(
+                    ST_Transform(geom, 3857),
+                    ST_TileEnvelope(:z, :x, :y),
+                    4096,
+                    64,
+                    true
+                ) AS geom,
+                zone_id,
+                place,
+                sector,
+                sector_name,
+                direction,
+                bearing,
+                depth_range,
+                distance_km,
+                lat,
+                lon,
+                intensity,
+                source,
+                CAST(valid_date AS TEXT) AS valid_date
+            FROM pfz_zones
+            WHERE geom && ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326)
+              AND intensity IN ('high', 'medium', 'recommended')
+        )
+        SELECT ST_AsMVT(mvtgeom.*, :layer, 4096, 'geom') FROM mvtgeom;
+    """,
+}
+
+
+async def get_mvt_tile(layer: str, z: int, x: int, y: int) -> Optional[bytes]:
+    """
+    Generate Mapbox Vector Tile (MVT) binary protobuf for a given layer and tile coordinate.
+    Queries PostGIS using ST_TileEnvelope and ST_AsMVT.
+    Returns bytes (empty b"" if no features exist in tile), or None on database error.
+    """
+    sql = MVT_LAYER_QUERIES.get(layer)
+    if not sql:
+        return None
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                text(sql),
+                {"z": z, "x": x, "y": y, "layer": layer},
+            )
+            raw = result.scalar()
+            if raw is None:
+                return b""
+            if isinstance(raw, bytes):
+                return raw
+            if isinstance(raw, (bytearray, memoryview)):
+                return bytes(raw)
+            if isinstance(raw, str):
+                return raw.encode("latin1")
+            return b""
+    except Exception as e:
+        logger.warning("PostGIS ST_AsMVT query failed for %s (%d/%d/%d): %s", layer, z, x, y, e)
+        return None
