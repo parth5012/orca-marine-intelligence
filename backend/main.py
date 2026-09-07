@@ -98,7 +98,7 @@ def get_telemetry_status() -> Dict[str, Any]:
     """Inspect and report LangSmith tracing configuration readiness."""
     tracing_v2 = os.getenv("LANGCHAIN_TRACING_V2", "").strip().lower() in ("true", "1", "yes")
     raw_key = os.getenv("LANGCHAIN_API_KEY", "").strip()
-    api_key_configured = bool(raw_key and not raw_key.startswith("your_"))
+    api_key_configured = bool(raw_key and not raw_key.lower().startswith("your_"))
     project = os.getenv("LANGCHAIN_PROJECT", "orca-marine-intelligence").strip() or "orca-marine-intelligence"
     endpoint = os.getenv("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com").strip() or "https://api.smith.langchain.com"
 
@@ -131,7 +131,7 @@ async def lifespan(app: FastAPI):
     data_source = os.getenv("ORCA_DATA_SOURCE", "mock")
     # Ensure placeholder or missing key does not trigger background 401 attempts
     raw_key = os.getenv("LANGCHAIN_API_KEY", "").strip()
-    if not raw_key or raw_key.startswith("your_"):
+    if not raw_key or raw_key.lower().startswith("your_"):
         if os.getenv("LANGCHAIN_TRACING_V2", "").strip().lower() in ("true", "1", "yes"):
             logger.info("LangSmith: Placeholder or missing API key detected; setting LANGCHAIN_TRACING_V2=false")
             os.environ["LANGCHAIN_TRACING_V2"] = "false"
