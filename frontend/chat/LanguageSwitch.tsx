@@ -95,10 +95,14 @@ export default function LanguageSwitch({
     <div className="relative inline-block text-left" ref={dropdownRef}>
       <button
         type="button"
+        id="language-selector-button"
+        data-testid="language-selector-button"
         onClick={() => setIsOpen(!isOpen)}
         className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/30 text-xs sm:text-sm font-medium text-cyan-200 transition-colors shadow-sm focus:outline-none focus:ring-1 focus:ring-cyan-400"
         title="Change Language"
         aria-label="Change Language"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
       >
         <span className="text-base" role="img" aria-label="Globe">
           🌐
@@ -127,7 +131,13 @@ export default function LanguageSwitch({
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-1.5 w-64 sm:w-72 rounded-xl bg-slate-900 border border-cyan-500/30 shadow-2xl z-50 overflow-hidden backdrop-blur-md">
+        <div
+          id="language-selector-dropdown"
+          data-testid="language-selector-dropdown"
+          role="listbox"
+          aria-label="Language options"
+          className="absolute right-0 mt-1.5 w-64 sm:w-72 rounded-xl bg-slate-900 border border-cyan-500/30 shadow-2xl z-50 overflow-hidden backdrop-blur-md"
+        >
           <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/60">
             <p className="text-xs font-medium text-cyan-400 uppercase tracking-wider">
               Select Language / ഭാഷ / மொழி
@@ -143,6 +153,11 @@ export default function LanguageSwitch({
               return (
                 <button
                   key={lang.code}
+                  id={`language-option-${lang.code}`}
+                  data-testid={`language-option-${lang.code}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  aria-label={`${lang.name} (${lang.native}) - ${lang.region}`}
                   onClick={() => handleSelect(lang.code)}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs sm:text-sm transition-colors ${
                     isSelected

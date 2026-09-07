@@ -15,6 +15,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { ChatPanel, LanguageSwitch, SafetyData } from '@/chat';
 import { MapView, SafetyBadge } from '@/map';
 
@@ -69,15 +70,27 @@ export default function HomePage() {
   }, []);
 
   const handleLocationUpdate = useCallback((lat: number, lon: number) => {
+    // Edge-case guard: fallback to default if invalid coordinates
+    if (typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon) || !isFinite(lat) || !isFinite(lon)) {
+      setMapCenter([9.93, 76.27]);
+      setMapZoom(11);
+      return;
+    }
     // Defend against [lon, lat] accidentally passed as [lat, lon]
     const actualLat = lat > 50 && lon < 40 ? lon : lat;
     const actualLon = lat > 50 && lon < 40 ? lat : lon;
-    setMapCenter([actualLat, actualLon]);
+    const boundedLat = Math.max(-90, Math.min(90, actualLat));
+    const boundedLon = Math.max(-180, Math.min(180, actualLon));
+    setMapCenter([boundedLat, boundedLon]);
     setMapZoom(11);
   }, []);
 
   const handleMapHighlight = useCallback((features: any[]) => {
     setHighlightFeatures(features);
+    // If on mobile screen, auto-switch to map tab so user sees highlighted zone
+    if (features && features.length > 0 && typeof window !== 'undefined' && window.innerWidth < 768) {
+      setActiveTab('map');
+    }
     if (features.length > 0) {
       const first = features[0];
       const geom = first?.geometry;
@@ -107,7 +120,13 @@ export default function HomePage() {
       {/* Top Application Header Bar */}
       <header className="h-16 px-4 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between z-30 flex-shrink-0 backdrop-blur">
         {/* Brand & Project Info */}
-        <div className="flex items-center gap-3">
+        <Link
+          href="/"
+          id="nav-brand-link"
+          data-testid="nav-brand-link"
+          aria-label="ORCA Home"
+          className="flex items-center gap-3 hover:opacity-95 transition-opacity"
+        >
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center text-xl shadow-lg shadow-cyan-900/40 border border-cyan-400/30">
             🐬
           </div>
@@ -127,7 +146,7 @@ export default function HomePage() {
               Autonomous Ocean Advisory, PFZ Telemetry & Safety System
             </p>
           </div>
-        </div>
+        </Link>
 
         {/* Center: GPS & System Telemetry Status */}
         <div className="hidden md:flex items-center gap-2.5">
@@ -150,8 +169,18 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Right Controls: SafetyBadge & LanguageSwitch */}
+        {/* Right Controls: SafetyBadge, LanguageSwitch, Map Navigation */}
         <div className="flex items-center gap-2 sm:gap-3">
+          <Link
+            href="/map"
+            id="nav-map-link"
+            data-testid="nav-map-link"
+            aria-label="Open Ocean Map"
+            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-cyan-300 border border-slate-700 text-xs font-semibold transition-colors shadow-sm"
+          >
+            <span>🗺️</span>
+            <span>Ocean Map</span>
+          </Link>
           <SafetyBadge
             waves={safetyState.waves_m}
             wind={safetyState.wind_kts}
@@ -168,9 +197,19 @@ export default function HomePage() {
       </header>
 
       {/* Mobile Tab Switcher */}
-      <div className="flex md:hidden bg-slate-900 border-b border-slate-800 p-1">
+      <div
+        role="tablist"
+        aria-label="Mobile Navigation"
+        className="flex md:hidden bg-slate-900 border-b border-slate-800 p-1"
+      >
         <button
           type="button"
+          id="mobile-tab-chat"
+          data-testid="mobile-tab-chat"
+          role="tab"
+          aria-selected={activeTab === 'chat'}
+          aria-controls="chat-panel-container"
+          aria-label="Switch to Chat Advisory Tab"
           onClick={() => setActiveTab('chat')}
           className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
             activeTab === 'chat'
@@ -182,6 +221,12 @@ export default function HomePage() {
         </button>
         <button
           type="button"
+          id="mobile-tab-map"
+          data-testid="mobile-tab-map"
+          role="tab"
+          aria-selected={activeTab === 'map'}
+          aria-controls="map-view-container"
+          aria-label="Switch to Ocean Map Tab"
           onClick={() => setActiveTab('map')}
           className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
             activeTab === 'map'
@@ -197,6 +242,10 @@ export default function HomePage() {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* Left Side: Chat Advisory Panel */}
         <section
+          id="chat-panel-container"
+          data-testid="chat-panel-container"
+          role="tabpanel"
+          aria-labelledby="mobile-tab-chat"
           className={`h-full flex-shrink-0 transition-all duration-300 z-10 ${
             activeTab === 'chat' ? 'flex' : 'hidden md:flex'
           } w-full md:w-[440px] lg:w-[480px] xl:w-[520px]`}
@@ -215,6 +264,10 @@ export default function HomePage() {
 
         {/* Right Side: Map Visualization */}
         <section
+          id="map-view-container"
+          data-testid="map-view-container"
+          role="tabpanel"
+          aria-labelledby="mobile-tab-map"
           className={`h-full flex-1 relative bg-slate-950 ${
             activeTab === 'map' ? 'flex' : 'hidden md:flex'
           } flex-col`}
