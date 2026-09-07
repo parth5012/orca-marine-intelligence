@@ -62,6 +62,10 @@ def test_health_check_endpoint(client):
     assert data["database"] in ["connected", "disconnected"]
     assert data["redis"] in ["connected", "disconnected"]
     assert data["data_source"] in ["mock", "live"]
+    assert "telemetry" in data
+    assert "langsmith" in data["telemetry"]
+    assert "enabled" in data["telemetry"]["langsmith"]
+    assert "project" in data["telemetry"]["langsmith"]
 
 
 @pytest.mark.asyncio
@@ -89,9 +93,30 @@ async def test_health_check_degraded_status():
         mock_db.return_value = "disconnected"
         mock_redis.return_value = "connected"
 
-        with TestClient(app, raise_server_exceptions=False) as c:
-            response = c.get("/health")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["status"] == "degraded"
-            assert data["database"] == "disconnected"
+    with TestClient(app, raise_server_exceptions=False) as c:
+        response = c.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "degraded"
+        assert data["database"] == "disconnected"
+
+
+def test_get_telemetry_status_permutations():
+    """Verify get_telemetry_status correctly evaluates flags and filters placeholders."""
+    from backend.main import get_telemetry_status
+
+    with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "false", "LANGCHAIN_API_KEY": ""}, clear=False):
+        status = get_telemetry_status()
+        assert status["langsmith"]["enabled"] is False
+
+    with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true", "LANGCHAIN_API_KEY": "your_langsmith_api_key_here"}, clear=False):
+        status = get_telemetry_status()
+        assert status["langsmith"]["enabled"] is False
+        assert status["langsmith"]["api_key_configured"] is False
+
+    with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true", "LANGCHAIN_API_KEY": "ls__valid_key_123", "LANGCHAIN_PROJECT": "orca-test"}, clear=False):
+        status = get_telemetry_status()
+        assert status["langsmith"]["enabled"] is True
+        assert status["langsmith"]["api_key_configured"] is True
+        assert status["langsmith"]["project"] == "orca-test"
+

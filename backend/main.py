@@ -84,7 +84,7 @@ async def check_database() -> str:
 async def check_redis() -> str:
     """Verify Redis pool readiness."""
     try:
-        import backend.db.redis as r_mod
+        from backend.db import redis as r_mod
         client = getattr(r_mod, "_redis_client", None)
         if client is not None:
             await asyncio.wait_for(client.ping(), timeout=1.0)
@@ -93,6 +93,24 @@ async def check_redis() -> str:
     except Exception as e:
         logger.debug("Redis ping error: %s", e)
         return "disconnected"
+
+def get_telemetry_status() -> Dict[str, Any]:
+    """Inspect and report LangSmith tracing configuration readiness."""
+    tracing_v2 = os.getenv("LANGCHAIN_TRACING_V2", "").strip().lower() in ("true", "1", "yes")
+    raw_key = os.getenv("LANGCHAIN_API_KEY", "").strip()
+    api_key_configured = bool(raw_key and not raw_key.startswith("your_"))
+    project = os.getenv("LANGCHAIN_PROJECT", "orca-marine-intelligence").strip() or "orca-marine-intelligence"
+    endpoint = os.getenv("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com").strip() or "https://api.smith.langchain.com"
+
+    return {
+        "langsmith": {
+            "enabled": tracing_v2 and api_key_configured,
+            "tracing_v2": tracing_v2,
+            "api_key_configured": api_key_configured,
+            "project": project,
+            "endpoint": endpoint,
+        }
+    }
 
 
 @asynccontextmanager
@@ -111,12 +129,14 @@ async def lifespan(app: FastAPI):
     redis_url = os.getenv("REDIS_URL")
     allowed_origins = os.getenv("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS)
     data_source = os.getenv("ORCA_DATA_SOURCE", "mock")
+    telemetry = get_telemetry_status()
     logger.info(
-        "Configured environment: ORCA_DATA_SOURCE=%s, DATABASE_URL=%s, REDIS_URL=%s, ALLOWED_ORIGINS=%s",
+        "Configured environment: ORCA_DATA_SOURCE=%s, DATABASE_URL=%s, REDIS_URL=%s, ALLOWED_ORIGINS=%s, LANGSMITH_ENABLED=%s",
         data_source,
         "set" if db_url else "default/unset",
         "set" if redis_url else "default/unset",
         allowed_origins,
+        telemetry["langsmith"]["enabled"],
     )
 
     # Verify database connection (gracefully handle disconnected state)
@@ -221,4 +241,5 @@ async def health_check() -> Dict[str, Any]:
         "database": db_status,
         "redis": redis_status,
         "data_source": data_source,
+        "telemetry": get_telemetry_status(),
     }
