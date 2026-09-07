@@ -31,7 +31,7 @@ class ChatMessageRead(ChatMessageBase):
 
     id: int
     session_id: str
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
 
 class ChatSessionBase(BaseModel):
@@ -58,6 +58,6 @@ class ChatSessionRead(ChatSessionBase):
     model_config = ConfigDict(from_attributes=True)
 
     session_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     messages: List[ChatMessageRead] = Field(default_factory=list)

@@ -49,6 +49,20 @@ class EnhancedJSONEncoder(json.JSONEncoder):
         return super().default(o)
 
 
+def _redact_redis_url(url: str) -> str:
+    """Safely redact credentials from Redis URL for logging."""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if parsed.password:
+            user_part = f"{parsed.username or ''}:***@"
+            host_port = f"{parsed.hostname or 'localhost'}{f':{parsed.port}' if parsed.port else ''}"
+            return f"{parsed.scheme}://{user_part}{host_port}{parsed.path}"
+        return url
+    except Exception:
+        return "[redacted-endpoint]"
+
+
 class CacheManager:
     """
     Async Cache Manager supporting Redis with automatic in-memory fallback.
@@ -87,7 +101,7 @@ class CacheManager:
                 await client.ping()
                 self._redis = client
                 self._connected = True
-                logger.info("CacheManager: Successfully connected to Redis at %s", self.redis_url)
+                logger.info("CacheManager: Successfully connected to Redis at %s", _redact_redis_url(self.redis_url))
                 return self._redis
             except Exception as exc:
                 logger.warning("CacheManager: Redis unavailable (%s); using in-memory cache fallback", exc)
@@ -269,21 +283,33 @@ class CacheManager:
     # High-level Cache Consistency & Invalidation Helpers
     async def invalidate_entity(self, namespace: str, entity_id: Any) -> None:
         """
-        Invalidate cache for a specific entity and all related collection/list queries.
+        Invalidate cache for a specific entity and all related collection/list/search/by_* queries.
         Ensures consistency when an entity is updated or deleted.
         """
         entity_key = self.build_key(namespace, entity_id)
-        list_pattern = f"{self.prefix}:{namespace}:list:*"
+        patterns = [
+            f"{self.prefix}:{namespace}:list:*",
+            f"{self.prefix}:{namespace}:search:*",
+            f"{self.prefix}:{namespace}:by_*",
+            f"{self.prefix}:{namespace}:sector:*",
+        ]
 
         await self.delete(entity_key)
-        await self.delete_pattern(list_pattern)
-        logger.debug("Invalidated entity cache for %s:%s and pattern %s", namespace, entity_id, list_pattern)
+        for pat in patterns:
+            await self.delete_pattern(pat)
+        logger.debug("Invalidated entity cache for %s:%s and patterns %s", namespace, entity_id, patterns)
 
     async def invalidate_collections(self, namespace: str) -> None:
-        """Invalidate all collection/list caches for a namespace (e.g. after entity creation)."""
-        list_pattern = f"{self.prefix}:{namespace}:list:*"
-        await self.delete_pattern(list_pattern)
-        logger.debug("Invalidated list caches for namespace %s (pattern %s)", namespace, list_pattern)
+        """Invalidate all collection/list/search caches for a namespace (e.g. after entity creation)."""
+        patterns = [
+            f"{self.prefix}:{namespace}:list:*",
+            f"{self.prefix}:{namespace}:search:*",
+            f"{self.prefix}:{namespace}:by_*",
+            f"{self.prefix}:{namespace}:sector:*",
+        ]
+        for pat in patterns:
+            await self.delete_pattern(pat)
+        logger.debug("Invalidated collection caches for namespace %s (patterns %s)", namespace, patterns)
 
     async def invalidate_namespace(self, namespace: str) -> None:
         """Completely purge all cache keys under a namespace."""

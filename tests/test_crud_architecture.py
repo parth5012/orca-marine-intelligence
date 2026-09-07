@@ -365,3 +365,88 @@ def test_api_delete_port_endpoint(api_client):
 
         resp = api_client.delete("/api/ports/88")
         assert resp.status_code == 204
+
+
+# ==============================================================================
+# 5. Regression Tests for Edge Cases & Fixes
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_port_update_syncs_geom():
+    """Verify that updating coordinates updates geom geometry column."""
+    mock_db = MagicMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock()
+    mock_db.refresh = AsyncMock()
+
+    initial_port = CoastalPort(id=1, name="Kochi", state="Kerala", aliases={}, lat=9.93, lon=76.26)
+    initial_port.geom = "SRID=4326;POINT(76.26 9.93)"
+
+    crud = CRUDCoastalPort(CoastalPort)
+    update_in = CoastalPortUpdate(lat=10.05, lon=76.35)
+
+    updated = await crud.update(mock_db, db_obj=initial_port, obj_in=update_in)
+    assert updated.lat == 10.05
+    assert updated.lon == 76.35
+    assert updated.geom == "SRID=4326;POINT(76.35 10.05)"
+
+
+@pytest.mark.asyncio
+async def test_cache_invalidation_covers_derived_key_types():
+    """Verify invalidation evicts by_name, search, and sector derived cache keys."""
+    cache = CacheManager(prefix="test_derived")
+
+    # Populate entity and derived keys
+    entity_key = cache.build_key("ports", 1)
+    by_name_key = cache.build_key("ports", "by_name", "kochi")
+    search_key = cache.build_query_key("ports:search", {"q": "kochi", "skip": 0, "limit": 20})
+    list_key = cache.build_query_key("ports", {"state": "Kerala"})
+    pfz_sector_key = cache.build_query_key("pfz:sector", {"sector": "KERALA"})
+
+    await cache.set(entity_key, {"id": 1, "name": "Kochi"})
+    await cache.set(by_name_key, {"id": 1, "name": "Kochi"})
+    await cache.set(search_key, [{"id": 1}])
+    await cache.set(list_key, {"items": [{"id": 1}], "total": 1})
+    await cache.set(pfz_sector_key, [{"id": 101}])
+
+    # Invalidate ports
+    await cache.invalidate_entity("ports", 1)
+
+    assert await cache.get(entity_key) is None
+    assert await cache.get(by_name_key) is None
+    assert await cache.get(search_key) is None
+    assert await cache.get(list_key) is None
+
+    # PFZ sector key should still be intact until pfz invalidation
+    assert await cache.get(pfz_sector_key) is not None
+    await cache.invalidate_collections("pfz")
+    assert await cache.get(pfz_sector_key) is None
+
+
+@pytest.mark.asyncio
+async def test_chat_session_service_logger_on_cache_error():
+    """Verify that chat_session_service logs warning on cache sync failure without NameError."""
+    from backend.services.chat_session_service import ChatSessionService
+    from backend.db.models import ChatMessage, ChatSession
+
+    failing_cache = CacheManager(prefix="failing_chat")
+    failing_cache.get = AsyncMock(side_effect=Exception("Redis cache failure"))
+    failing_cache.set = AsyncMock(side_effect=Exception("Redis set failure"))
+    failing_cache.invalidate_entity = AsyncMock(side_effect=Exception("Redis invalidation failure"))
+
+    mock_session_crud = MagicMock()
+    mock_msg_crud = MagicMock()
+    mock_db = MagicMock()
+
+    mock_session_crud.get = AsyncMock(return_value=ChatSession(session_id="sess_123", preferred_language="en"))
+    mock_msg_crud.append_message = AsyncMock(
+        return_value=ChatMessage(id=1, session_id="sess_123", sender="user", message="hello")
+    )
+
+    service = ChatSessionService(session_crud=mock_session_crud, message_crud=mock_msg_crud, cache=failing_cache)
+
+    # Should succeed cleanly without NameError: name 'logger' is not defined
+    res = await service.append_message(mock_db, session_id="sess_123", sender="user", message="hello")
+    assert res.message == "hello"
+    assert res.sender == "user"
+

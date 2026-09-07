@@ -29,16 +29,21 @@ class CRUDChatSession(CRUDBase[ChatSession, ChatSessionCreate, ChatSessionUpdate
         session_id: str,
         limit_messages: int = 50,
     ) -> Optional[ChatSession]:
-        """Fetch chat session along with eagerly loaded ordered messages."""
+        """Fetch chat session along with messages without mutating the ORM relationship collection."""
+        session = await self.get(db, session_id)
+        if session is None:
+            return None
+
         stmt = (
-            select(ChatSession)
-            .where(ChatSession.session_id == session_id)
-            .options(selectinload(ChatSession.messages))
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at.desc())
+            .limit(limit_messages)
         )
         result = await db.execute(stmt)
-        session = result.scalar_one_or_none()
-        if session and session.messages and limit_messages:
-            session.messages = session.messages[-limit_messages:]
+        ordered_msgs = list(reversed(list(result.scalars().all())))
+        # Store on non-persisted attribute to avoid triggering delete-orphan cascades
+        session.messages_history = ordered_msgs
         return session
 
     async def update_location(

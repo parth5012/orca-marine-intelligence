@@ -8,6 +8,7 @@ Manages multi-turn conversation memory with dual persistence:
 - Redis: Low-latency session state & recent turn cache (24h TTL)
 """
 
+import logging
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.crud.chat import (
@@ -26,6 +27,8 @@ from backend.schemas.chat import (
 )
 from backend.services.base import BaseService
 from backend.services.cache import CacheManager, cache_manager
+
+logger = logging.getLogger("orca.chat_service")
 
 
 class ChatSessionService(

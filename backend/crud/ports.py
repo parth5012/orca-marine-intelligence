@@ -7,7 +7,7 @@ Handles PostgreSQL database operations for coastal fishing harbors and ports.
 """
 
 from typing import Any, Dict, List, Optional
-from sqlalchemy import func, select
+from sqlalchemy import cast, func, select, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.crud.base import CRUDBase
 from backend.db.models import CoastalPort
@@ -57,6 +57,7 @@ class CRUDCoastalPort(CRUDBase[CoastalPort, CoastalPortCreate, CoastalPortUpdate
             .where(
                 (func.lower(CoastalPort.name).like(term))
                 | (func.lower(CoastalPort.state).like(term))
+                | (func.lower(cast(CoastalPort.aliases, Text)).like(term))
             )
             .order_by(CoastalPort.name.asc())
             .offset(skip)
@@ -81,6 +82,21 @@ class CRUDCoastalPort(CRUDBase[CoastalPort, CoastalPortCreate, CoastalPortUpdate
         await db.commit()
         await db.refresh(db_obj)
         return db_obj
+
+    async def update(
+        self,
+        db: AsyncSession,
+        *,
+        db_obj: CoastalPort,
+        obj_in: CoastalPortUpdate | Dict[str, Any],
+    ) -> CoastalPort:
+        """Update port and synchronize spatial Point geometry when coordinates change."""
+        data = obj_in if isinstance(obj_in, dict) else obj_in.model_dump(exclude_unset=True)
+        effective_lat = data.get("lat", db_obj.lat)
+        effective_lon = data.get("lon", db_obj.lon)
+        if "lat" in data or "lon" in data:
+            data["geom"] = f"SRID=4326;POINT({effective_lon} {effective_lat})"
+        return await super().update(db, db_obj=db_obj, obj_in=data)
 
 
 port_crud = CRUDCoastalPort(CoastalPort)
