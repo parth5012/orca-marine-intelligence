@@ -44,6 +44,7 @@ import re
 import time
 import uuid
 from typing import Any, TypedDict, Annotated
+from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
@@ -1083,15 +1084,34 @@ async def orchestrate_via_graph(
 
         return await _archived_fallback(query, language, location, session_id)
 
+    sid = session_id or uuid.uuid4().hex
     init_state: ORCAState = {
         "query": query or "",
         "language": language or "en",
         "location": location,
-        "session_id": session_id or uuid.uuid4().hex,
+        "session_id": sid,
+    }
+
+    meta_location = None
+    if isinstance(location, dict):
+        meta_location = {
+            "has_coords": bool(location.get("lat") or location.get("latitude")),
+            "port": location.get("port") or location.get("name"),
+        }
+
+    runnable_config: RunnableConfig = {
+        "run_name": "orca_agentic_supervisor",
+        "tags": ["orca", "marine-intelligence", "sih26176", language or "en"],
+        "metadata": {
+            "session_id": sid,
+            "location": meta_location,
+            "scenario": os.getenv("ORCA_SCENARIO", "normal"),
+            "language": language or "en",
+        },
     }
 
     # Handle no-location early (planner will set user_location=None)
-    final = await graph.ainvoke(init_state)
+    final = await graph.ainvoke(init_state, config=runnable_config)
 
     # ---- Clarification short-circuit (ticket #32) ---------------------
     # Planner gated needs_clarification → vernacular GPS prompt, no
@@ -1504,8 +1524,26 @@ async def orchestrate_stream_via_graph(
 
     init_state: ORCAState = {"query": query or "", "language": language or "en", "location": location, "session_id": sid}
 
+    meta_location = None
+    if isinstance(location, dict):
+        meta_location = {
+            "has_coords": bool(location.get("lat") or location.get("latitude")),
+            "port": location.get("port") or location.get("name"),
+        }
+
+    runnable_config: RunnableConfig = {
+        "run_name": "orca_agentic_supervisor",
+        "tags": ["orca", "marine-intelligence", "sih26176", language or "en"],
+        "metadata": {
+            "session_id": sid,
+            "location": meta_location,
+            "scenario": os.getenv("ORCA_SCENARIO", "normal"),
+            "language": language or "en",
+        },
+    }
+
     try:
-        async for ev in graph.astream_events(init_state, version="v2"):
+        async for ev in graph.astream_events(init_state, version="v2", config=runnable_config):
             etype = ev.get("event")
             name = ev.get("name")
             now = time.perf_counter()

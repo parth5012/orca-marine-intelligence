@@ -129,6 +129,13 @@ async def lifespan(app: FastAPI):
     redis_url = os.getenv("REDIS_URL")
     allowed_origins = os.getenv("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS)
     data_source = os.getenv("ORCA_DATA_SOURCE", "mock")
+    # Ensure placeholder or missing key does not trigger background 401 attempts
+    raw_key = os.getenv("LANGCHAIN_API_KEY", "").strip()
+    if not raw_key or raw_key.startswith("your_"):
+        if os.getenv("LANGCHAIN_TRACING_V2", "").strip().lower() in ("true", "1", "yes"):
+            logger.info("LangSmith: Placeholder or missing API key detected; setting LANGCHAIN_TRACING_V2=false")
+            os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
     telemetry = get_telemetry_status()
     logger.info(
         "Configured environment: ORCA_DATA_SOURCE=%s, DATABASE_URL=%s, REDIS_URL=%s, ALLOWED_ORIGINS=%s, LANGSMITH_ENABLED=%s",

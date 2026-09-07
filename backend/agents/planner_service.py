@@ -44,6 +44,16 @@ import os
 import time
 from typing import Any, Awaitable, Callable
 
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(*args: Any, **kwargs: Any) -> Any:  # type: ignore
+        def decorator(fn: Any) -> Any:
+            return fn
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]
+        return decorator
+
 from backend.agents.planner_schema import (
     CLARIFICATION_THRESHOLD,
     COASTAL_PORTS_REGISTRY,
@@ -73,6 +83,7 @@ __all__ = [
     "build_clarification_text",
     "planner_error_to_sse_event",
     "plan_query",
+    "generate_structured_plan",
 ]
 
 # ---------------------------------------------------------------------------
@@ -638,6 +649,11 @@ def _generate_structured_json(
 # ---------------------------------------------------------------------------
 
 
+@traceable(
+    name="orca_planner_service",
+    run_type="chain",
+    tags=["orca", "planner", "gemini-2.5-flash"],
+)
 async def plan_query(
     query: str,
     language: str = "en",
@@ -787,3 +803,31 @@ async def plan_query(
         "clarification_text": clarification,
         "elapsed_ms": elapsed_ms,
     }
+
+
+@traceable(
+    name="orca_generate_structured_plan",
+    run_type="chain",
+    tags=["orca", "planner", "structured_plan"],
+)
+async def generate_structured_plan(
+    query: str,
+    language: str = "en",
+    location: dict | None = None,
+    session_id: str | None = None,
+    *,
+    client: Any | None = None,
+    timeout_s: float = PLANNER_TIMEOUT_S,
+    generate_fn: Callable[..., Awaitable[str]] | None = None,
+) -> dict[str, Any]:
+    """Generate structured planner output with LangSmith tracing support."""
+    return await plan_query(
+        query=query,
+        language=language,
+        location=location,
+        session_id=session_id,
+        client=client,
+        timeout_s=timeout_s,
+        generate_fn=generate_fn,
+    )
+

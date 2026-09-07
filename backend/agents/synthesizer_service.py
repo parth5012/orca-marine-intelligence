@@ -58,6 +58,16 @@ import re
 import time
 from typing import Any, AsyncGenerator, Awaitable, Callable
 
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(*args: Any, **kwargs: Any) -> Any:  # type: ignore
+        def decorator(fn: Any) -> Any:
+            return fn
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]
+        return decorator
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -504,6 +514,11 @@ def _generate_text_sync(prompt: str, client: Any | None, *, max_output_tokens: i
 # ---------------------------------------------------------------------------
 
 
+@traceable(
+    name="orca_synthesizer_service",
+    run_type="llm",
+    tags=["orca", "synthesizer", "gemini-2.5-flash"],
+)
 async def synthesize_advisory(
     combined: dict | None,
     language: str = "en",
@@ -758,6 +773,11 @@ def extract_native_token_text(chunk: Any) -> str:
         return ""
 
 
+@traceable(
+    name="orca_iter_reply_tokens",
+    run_type="parser",
+    tags=["orca", "tokens"],
+)
 def iter_reply_tokens(reply_text: str, chunk_size: int = 40) -> list[str]:
     """Chunk a *validated* synthesizer reply into SSE ``token`` texts.
 
