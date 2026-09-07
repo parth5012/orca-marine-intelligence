@@ -38,6 +38,8 @@ const MapInner = dynamic(() => import('./MapInner'), {
 export default function MapView({ className, style, ...props }: MapViewProps) {
   return (
     <div
+      id="map-view"
+      data-testid="map-view"
       className={`map-view relative w-full h-full overflow-hidden ${className || ''}`}
       style={style}
     >
