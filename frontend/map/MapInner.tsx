@@ -17,7 +17,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -36,6 +36,14 @@ import 'leaflet/dist/leaflet.css';
 import { EEZ_GEOJSON, MPA_GEOJSON, IMBL_COORDINATES } from './boundaries';
 import { haversineDistance, bearing, formatDMS, getCompassDirection } from './geo';
 import SafetyBadge from './SafetyBadge';
+import {
+  BasemapStyle,
+  BASEMAP_OPTIONS,
+  getBasemapTileUrl,
+  getDefaultBasemapStyle,
+  CARTO_ATTRIBUTION,
+  OSM_ATTRIBUTION,
+} from './carto';
 
 export interface MapLayerToggles {
   pfz?: boolean;
@@ -54,6 +62,7 @@ export interface MapInnerProps {
   activeLayers?: MapLayerToggles;
   sector?: string;
   onCenterChange?: (center: [number, number]) => void;
+  initialBasemapStyle?: BasemapStyle;
 }
 
 interface LiveWeatherState {
@@ -130,7 +139,15 @@ export default function MapInner({
   activeLayers: initialLayers,
   sector,
   onCenterChange,
+  initialBasemapStyle,
 }: MapInnerProps) {
+  // Basemap style state & fallback handling
+  const [basemapStyle, setBasemapStyle] = useState<BasemapStyle>(
+    initialBasemapStyle || getDefaultBasemapStyle()
+  );
+  const [tileError, setTileError] = useState<boolean>(false);
+  const tileErrorsRef = useRef<number>(0);
+
   // Layer toggles
   const [layers, setLayers] = useState<MapLayerToggles>({
     pfz: true,
@@ -351,9 +368,21 @@ export default function MapInner({
 
         {/* Base Tile Layer: CartoDB Dark Matter / Voyager for marine styling */}
         <TileLayer
-          attribution='&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          key={tileError ? 'osm-fallback' : basemapStyle}
+          attribution={tileError || basemapStyle === 'osm' ? OSM_ATTRIBUTION : CARTO_ATTRIBUTION}
+          url={getBasemapTileUrl(tileError ? 'osm' : basemapStyle)}
           maxZoom={18}
+          eventHandlers={{
+            tileerror: () => {
+              tileErrorsRef.current += 1;
+              if (tileErrorsRef.current >= 3 && !tileError && basemapStyle !== 'osm') {
+                console.warn(
+                  `CARTO tiles reported persistent failures (${tileErrorsRef.current}) on style "${basemapStyle}". Falling back to OpenStreetMap.`
+                );
+                setTileError(true);
+              }
+            },
+          }}
         />
 
         {/* 1. EEZ Polygons Layer (Blue boundary) */}
@@ -683,6 +712,46 @@ export default function MapInner({
               />
               <span>⛅ Live Weather</span>
             </label>
+
+            {/* Basemap Style Switcher */}
+            <div className="font-bold text-slate-300 text-[11px] uppercase tracking-wider mt-3 pt-2 mb-1.5 border-t border-slate-800">
+              Base Cartography
+            </div>
+            <div className="space-y-1">
+              {BASEMAP_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  data-testid={`basemap-option-${opt.id}`}
+                  onClick={() => {
+                    tileErrorsRef.current = 0;
+                    setBasemapStyle(opt.id);
+                    setTileError(false);
+                  }}
+                  className={`w-full text-left px-2 py-1 rounded flex items-center justify-between text-[11px] transition-colors ${
+                    basemapStyle === opt.id && !tileError
+                      ? 'bg-cyan-950/70 text-cyan-300 border border-cyan-800/60 font-semibold'
+                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  }`}
+                  title={opt.description}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span>{opt.icon}</span>
+                    <span>{opt.label}</span>
+                  </span>
+                  {basemapStyle === opt.id && !tileError && (
+                    <span className="text-[10px] text-cyan-400">✓</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {tileError && (
+              <div className="mt-2 p-1.5 rounded bg-amber-950/60 border border-amber-800/50 text-[10px] text-amber-300 flex items-center gap-1">
+                <span>⚠️</span>
+                <span>OSM Fallback Active</span>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -17,3 +17,4 @@ export type { SafetyBadgeProps } from './SafetyBadge';
 
 export * from './geo';
 export * from './boundaries';
+export * from './carto';
