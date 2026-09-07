@@ -22,8 +22,18 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
+from pathlib import Path
 import time
 from typing import Any, Dict
+
+from dotenv import load_dotenv
+
+# Automatically load environment variables from .env (root, backend, or current working dir)
+_base_dir = Path(__file__).resolve().parent
+_root_dir = _base_dir.parent
+for _env_file in (_root_dir / ".env", _base_dir / ".env", Path(".env")):
+    if _env_file.is_file():
+        load_dotenv(dotenv_path=_env_file, override=False)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

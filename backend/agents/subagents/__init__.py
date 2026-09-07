@@ -7,8 +7,6 @@ Houses the 4 specialized sensory and domain agents:
   - danger_agent: geofence boundaries (EEZ, MPA, IMBL) verification
 """
 
-from backend.agents.subagents import danger_agent, fish_finder, sea_checker, weather_agent
-
 __all__ = [
     "danger_agent",
     "fish_finder",
