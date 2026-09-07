@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -312,7 +312,10 @@ async def fetch_incois_sectors(
     return features
 
 
-async def ingest_textdata(session_id: Optional[str] = None) -> Dict[str, Any]:
+async def ingest_textdata(
+    session_id: Optional[str] = None,
+    valid_date: Optional[date] = None,
+) -> Dict[str, Any]:
     """
     Fetch and parse INCOIS TextData into unified GeoJSON FeatureCollection.
     Writes data/pfz-today.geojson, upserts into PostGIS pfz_zones table if connected,
@@ -358,14 +361,14 @@ async def ingest_textdata(session_id: Optional[str] = None) -> Dict[str, Any]:
         except Exception as io_err:
             logger.warning("Could not write %s: %s", out_path, io_err)
 
-    # 2. Upsert to PostGIS if connected
-    try:
-        from backend.db.postgis import upsert_pfz_features
+        # 2. Upsert to PostGIS if connected
+        try:
+            from backend.db.postgis import upsert_pfz_features
 
-        upserted = await upsert_pfz_features(features)
-        logger.info("Upserted %d PFZ zones into PostGIS database", upserted)
-    except Exception as db_err:
-        logger.debug("PostGIS upsert skipped (offline/disconnected): %s", db_err)
+            upserted = await upsert_pfz_features(features, valid_date=valid_date)
+            logger.info("Upserted %d PFZ zones to PostGIS database", upserted)
+        except Exception as db_err:
+            logger.debug("PostGIS upsert skipped (offline/disconnected): %s", db_err)
 
     # 3. Cache in Redis (6-hour TTL)
     try:
