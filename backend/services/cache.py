@@ -23,6 +23,7 @@ import logging
 import os
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Type, TypeVar
+from urllib.parse import parse_qsl, urlencode, urlparse
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -50,15 +51,45 @@ class EnhancedJSONEncoder(json.JSONEncoder):
 
 
 def _redact_redis_url(url: str) -> str:
-    """Safely redact credentials from Redis URL for logging."""
+    """Safely redact credentials and password query parameters from Redis URL for logging."""
     try:
-        from urllib.parse import urlparse
         parsed = urlparse(url)
-        if parsed.password:
-            user_part = f"{parsed.username or ''}:***@"
-            host_port = f"{parsed.hostname or 'localhost'}{f':{parsed.port}' if parsed.port else ''}"
-            return f"{parsed.scheme}://{user_part}{host_port}{parsed.path}"
-        return url
+        has_netloc_password = bool(parsed.password)
+
+        has_query_password = False
+        new_query = ""
+        if parsed.query:
+            q_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+            redacted_pairs = []
+            for k, v in q_pairs:
+                if k.lower() == "password":
+                    has_query_password = True
+                    redacted_pairs.append((k, "***"))
+                else:
+                    redacted_pairs.append((k, v))
+            if has_query_password:
+                new_query = urlencode(redacted_pairs, safe="*")
+            else:
+                new_query = parsed.query
+
+        if not has_netloc_password and not has_query_password:
+            return url
+
+        netloc = parsed.netloc
+        if has_netloc_password:
+            auth, _, host_port = parsed.netloc.rpartition("@")
+            user, _, _ = auth.partition(":")
+            netloc = f"{user}:***@{host_port}"
+
+        delimiter = "://" if "://" in url else ":"
+        res = f"{parsed.scheme}{delimiter}{netloc}{parsed.path}"
+        if parsed.params:
+            res = f"{res};{parsed.params}"
+        if new_query:
+            res = f"{res}?{new_query}"
+        if parsed.fragment:
+            res = f"{res}#{parsed.fragment}"
+        return res
     except Exception:
         return "[redacted-endpoint]"
 

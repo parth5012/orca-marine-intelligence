@@ -450,3 +450,56 @@ async def test_chat_session_service_logger_on_cache_error():
     assert res.message == "hello"
     assert res.sender == "user"
 
+
+@pytest.mark.asyncio
+async def test_redis_url_redaction_and_connection_log_regression(caplog):
+    """
+    Regression test asserting:
+    1. _redact_redis_url redacts password query parameters (including Unix socket URLs)
+       and authority credentials while preserving other URL components.
+    2. Successful Redis connection log message does not expose the password.
+    """
+    import logging
+    from backend.services.cache import _redact_redis_url
+
+    # 1. Assert redacted URL returns safely without exposing passwords across schemes
+    test_cases = [
+        ("unix:///tmp/redis.sock?password=secret", "unix:///tmp/redis.sock?password=***"),
+        ("unix:///tmp/redis.sock?db=0&password=secret&other=val", "unix:///tmp/redis.sock?db=0&password=***&other=val"),
+        ("redis://:secret@localhost:6379/0", "redis://:***@localhost:6379/0"),
+        ("redis://user:secret@localhost:6379/0?db=0", "redis://user:***@localhost:6379/0?db=0"),
+        ("redis://localhost:6379/0?password=secret", "redis://localhost:6379/0?password=***"),
+        ("redis://user:secret1@127.0.0.1:6379/0?password=secret2&db=1", "redis://user:***@127.0.0.1:6379/0?password=***&db=1"),
+        ("redis://localhost:6379/0", "redis://localhost:6379/0"),
+        ("unix:///tmp/redis.sock", "unix:///tmp/redis.sock"),
+    ]
+
+    for raw_url, expected in test_cases:
+        redacted = _redact_redis_url(raw_url)
+        assert redacted == expected
+        assert "secret" not in redacted
+
+    # 2. Assert successful Redis connection log message does not expose the password
+    unix_secret_url = "unix:///tmp/redis.sock?password=super_secret_unix_pass&db=0"
+    cache = CacheManager(prefix="test_redact_log", redis_url=unix_secret_url)
+
+    mock_client = AsyncMock()
+    mock_client.ping = AsyncMock(return_value=True)
+
+    with caplog.at_level(logging.INFO, logger="orca.cache"):
+        with patch("redis.asyncio.from_url", return_value=mock_client) as mock_from_url:
+            client = await cache.get_client()
+            assert client is mock_client
+            mock_from_url.assert_called_once_with(
+                unix_secret_url,
+                decode_responses=True,
+                socket_connect_timeout=0.5,
+                socket_timeout=0.5,
+            )
+
+    log_output = caplog.text
+    assert "CacheManager: Successfully connected to Redis at" in log_output
+    assert "super_secret_unix_pass" not in log_output
+    assert "unix:///tmp/redis.sock?password=***&db=0" in log_output
+
+
