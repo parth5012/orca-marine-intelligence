@@ -457,19 +457,23 @@ async def test_redis_url_redaction_and_connection_log_regression(caplog):
     Regression test asserting:
     1. _redact_redis_url redacts password query parameters (including Unix socket URLs)
        and authority credentials while preserving other URL components.
-    2. Successful Redis connection log message does not expose the password.
+    2. Successful Redis connection log message does not expose credentials.
     """
     import logging
     from backend.services.cache import _redact_redis_url
 
-    # 1. Assert redacted URL returns safely without exposing passwords across schemes
+    # Neutral fixture markers to avoid static credential / secret detector false positives
+    marker_primary = "fixture_credential_alpha"
+    marker_secondary = "fixture_credential_beta"
+
+    # 1. Assert redacted URL returns safely without exposing credentials across schemes
     test_cases = [
-        ("unix:///tmp/redis.sock?password=secret", "unix:///tmp/redis.sock?password=***"),
-        ("unix:///tmp/redis.sock?db=0&password=secret&other=val", "unix:///tmp/redis.sock?db=0&password=***&other=val"),
-        ("redis://:secret@localhost:6379/0", "redis://:***@localhost:6379/0"),
-        ("redis://user:secret@localhost:6379/0?db=0", "redis://user:***@localhost:6379/0?db=0"),
-        ("redis://localhost:6379/0?password=secret", "redis://localhost:6379/0?password=***"),
-        ("redis://user:secret1@127.0.0.1:6379/0?password=secret2&db=1", "redis://user:***@127.0.0.1:6379/0?password=***&db=1"),
+        (f"unix:///tmp/redis.sock?password={marker_primary}", "unix:///tmp/redis.sock?password=***"),
+        (f"unix:///tmp/redis.sock?db=0&password={marker_primary}&other=val", "unix:///tmp/redis.sock?db=0&password=***&other=val"),
+        (f"redis://:{marker_primary}@localhost:6379/0", "redis://:***@localhost:6379/0"),
+        (f"redis://user:{marker_primary}@localhost:6379/0?db=0", "redis://user:***@localhost:6379/0?db=0"),
+        (f"redis://localhost:6379/0?password={marker_primary}", "redis://localhost:6379/0?password=***"),
+        (f"redis://user:{marker_primary}@127.0.0.1:6379/0?password={marker_secondary}&db=1", "redis://user:***@127.0.0.1:6379/0?password=***&db=1"),
         ("redis://localhost:6379/0", "redis://localhost:6379/0"),
         ("unix:///tmp/redis.sock", "unix:///tmp/redis.sock"),
     ]
@@ -477,11 +481,13 @@ async def test_redis_url_redaction_and_connection_log_regression(caplog):
     for raw_url, expected in test_cases:
         redacted = _redact_redis_url(raw_url)
         assert redacted == expected
-        assert "secret" not in redacted
+        assert marker_primary not in redacted
+        assert marker_secondary not in redacted
 
-    # 2. Assert successful Redis connection log message does not expose the password
-    unix_secret_url = "unix:///tmp/redis.sock?password=super_secret_unix_pass&db=0"
-    cache = CacheManager(prefix="test_redact_log", redis_url=unix_secret_url)
+    # 2. Assert successful Redis connection log message does not expose credentials
+    conn_marker = "fixture_conn_credential_val"
+    test_unix_endpoint_url = f"unix:///tmp/redis.sock?password={conn_marker}&db=0"
+    cache = CacheManager(prefix="test_redact_log", redis_url=test_unix_endpoint_url)
 
     mock_client = AsyncMock()
     mock_client.ping = AsyncMock(return_value=True)
@@ -491,7 +497,7 @@ async def test_redis_url_redaction_and_connection_log_regression(caplog):
             client = await cache.get_client()
             assert client is mock_client
             mock_from_url.assert_called_once_with(
-                unix_secret_url,
+                test_unix_endpoint_url,
                 decode_responses=True,
                 socket_connect_timeout=0.5,
                 socket_timeout=0.5,
@@ -499,7 +505,8 @@ async def test_redis_url_redaction_and_connection_log_regression(caplog):
 
     log_output = caplog.text
     assert "CacheManager: Successfully connected to Redis at" in log_output
-    assert "super_secret_unix_pass" not in log_output
+    assert conn_marker not in log_output
     assert "unix:///tmp/redis.sock?password=***&db=0" in log_output
+
 
 
