@@ -29,9 +29,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 try:
-    from backend.routers import chat, geofence, pfz, tiles, weather
+    from backend.routers import chat, geofence, pfz, ports, tiles, weather
 except ImportError:
-    from routers import chat, geofence, pfz, tiles, weather
+    from routers import chat, geofence, pfz, ports, tiles, weather
 
 logger = logging.getLogger("orca.api")
 
@@ -179,6 +179,7 @@ app.add_middleware(
 # Mount live routers under /api
 app.include_router(chat.router, prefix="/api")
 app.include_router(pfz.router, prefix="/api")
+app.include_router(ports.router, prefix="/api")
 app.include_router(weather.router, prefix="/api")
 app.include_router(geofence.router, prefix="/api")
 app.include_router(tiles.router, prefix="/api")
