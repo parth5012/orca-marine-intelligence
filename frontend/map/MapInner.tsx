@@ -91,14 +91,14 @@ function MapController({
         // Handle GeoJSON [lon, lat] vs standard [lat, lon]
         const lat = coords[0] > 50 && coords[1] < 40 ? coords[1] : coords[0];
         const lon = coords[0] > 50 && coords[1] < 40 ? coords[0] : coords[1];
-        if (typeof lat === 'number' && typeof lon === 'number') {
-          map.flyTo([lat, lon], Math.max(map.getZoom(), 9), { duration: 1.2 });
+        if (typeof lat === 'number' && typeof lon === 'number' && Number.isFinite(lat) && Number.isFinite(lon)) {
+          try { map.flyTo([lat, lon], Math.max(map.getZoom() || 8, 9), { duration: 1.2 }); } catch (err) { console.warn('Safe flyTo prevented crash:', err); }
           return;
         }
       }
     }
-    if (center && center.length === 2) {
-      map.flyTo(center, zoom || map.getZoom(), { duration: 1.0 });
+    if (center && center.length === 2 && typeof center[0] === 'number' && typeof center[1] === 'number' && Number.isFinite(center[0]) && Number.isFinite(center[1])) {
+      try { map.flyTo(center, (typeof zoom === 'number' && Number.isFinite(zoom)) ? zoom : (map.getZoom() || 8), { duration: 1.0 }); } catch (err) { console.warn('Safe flyTo prevented crash:', err); }
     }
   }, [center, zoom, highlightFeatures, map]);
 
@@ -603,6 +603,10 @@ export default function MapInner({
       <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-2">
         <button
           type="button"
+          id="floating-layers-toggle"
+          data-testid="floating-layers-toggle"
+          aria-label="Toggle Maritime Layers Panel"
+          aria-expanded={showLayerPanel}
           onClick={() => setShowLayerPanel((p) => !p)}
           className="px-3 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-cyan-300 border border-slate-700 backdrop-blur shadow-lg text-xs font-bold flex items-center gap-1.5 transition-all"
         >
@@ -610,13 +614,20 @@ export default function MapInner({
         </button>
 
         {showLayerPanel && (
-          <div className="p-3 rounded-xl bg-slate-900/95 border border-slate-700/80 backdrop-blur shadow-2xl text-xs space-y-2 min-w-[170px] animate-fadeIn">
+          <div
+            id="floating-layers-panel"
+            data-testid="floating-layers-panel"
+            className="p-3 rounded-xl bg-slate-900/95 border border-slate-700/80 backdrop-blur shadow-2xl text-xs space-y-2 min-w-[170px] animate-fadeIn"
+          >
             <div className="font-bold text-slate-300 text-[11px] uppercase tracking-wider mb-1 border-b border-slate-800 pb-1">
               Maritime Layers
             </div>
             <label className="flex items-center gap-2 cursor-pointer text-slate-200 hover:text-white">
               <input
                 type="checkbox"
+                id="layer-checkbox-pfz"
+                data-testid="layer-checkbox-pfz"
+                aria-label="PFZ Points layer toggle"
                 checked={layers.pfz}
                 onChange={(e) => setLayers((l) => ({ ...l, pfz: e.target.checked }))}
                 className="rounded accent-cyan-500"
@@ -627,6 +638,9 @@ export default function MapInner({
             <label className="flex items-center gap-2 cursor-pointer text-slate-200 hover:text-white">
               <input
                 type="checkbox"
+                id="layer-checkbox-eez"
+                data-testid="layer-checkbox-eez"
+                aria-label="EEZ Boundary layer toggle"
                 checked={layers.eez}
                 onChange={(e) => setLayers((l) => ({ ...l, eez: e.target.checked }))}
                 className="rounded accent-sky-500"
@@ -636,6 +650,9 @@ export default function MapInner({
             <label className="flex items-center gap-2 cursor-pointer text-slate-200 hover:text-white">
               <input
                 type="checkbox"
+                id="layer-checkbox-mpa"
+                data-testid="layer-checkbox-mpa"
+                aria-label="MPA Sanctuaries layer toggle"
                 checked={layers.mpa}
                 onChange={(e) => setLayers((l) => ({ ...l, mpa: e.target.checked }))}
                 className="rounded accent-red-500"
@@ -645,6 +662,9 @@ export default function MapInner({
             <label className="flex items-center gap-2 cursor-pointer text-slate-200 hover:text-white">
               <input
                 type="checkbox"
+                id="layer-checkbox-imbl"
+                data-testid="layer-checkbox-imbl"
+                aria-label="IMBL Border layer toggle"
                 checked={layers.imbl}
                 onChange={(e) => setLayers((l) => ({ ...l, imbl: e.target.checked }))}
                 className="rounded accent-orange-500"
@@ -654,6 +674,9 @@ export default function MapInner({
             <label className="flex items-center gap-2 cursor-pointer text-slate-200 hover:text-white">
               <input
                 type="checkbox"
+                id="layer-checkbox-weather"
+                data-testid="layer-checkbox-weather"
+                aria-label="Live Weather layer toggle"
                 checked={layers.weather}
                 onChange={(e) => setLayers((l) => ({ ...l, weather: e.target.checked }))}
                 className="rounded accent-cyan-500"

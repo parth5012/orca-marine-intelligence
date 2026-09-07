@@ -7,7 +7,11 @@ Core orchestration and multi-agent system:
 """
 
 import sys
-from backend.agents.subagents import danger_agent, fish_finder, sea_checker, weather_agent
+
+try:
+    from backend.agents.subagents import danger_agent, fish_finder, sea_checker, weather_agent
+except ModuleNotFoundError:
+    from agents.subagents import danger_agent, fish_finder, sea_checker, weather_agent  # type: ignore
 
 # Backward compatibility aliases in sys.modules so existing test mocks and imports
 # continue to resolve smoothly:

@@ -107,8 +107,8 @@ export default function ChatPanel({
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() || isStreaming) return;
-    const text = inputText;
+    if (!inputText || !inputText.trim() || isStreaming) return;
+    const text = inputText.trim();
     setInputText('');
     await sendMessage(text);
   };
@@ -249,6 +249,9 @@ export default function ChatPanel({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
+            id="chat-clear-session-button"
+            data-testid="chat-clear-session-button"
+            aria-label="Clear chat session"
             onClick={clearSession}
             disabled={isStreaming}
             title="Start new conversation"
@@ -596,6 +599,9 @@ export default function ChatPanel({
             <button
               key={idx}
               type="button"
+              id={`quick-action-chip-${idx}`}
+              data-testid={`quick-action-chip-${idx}`}
+              aria-label={`Quick query: ${chip.label}`}
               disabled={isStreaming}
               onClick={() => handleQuickAction(chip.query)}
               className="flex-shrink-0 px-2.5 py-1 rounded-full bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-cyan-500/40 text-[11px] transition-colors disabled:opacity-50"
@@ -643,12 +649,17 @@ export default function ChatPanel({
 
       {/* Chat Input Bar */}
       <form
+        id="chat-form"
+        data-testid="chat-form"
         onSubmit={handleSend}
         className="p-3 bg-slate-900 border-t border-slate-800 flex items-center gap-2"
       >
         {/* Vernacular Voice Microphone Button */}
         <button
           type="button"
+          id="chat-voice-record-button"
+          data-testid="chat-voice-record-button"
+          aria-label={isRecording ? 'Stop recording vernacular query' : 'Speak query in vernacular language'}
           onClick={isRecording ? stopRecording : startRecording}
           disabled={isTranscribing}
           title={isRecording ? 'Stop recording' : 'Speak query in your language'}
@@ -680,6 +691,9 @@ export default function ChatPanel({
         {/* Text Input */}
         <input
           ref={inputRef}
+          id="chat-input"
+          data-testid="chat-input"
+          aria-label="Chat input query" 
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
@@ -702,6 +716,9 @@ export default function ChatPanel({
         {isStreaming ? (
           <button
             type="button"
+            id="chat-stop-button"
+            data-testid="chat-stop-button"
+            aria-label="Stop response stream"
             onClick={stopStream}
             className="px-3.5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs transition-colors shadow"
           >
@@ -710,6 +727,9 @@ export default function ChatPanel({
         ) : (
           <button
             type="submit"
+            id="chat-send-button"
+            data-testid="chat-send-button"
+            aria-label="Send message"
             disabled={!inputText.trim() || isStreaming || isRecording}
             className="px-3.5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-sm transition-colors shadow-md shadow-cyan-500/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
           >

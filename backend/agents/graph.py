@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import os
 import re
 import time
 import uuid
@@ -151,8 +152,8 @@ try:
         _parse_relative_offset,
     )
 except ImportError:
-    # fallback for direct script runs
-    from fallback import (  # type: ignore
+    # fallback for direct script runs (uvicorn main:app inside backend/)
+    from agents.fallback import (  # type: ignore
         COASTAL_PORTS,
         _parse_intent,
         _resolve_location,
@@ -1367,9 +1368,9 @@ async def orchestrate_stream_via_graph(
         }
         return
 
-    # Budgets (map decision #26: 1.4s observed per-node, P95<2.0s total)
-    NODE_TIMEOUT_S = 1.4
-    P95_BUDGET_S = 2.0
+    # Budgets: configurable sub-agent budget (default 10.0s, 5-10s range)
+    NODE_TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "10.0"))
+    P95_BUDGET_S = float(os.getenv("ORCA_P95_BUDGET_S", "12.0"))
     # Current compiled topology: planner -> fish_finder ->
     # parallel_analysis -> decision_agent. Sub-agent names kept for
     # forward-compat (never emitted today — see parallel_analysis_node).

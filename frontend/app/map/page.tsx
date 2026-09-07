@@ -120,8 +120,18 @@ export default function MapPage() {
     if (!searchQuery.trim()) return;
 
     const loc = parseLocation(searchQuery);
-    if (loc) {
-      setMapCenter([loc.lat, loc.lon]);
+    if (loc && typeof loc.lat === 'number' && typeof loc.lon === 'number' && !isNaN(loc.lat) && !isNaN(loc.lon) && isFinite(loc.lat) && isFinite(loc.lon)) {
+      let safeLat = loc.lat;
+      let safeLon = loc.lon;
+      // In Indian maritime waters: defend against [lon, lat] accidentally swapped
+      if (safeLat > 50 && safeLon < 40) {
+        const tmp = safeLat;
+        safeLat = safeLon;
+        safeLon = tmp;
+      }
+      safeLat = Math.max(-90, Math.min(90, safeLat));
+      safeLon = Math.max(-180, Math.min(180, safeLon));
+      setMapCenter([safeLat, safeLon]);
       setMapZoom(10);
     } else {
       setSearchError('Location not recognized. Try "Kochi", "Veraval", or coordinates "9.93, 76.27".');
@@ -142,6 +152,9 @@ export default function MapPage() {
           <Link
             href="/"
             className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center text-xl shadow-lg shadow-cyan-900/40 border border-cyan-400/30 hover:scale-105 transition-transform"
+            id="nav-home-link"
+            data-testid="nav-home-link"
+            aria-label="Back to ORCA Home"
             title="Back to ORCA Home"
           >
             🌊
@@ -169,12 +182,15 @@ export default function MapPage() {
           {/* Sector Selector */}
           <div className="relative">
             <select
-              value={selectedSector}
+              id="sector-select-dropdown"
+            data-testid="sector-select-dropdown"
+            aria-label="Select Coastal Sector"
+            value={selectedSector}
               onChange={(e) => handleSectorChange(e.target.value)}
               className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-cyan-300 font-medium focus:outline-none focus:border-cyan-500 transition-colors cursor-pointer"
             >
               {SECTORS.map((sec) => (
-                <option key={sec.value} value={sec.value} className="bg-slate-900 text-slate-200">
+                <option key={sec.value} id={`sector-option-${sec.value.toLowerCase().replace(/\s+/g, '-')}`} data-testid={`sector-option-${sec.value.toLowerCase().replace(/\s+/g, '-')}`} value={sec.value} className="bg-slate-900 text-slate-200">
                   {sec.label}
                 </option>
               ))}
@@ -182,17 +198,23 @@ export default function MapPage() {
           </div>
 
           {/* Quick Search Form */}
-          <form onSubmit={handleSearch} className="relative flex items-center">
+          <form id="coord-search-form" data-testid="coord-search-form" onSubmit={handleSearch} className="relative flex items-center">
             <input
               type="text"
-              placeholder="Search port or lat, lon..."
+              id="coord-search-input"
+            data-testid="coord-search-input"
+            aria-label="Search port or coordinates (lat, lon)"
+            placeholder="Search port or lat, lon..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-48 xl:w-56 px-3 py-1.5 rounded-l-lg bg-slate-950 border border-r-0 border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
             <button
               type="submit"
-              className="px-3 py-1.5 rounded-r-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-colors border border-cyan-500"
+              id="coord-search-button"
+            data-testid="coord-search-button"
+            aria-label="Search coordinates or port"
+            className="px-3 py-1.5 rounded-r-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-colors border border-cyan-500"
             >
               Go
             </button>
@@ -210,7 +232,10 @@ export default function MapPage() {
                 setMapZoom(11);
               }}
               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-slate-700 text-xs font-medium transition-colors"
-              title="Center on vessel location"
+              id="map-gps-recenter-button"
+            data-testid="map-gps-recenter-button"
+            aria-label="Center on vessel location"
+            title="Center on vessel location"
             >
               <span>📍</span> GPS Recenter
             </button>
@@ -219,6 +244,9 @@ export default function MapPage() {
           {/* Back to Chat Advisory */}
           <Link
             href="/"
+            id="nav-chat-link"
+            data-testid="nav-chat-link"
+            aria-label="Back to Chat Advisory"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-md shadow-cyan-900/30 transition-all"
           >
             <span>💬</span> Back to Chat
@@ -235,7 +263,11 @@ export default function MapPage() {
 
           <button
             type="button"
-            onClick={() => toggleLayer('pfz')}
+            id="layer-toggle-pfz"
+          data-testid="layer-toggle-pfz"
+          aria-label="Toggle PFZ Zones Layer"
+          aria-pressed={layers.pfz}
+          onClick={() => toggleLayer('pfz')}
             className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all ${
               layers.pfz
                 ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/60 shadow-sm'
@@ -247,7 +279,11 @@ export default function MapPage() {
 
           <button
             type="button"
-            onClick={() => toggleLayer('eez')}
+            id="layer-toggle-eez"
+          data-testid="layer-toggle-eez"
+          aria-label="Toggle EEZ Boundary Layer"
+          aria-pressed={layers.eez}
+          onClick={() => toggleLayer('eez')}
             className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all ${
               layers.eez
                 ? 'bg-sky-950/80 text-sky-300 border border-sky-500/60 shadow-sm'
@@ -259,7 +295,11 @@ export default function MapPage() {
 
           <button
             type="button"
-            onClick={() => toggleLayer('mpa')}
+            id="layer-toggle-mpa"
+          data-testid="layer-toggle-mpa"
+          aria-label="Toggle MPA Sanctuaries Layer"
+          aria-pressed={layers.mpa}
+          onClick={() => toggleLayer('mpa')}
             className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all ${
               layers.mpa
                 ? 'bg-red-950/80 text-red-300 border border-red-500/60 shadow-sm'
@@ -271,7 +311,11 @@ export default function MapPage() {
 
           <button
             type="button"
-            onClick={() => toggleLayer('imbl')}
+            id="layer-toggle-imbl"
+          data-testid="layer-toggle-imbl"
+          aria-label="Toggle IMBL Border Layer"
+          aria-pressed={layers.imbl}
+          onClick={() => toggleLayer('imbl')}
             className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all ${
               layers.imbl
                 ? 'bg-orange-950/80 text-orange-300 border border-orange-500/60 shadow-sm'
@@ -283,7 +327,11 @@ export default function MapPage() {
 
           <button
             type="button"
-            onClick={() => toggleLayer('weather')}
+            id="layer-toggle-weather"
+          data-testid="layer-toggle-weather"
+          aria-label="Toggle Weather Telemetry Layer"
+          aria-pressed={layers.weather}
+          onClick={() => toggleLayer('weather')}
             className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all ${
               layers.weather
                 ? 'bg-cyan-950/80 text-cyan-300 border border-cyan-500/60 shadow-sm'
@@ -297,6 +345,10 @@ export default function MapPage() {
         {/* Drawer Toggle */}
         <button
           type="button"
+          id="inspector-drawer-toggle"
+          data-testid="inspector-drawer-toggle"
+          aria-label="Toggle Safety Inspector Drawer"
+          aria-expanded={drawerOpen}
           onClick={() => setDrawerOpen((prev) => !prev)}
           className="px-2.5 py-1 rounded-md bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-slate-700 text-xs font-medium flex items-center gap-1 transition-colors"
         >
@@ -305,10 +357,16 @@ export default function MapPage() {
       </div>
 
       {searchError && (
-        <div className="bg-red-950/90 text-red-200 border-b border-red-800 text-xs px-4 py-1.5 flex items-center justify-between">
+        <div id="coord-search-error"
+          data-testid="coord-search-error"
+          role="alert"
+          className="bg-red-950/90 text-red-200 border-b border-red-800 text-xs px-4 py-1.5 flex items-center justify-between">
           <span>⚠️ {searchError}</span>
           <button
             type="button"
+            id="coord-search-error-dismiss"
+            data-testid="coord-search-error-dismiss"
+            aria-label="Dismiss search error"
             onClick={() => setSearchError(null)}
             className="text-red-300 font-bold ml-4"
           >
@@ -345,6 +403,9 @@ export default function MapPage() {
               </h2>
               <button
                 type="button"
+                id="inspector-drawer-close"
+                data-testid="inspector-drawer-close"
+                aria-label="Close Safety Inspector Drawer"
                 onClick={() => setDrawerOpen(false)}
                 className="text-slate-400 hover:text-white text-xs"
               >
