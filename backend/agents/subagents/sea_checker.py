@@ -26,7 +26,9 @@ Extensible interface:
 
 import hashlib
 import logging
+from pathlib import Path
 from typing import Any
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +186,58 @@ def _heuristic_current(lat: float | None, lon: float | None, zone_id: str, idx: 
 
 
 # ---------------------------------------------------------------------------
+# Tier 3 Fallback: Marine Data Package (coastal_point_features.parquet)
+# ---------------------------------------------------------------------------
+
+_PARQUET_COASTAL_CACHE = None
+
+def _find_parquet_features_file() -> Path | None:
+    base = Path(__file__).resolve().parents[3]
+    candidates = [
+        base / "data" / "marine_data_package" / "marine-data" / "unified" / "marine_features" / "coastal_point_features.parquet",
+        base / "data" / "coastal_point_features.parquet",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+def _get_coastal_parquet_data():
+    global _PARQUET_COASTAL_CACHE
+    if _PARQUET_COASTAL_CACHE is not None:
+        return _PARQUET_COASTAL_CACHE
+    p = _find_parquet_features_file()
+    if not p:
+        return None
+    try:
+        import pyarrow.parquet as pq
+        tbl = pq.read_table(str(p), columns=["latitude", "longitude", "wave_height_m", "swell_wave_height_m"])
+        lats = tbl["latitude"].to_numpy()
+        lons = tbl["longitude"].to_numpy()
+        waves = tbl["wave_height_m"].to_numpy()
+        swells = tbl["swell_wave_height_m"].to_numpy() if "swell_wave_height_m" in tbl.column_names else None
+        _PARQUET_COASTAL_CACHE = (lats, lons, waves, swells)
+        return _PARQUET_COASTAL_CACHE
+    except Exception as exc:
+        logger.debug("Failed loading coastal_point_features.parquet: %s", exc)
+        return None
+
+def _fetch_parquet_wave_current(lat: float, lon: float) -> tuple[float, float] | None:
+    data = _get_coastal_parquet_data()
+    if not data:
+        return None
+    lats, lons, waves, swells = data
+    dist_sq = (lats - lat) ** 2 + (lons - lon) ** 2
+    idx = int(dist_sq.argmin())
+    wave_val = waves[idx]
+    wave = float(wave_val) if not (np.isnan(wave_val) if hasattr(wave_val, "dtype") else False) else 1.2
+    swell_val = swells[idx] if swells is not None else 1.0
+    swell = float(swell_val) if swells is not None and not (np.isnan(swell_val) if hasattr(swell_val, "dtype") else False) else 1.0
+    current_kt = round(swell * 0.8, 2)
+    return wave, current_kt
+
+
+# ---------------------------------------------------------------------------
 # W2 extensible interface — OSF 06Z forecast
 # ---------------------------------------------------------------------------
 
@@ -208,13 +262,11 @@ async def get_wave_current(
     idx: int,
 ) -> tuple[float, float, str]:
     """
-    Extensible wrapper: try OSF real data, fall back to deterministic heuristic.
+    Extensible wrapper: try OSF real data, fall back to Tier 3 Marine Data Package parquet,
+    then deterministic heuristic.
 
     Returns:
-        (wave_height_m, current_kt, source) where source is "osf_06z" or "mock_heuristic".
-
-    This is the sole call site that needs to change for W2: once fetch_osf_wave_current
-    is implemented, all callers automatically get real data without signature changes.
+        (wave_height_m, current_kt, source) where source in ("open_meteo_live", "marine_data_package", "mock_heuristic").
     """
     if lat is not None and lon is not None:
         try:
@@ -223,8 +275,14 @@ async def get_wave_current(
         except NotImplementedError:
             pass
         except Exception as exc:
-            logger.debug("sea_checker: OSF fetch failed for %s (%s,%s): %s — using heuristic", zone_id, lat, lon, exc)
-    # Fallback — deterministic mock
+            logger.debug("sea_checker: OSF live fetch failed for %s (%s, %s): %s", zone_id, lat, lon, exc)
+
+        # Tier 3 Fallback: Marine Data Package Parquet
+        parquet_fallback = _fetch_parquet_wave_current(lat, lon)
+        if parquet_fallback is not None:
+            return round(float(parquet_fallback[0]), 2), round(float(parquet_fallback[1]), 2), "marine_data_package"
+
+    # Fallback to deterministic mock
     wave = _heuristic_wave_height(lat, lon, zone_id, idx)
     current = _heuristic_current(lat, lon, zone_id, idx)
     return wave, current, "mock_heuristic"

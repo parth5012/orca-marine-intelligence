@@ -27,6 +27,8 @@ Extensible interface:
 import hashlib
 import math
 import logging
+from pathlib import Path
+import numpy as np
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -161,6 +163,91 @@ def _heuristic_wind_deg(wind_dir: str) -> int | None:
 
 
 # ---------------------------------------------------------------------------
+# Tier 3 Fallback: Marine Data Package Parquet (cyclones & coastal wind)
+# ---------------------------------------------------------------------------
+
+_PARQUET_CYCLONE_CACHE = None
+_PARQUET_WIND_CACHE = None
+
+def _get_cyclone_parquet_data() -> list[dict] | None:
+    global _PARQUET_CYCLONE_CACHE
+    if _PARQUET_CYCLONE_CACHE is not None:
+        return _PARQUET_CYCLONE_CACHE
+    base = Path(__file__).resolve().parents[3]
+    p = base / "data" / "marine_data_package" / "marine-data" / "unified" / "marine_events" / "cyclone_events.parquet"
+    if not p.exists():
+        return None
+    try:
+        import pyarrow.parquet as pq
+        tbl = pq.read_table(str(p))
+        df = tbl.to_pandas()
+        cyclones = []
+        for _, row in df.tail(15).iterrows():
+            min_lat = float(row.get("min_lat", 10.0))
+            max_lat = float(row.get("max_lat", 15.0))
+            min_lon = float(row.get("min_lon", 75.0))
+            max_lon = float(row.get("max_lon", 85.0))
+            center_lat = round((min_lat + max_lat) / 2.0, 2)
+            center_lon = round((min_lon + max_lon) / 2.0, 2)
+            cyclones.append({
+                "name": str(row.get("name", "UNKNOWN")),
+                "lat": center_lat,
+                "lon": center_lon,
+                "center": [center_lat, center_lon],
+                "wind_speed_kt": float(row.get("max_wind_kt", 45.0)),
+                "pressure_hpa": float(row.get("min_pressure_mb", 990.0)),
+                "source": "marine_data_package",
+            })
+        _PARQUET_CYCLONE_CACHE = cyclones
+        return _PARQUET_CYCLONE_CACHE
+    except Exception as exc:
+        logger.debug("Failed reading cyclone_events.parquet: %s", exc)
+        return None
+
+def _get_coastal_wind_parquet_data():
+    global _PARQUET_WIND_CACHE
+    if _PARQUET_WIND_CACHE is not None:
+        return _PARQUET_WIND_CACHE
+    base = Path(__file__).resolve().parents[3]
+    candidates = [
+        base / "data" / "marine_data_package" / "marine-data" / "unified" / "marine_features" / "coastal_point_features.parquet",
+        base / "data" / "coastal_point_features.parquet",
+    ]
+    p = next((c for c in candidates if c.exists()), None)
+    if not p:
+        return None
+    try:
+        import pyarrow.parquet as pq
+        tbl = pq.read_table(str(p), columns=["latitude", "longitude", "wind_speed_10m_kmh", "wind_direction_10m_deg"])
+        lats = tbl["latitude"].to_numpy()
+        lons = tbl["longitude"].to_numpy()
+        speeds = tbl["wind_speed_10m_kmh"].to_numpy()
+        dirs = tbl["wind_direction_10m_deg"].to_numpy()
+        _PARQUET_WIND_CACHE = (lats, lons, speeds, dirs)
+        return _PARQUET_WIND_CACHE
+    except Exception as exc:
+        logger.debug("Failed reading coastal wind parquet: %s", exc)
+        return None
+
+def _deg_to_compass(deg: float) -> str:
+    val = int((deg / 45.0) + 0.5) % 8
+    return _COMPASS_8[val]
+
+def _fetch_parquet_wind(lat: float, lon: float) -> tuple[float, str, int] | None:
+    data = _get_coastal_wind_parquet_data()
+    if not data:
+        return None
+    lats, lons, speeds, dirs = data
+    dist_sq = (lats - lat) ** 2 + (lons - lon) ** 2
+    idx = int(dist_sq.argmin())
+    speed_kmh = float(speeds[idx]) if not (np.isnan(speeds[idx]) if hasattr(speeds, "dtype") else False) else 15.0
+    wind_kt = round(speed_kmh * 0.539957, 1)
+    deg = int(dirs[idx]) if not (np.isnan(dirs[idx]) if hasattr(dirs, "dtype") else False) else 0
+    compass = _deg_to_compass(deg)
+    return wind_kt, compass, deg
+
+
+# ---------------------------------------------------------------------------
 # W2 extensible interface — IMD scraping
 # ---------------------------------------------------------------------------
 
@@ -181,14 +268,22 @@ async def fetch_imd_wind(lat: float, lon: float) -> tuple[float, str]:
 async def fetch_imd_cyclones() -> list[dict]:
     """
     Real fetcher: active cyclone list from IMD / live coastal fetcher.
-    Returns list of {"name": str, "lat": float, "lon": float, "center": [lat, lon]}
+    Falls back to Marine Data Package (cyclone_events.parquet) if live is unavailable.
     """
     try:
         from backend.ingest.live_fetchers import fetch_imd_cyclones as live_cyclones
-        return live_cyclones()
+        res = live_cyclones()
+        if res:
+            return res
     except Exception as exc:
         logger.debug("IMD cyclone fetch error: %s", exc)
-        return []
+
+    # Tier 3 fallback: Marine Data Package
+    fallback = _get_cyclone_parquet_data()
+    if fallback:
+        return fallback
+
+    return []
 
 
 async def get_wind(
@@ -198,7 +293,7 @@ async def get_wind(
     idx: int,
 ) -> tuple[float, str, int | None, str]:
     """
-    Wrapper: try IMD real wind, fall back to heuristic.
+    Wrapper: try IMD real wind, fall back to Marine Data Package parquet, then heuristic.
 
     Returns:
         (wind_kt, wind_dir, wind_deg, source)
@@ -211,7 +306,12 @@ async def get_wind(
         except NotImplementedError:
             pass
         except Exception as exc:
-            logger.debug("weather_agent: IMD wind fetch failed for %s (%s,%s): %s", zone_id, lat, lon, exc)
+            logger.debug("weather_agent: IMD wind fetch failed for %s (%s, %s): %s", zone_id, lat, lon, exc)
+
+        # Tier 3 fallback: Marine Data Package
+        parquet_fallback = _fetch_parquet_wind(lat, lon)
+        if parquet_fallback is not None:
+            return parquet_fallback[0], parquet_fallback[1], parquet_fallback[2], "marine_data_package"
 
     wind_kt = _heuristic_wind_speed(lat, lon, zone_id, idx)
     wind_dir = _heuristic_wind_dir(lat, lon, zone_id, idx)
