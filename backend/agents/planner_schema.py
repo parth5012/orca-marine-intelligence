@@ -1,7 +1,7 @@
 """
 PROTOTYPE - awaiting human approval (wayfinder #25, map #22). ROUGH DRAFT only.
 
-Dynamic planner schema for Gemini 2.5 Flash (<500ms) selective dispatch.
+Dynamic planner schema for Gemini 2.5 Flash (<5000ms) selective dispatch.
 
 Design (draft, to react to):
   - Planner (LLM) picks a SUBSET of 4 specialists per query instead of
@@ -17,6 +17,7 @@ Do NOT wire into graph.py / orchestrator.py until human approves direction.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -25,8 +26,8 @@ from pydantic import BaseModel, Field, field_validator
 # Planner contract constants (draft - human to confirm)
 # ---------------------------------------------------------------------------
 
-PLANNER_MODEL = "gemini-2.5-flash"  # primary; <500ms budget per ticket #25
-PLANNER_TIMEOUT_MS = 500
+PLANNER_MODEL = "gemini-2.5-flash"  # primary; <5000ms budget per ticket #74
+PLANNER_TIMEOUT_MS: int = int(os.getenv("ORCA_PLANNER_TIMEOUT_MS", "5000"))
 
 CLARIFICATION_THRESHOLD = 0.6  # confidence < 0.6 -> ask GPS, never guess
 
@@ -50,7 +51,7 @@ COASTAL_PORTS_REGISTRY: dict[str, list[float]] = {
     "Chennai": [13.08, 80.27],
 }
 
-PLANNER_SYSTEM_PROMPT: str = """You are ORCA's dynamic query planner (model: gemini-2.5-flash, budget <500ms).
+PLANNER_SYSTEM_PROMPT: str = """You are ORCA's dynamic query planner (model: gemini-2.5-flash, budget <5000ms).
 Pick the MINIMAL subset of specialist tools needed for the user query. Be deterministic and auditable.
 
 Available tools (exact names):

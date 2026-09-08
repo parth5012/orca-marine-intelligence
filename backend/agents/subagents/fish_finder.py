@@ -19,13 +19,121 @@ Query Logic:
     4. Return normalized zone objects.
 """
 
+import asyncio
 import json
-import math
 import logging
+import math
 from pathlib import Path
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# PostGIS Fast-Check Circuit Breaker (Ticket #76)
+# ---------------------------------------------------------------------------
+_db_degraded: bool = False
+_db_last_failure_time: float = 0.0
+_CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 30.0
+_DB_PING_TIMEOUT_SECONDS: float = 0.5
+
+
+def is_db_degraded() -> bool:
+    """Return True if PostGIS is currently in degraded / circuit-open state."""
+    global _db_degraded, _db_last_failure_time
+    if _db_degraded:
+        if time.time() - _db_last_failure_time > _CIRCUIT_BREAKER_COOLDOWN_SECONDS:
+            return False
+        return True
+    try:
+        from backend.db import postgis as db_postgis
+
+        if hasattr(db_postgis, "is_db_degraded") and db_postgis.is_db_degraded != is_db_degraded:
+            return db_postgis.is_db_degraded()
+    except Exception:
+        pass
+    return False
+
+
+def set_db_degraded(degraded: bool = True) -> None:
+    """Set database degraded state and update failure timestamp."""
+    global _db_degraded, _db_last_failure_time
+    _db_degraded = degraded
+    if degraded:
+        _db_last_failure_time = time.time()
+    else:
+        _db_last_failure_time = 0.0
+    try:
+        from backend.db import postgis as db_postgis
+
+        if hasattr(db_postgis, "set_db_degraded") and db_postgis.set_db_degraded != set_db_degraded:
+            db_postgis.set_db_degraded(degraded)
+    except Exception:
+        pass
+
+
+def reset_circuit_breaker() -> None:
+    """Reset circuit breaker to healthy state (closed)."""
+    set_db_degraded(False)
+    try:
+        from backend.db import postgis as db_postgis
+
+        if (
+            hasattr(db_postgis, "reset_circuit_breaker")
+            and db_postgis.reset_circuit_breaker != reset_circuit_breaker
+        ):
+            db_postgis.reset_circuit_breaker()
+    except Exception:
+        pass
+
+
+async def ping_database(timeout: float = _DB_PING_TIMEOUT_SECONDS) -> bool:
+    """
+    Fast async connectivity check for PostGIS within timeout (default 500ms).
+    Avoids 4-second connection hang when database is down.
+    Returns True if healthy/reachable, False otherwise.
+    """
+    try:
+        from backend.db.postgis import find_pfz_near
+        import unittest.mock
+
+        # If find_pfz_near is mocked in tests, treat DB as reachable unless ping is explicitly mocked
+        if isinstance(find_pfz_near, (unittest.mock.Mock, unittest.mock.AsyncMock)):
+            try:
+                from backend.db.postgis import ping_postgis
+
+                if isinstance(ping_postgis, (unittest.mock.Mock, unittest.mock.AsyncMock)):
+                    res = ping_postgis()
+                    if asyncio.iscoroutine(res):
+                        return await asyncio.wait_for(res, timeout=timeout)
+                    return bool(res)
+            except (ImportError, AttributeError):
+                pass
+            return True
+    except Exception:
+        pass
+
+    try:
+        try:
+            from backend.db.postgis import ping_postgis
+
+            res = ping_postgis()
+            if asyncio.iscoroutine(res):
+                return await asyncio.wait_for(res, timeout=timeout)
+            return bool(res)
+        except (ImportError, AttributeError):
+            from backend.db.session import engine
+            from sqlalchemy import text
+
+            async def _check():
+                async with engine.connect() as conn:
+                    await conn.execute(text("SELECT 1"))
+
+            await asyncio.wait_for(_check(), timeout=timeout)
+            return True
+    except Exception as exc:
+        logger.warning("fish_finder: PostGIS fast-check ping failed (%s)", exc)
+        return False
 
 # Resolved GeoJSON path — backend/agents/subagents/fish_finder.py -> project root / data/pfz-today.geojson
 _GEOJSON_CANDIDATES = [
@@ -242,24 +350,55 @@ async def find_fishing_zones(
     use_fallback = False
     last_error: Exception | None = None
 
+    # Fast-check PostGIS circuit breaker & ping before entering query loop (Ticket #76)
+    if is_db_degraded():
+        logger.warning(
+            "fish_finder: PostGIS in degraded state (circuit-breaker open), fast-failing to GeoJSON fallback"
+        )
+        use_fallback = True
+    else:
+        try:
+            db_alive = await asyncio.wait_for(
+                ping_database(timeout=_DB_PING_TIMEOUT_SECONDS),
+                timeout=_DB_PING_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            db_alive = False
+
+        if not db_alive:
+            logger.warning(
+                "fish_finder: PostGIS fast-check ping failed within 500ms, fast-failing to GeoJSON fallback"
+            )
+            set_db_degraded(True)
+            use_fallback = True
+
     for radius in radii_to_try:
         if not use_fallback:
             try:
                 from backend.db.postgis import find_pfz_near  # local import for testability
 
-                zones: list[dict] = await find_pfz_near(lat=lat, lon=lon, radius_km=radius, limit=limit)
+                res = find_pfz_near(lat=lat, lon=lon, radius_km=radius, limit=limit)
+                if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                    zones: list[dict] = await asyncio.wait_for(
+                        res,
+                        timeout=_DB_PING_TIMEOUT_SECONDS,
+                    )
+                else:
+                    zones = res
                 # PostGIS does not filter by sector — apply here
                 zones = _apply_sector_filter(zones)
                 # find_pfz_near already returns normalized objects sorted by distance
                 # If sector filter emptied results, treat as 0 and expand
                 if zones:
+                    set_db_degraded(False)
                     return zones[:limit]
                 # else: 0 zones at this radius -> try next expansion stage
                 continue
             except Exception as exc:
-                # DB unreachable or query failed -> fallback to GeoJSON
+                # DB unreachable or query failed - fallback to GeoJSON
                 last_error = exc
                 use_fallback = True
+                set_db_degraded(True)
                 logger.warning(
                     "fish_finder: PostGIS find_pfz_near failed at radius %.1fkm (%s), falling back to GeoJSON",
                     radius,

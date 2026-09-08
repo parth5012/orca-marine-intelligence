@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 try:
     from backend.agents.fallback import (  # noqa: F401 (deprecated re-exports)
         COASTAL_PORTS,
+        _KNOWN_PORTS,
         _coastal_port_lookup,
         _is_temporal_followup,
         _parse_explicit_location,
@@ -60,6 +61,7 @@ try:
 except ImportError:
     from fallback import (  # type: ignore # noqa: F401 (direct script runs)
         COASTAL_PORTS,
+        _KNOWN_PORTS,
         _coastal_port_lookup,
         _is_temporal_followup,
         _parse_explicit_location,
