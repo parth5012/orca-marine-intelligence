@@ -347,12 +347,15 @@ export default function ChatPanel({
                               {step.state === 'done' && (
                                 <span className="text-emerald-400 font-bold">✓</span>
                               )}
-                              {step.state === 'timeout' && (
-                                <span className="text-amber-400">⏱</span>
-                              )}
-                              {step.state === 'error' && (
-                                <span className="text-red-400">✕</span>
-                              )}
+                      {step.state === 'timeout' && (
+                        <span className="text-amber-400">⏱</span>
+                      )}
+                      {step.state === 'fallback' && (
+                        <span className="text-amber-400">⚠</span>
+                      )}
+                      {step.state === 'error' && (
+                        <span className="text-red-400">✕</span>
+                      )}
                               <span className="font-medium text-slate-200">
                                 {step.title}
                               </span>
@@ -452,6 +455,17 @@ export default function ChatPanel({
                       <span>ORCA Brain reasoning & translating advisory...</span>
                     </div>
                   ) : null}
+
+                  {/* Fallback Amber Banner */}
+                  {(msg.fallback || msg.reasoning_steps?.some((s) => s.state === 'fallback')) && (
+                    <div
+                      data-testid="fallback-banner"
+                      className="mt-2 text-xs text-amber-300 bg-amber-950/60 p-2 rounded-lg border border-amber-700/60 flex items-center gap-1.5"
+                    >
+                      <span className="text-amber-400 font-bold">⚠</span>
+                      <span>{msg.fallback_message || 'using fallback (LLM unavailable)'}</span>
+                    </div>
+                  )}
 
                   {/* Error Indicator */}
                   {msg.error && (

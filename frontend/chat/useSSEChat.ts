@@ -13,7 +13,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 export interface ReasoningStep {
   agent: string;
-  state: 'running' | 'done' | 'timeout' | 'error';
+  state: 'running' | 'done' | 'timeout' | 'error' | 'fallback';
   elapsed_ms?: number;
   title: string;
   description?: string;
@@ -63,6 +63,8 @@ export interface ChatMessage {
   latency_ms?: number;
   confidence?: number;
   error?: string;
+  fallback?: boolean;
+  fallback_message?: string;
 }
 
 export interface UseSSEChatOptions {
@@ -350,9 +352,32 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
               continue;
             }
 
-            const type = parsed.type || eventType;
+          const type = parsed.type || eventType;
 
+          // Don't abort 'status' events. Only abort fatal 'error'.
+          if (type === 'error') {
             setMessages((prevMsgs) => {
+              const current = prevMsgs.find((m) => m.id === assistantMessageId);
+              if (!current) return prevMsgs;
+              return prevMsgs.map((m) =>
+                m.id === assistantMessageId
+                  ? {
+                      ...m,
+                      isStreaming: false,
+                      error: parsed.message || 'Stream error occurred',
+                    }
+                  : m
+              );
+            });
+            try {
+              await reader.cancel();
+            } catch {
+              // ignore
+            }
+            break;
+          }
+
+          setMessages((prevMsgs) => {
               const current = prevMsgs.find((m) => m.id === assistantMessageId);
               if (!current) return prevMsgs;
 
@@ -365,40 +390,50 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                   break;
                 }
 
-                case 'status':
-                case 'reasoning_step':
-                case 'tool_call': {
-                  const agentKey = parsed.agent || parsed.name || 'orchestrator';
-                  const title =
-                    parsed.title ||
-                    parsed.description ||
-                    AGENT_TITLE_MAP[agentKey] ||
-                    `Agent ${agentKey} active`;
-                  const state = parsed.state || 'running';
-                  const elapsed = parsed.elapsed_ms ?? undefined;
+          case 'status':
+          case 'reasoning_step':
+          case 'tool_call': {
+            const agentKey = parsed.agent || parsed.name || 'orchestrator';
+            const title =
+              parsed.title ||
+              parsed.description ||
+              (parsed.state === 'fallback'
+                ? 'Planner fallback advisory'
+                : AGENT_TITLE_MAP[agentKey]) ||
+              `Agent ${agentKey} active`;
+            const state = parsed.state || 'running';
+            const elapsed = parsed.elapsed_ms ?? undefined;
 
-                  const existingIdx = updated.reasoning_steps.findIndex(
-                    (s) => s.agent === agentKey
-                  );
+            if (state === 'fallback' || parsed.fallback === true) {
+              updated.fallback = true;
+              updated.fallback_message = 'using fallback (LLM unavailable)';
+            }
 
-                  const step: ReasoningStep = {
-                    agent: agentKey,
-                    state,
-                    elapsed_ms: elapsed,
-                    title,
-                    description: parsed.description || parsed.summary,
-                    timestamp: Date.now(),
-                  };
+            const existingIdx = updated.reasoning_steps.findIndex(
+              (s) => s.agent === agentKey
+            );
 
-                  if (existingIdx >= 0) {
-                    const newSteps = [...updated.reasoning_steps];
-                    newSteps[existingIdx] = { ...newSteps[existingIdx], ...step };
-                    updated.reasoning_steps = newSteps;
-                  } else {
-                    updated.reasoning_steps = [...updated.reasoning_steps, step];
-                  }
-                  break;
-                }
+            const step: ReasoningStep = {
+              agent: agentKey,
+              state,
+              elapsed_ms: elapsed,
+              title,
+              description:
+                parsed.description ||
+                parsed.summary ||
+                (state === 'fallback' ? parsed.message : undefined),
+              timestamp: Date.now(),
+            };
+
+            if (existingIdx >= 0) {
+              const newSteps = [...updated.reasoning_steps];
+              newSteps[existingIdx] = { ...newSteps[existingIdx], ...step };
+              updated.reasoning_steps = newSteps;
+            } else {
+              updated.reasoning_steps = [...updated.reasoning_steps, step];
+            }
+            break;
+          }
 
                 case 'map':
                 case 'zone_card': {
@@ -504,11 +539,11 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                   break;
                 }
 
-                case 'error': {
-                  updated.isStreaming = false;
-                  updated.error = parsed.message || 'Stream error occurred';
-                  break;
-                }
+          case 'error': {
+            updated.isStreaming = false;
+            updated.error = parsed.message || 'Stream error occurred';
+            break;
+          }
 
                 default: {
                   if (parsed.text) {
