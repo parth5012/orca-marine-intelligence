@@ -456,7 +456,7 @@ def _is_temporal_followup(query: str) -> bool:
 def _parse_intent(query: str) -> dict:
     q = (query or "").lower()
     # wants_fish: keywords fish/PFZ
-    fish_keywords = ["fish", "pfz", "catch", "fishing", "zone", "மீൻ", "മത്സ്യം", "machhli", "chepa"]
+    fish_keywords = ["fish", "pfz", "catch", "fishing", "zone", "மீன்", "மீன", "മീൻ", "മത്സ്യം", "machhli", "chepa"]
     # wants_safety: wave, wind, cyclone, safe, danger, tide, weather, storm
     safety_keywords = ["safe", "danger", "wave", "wind", "cyclone", "storm", "tide", "weather", "sea", "current", "lightning"]
     # In W1, if query is short or unknown, default both to true (independent)

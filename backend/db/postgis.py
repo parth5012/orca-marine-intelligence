@@ -98,7 +98,7 @@ async def upsert_pfz_features(features: List[Dict[str, Any]], valid_date: Option
             }
         )
         result = await session.execute(stmt)
-    await session.commit()
+        await session.commit()
     return len(rows)
 
 

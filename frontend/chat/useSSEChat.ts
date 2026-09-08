@@ -406,7 +406,8 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
             if (state === 'fallback' || parsed.fallback === true) {
               updated.fallback = true;
-              updated.fallback_message = 'using fallback (LLM unavailable)';
+              updated.fallback_message =
+                parsed.message || 'using fallback (LLM unavailable)';
             }
 
             const existingIdx = updated.reasoning_steps.findIndex(

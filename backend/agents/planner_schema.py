@@ -27,7 +27,20 @@ from pydantic import BaseModel, Field, field_validator
 # ---------------------------------------------------------------------------
 
 PLANNER_MODEL = "gemini-2.5-flash"  # primary; <5000ms budget per ticket #74
-PLANNER_TIMEOUT_MS: int = int(os.getenv("ORCA_PLANNER_TIMEOUT_MS", "5000"))
+
+
+def _parse_timeout_ms(raw: str | None, default: int = 5000) -> int:
+    """Validate ORCA_PLANNER_TIMEOUT_MS once; fall back safely on bad input."""
+    try:
+        value = int(str(raw) if raw is not None else default)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+PLANNER_TIMEOUT_MS: int = _parse_timeout_ms(
+    os.getenv("ORCA_PLANNER_TIMEOUT_MS"), 5000
+)
 
 CLARIFICATION_THRESHOLD = 0.6  # confidence < 0.6 -> ask GPS, never guess
 

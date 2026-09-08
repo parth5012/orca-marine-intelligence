@@ -90,7 +90,7 @@ __all__ = [
 # Constants
 # ---------------------------------------------------------------------------
 
-PLANNER_TIMEOUT_S: float = float(os.getenv("ORCA_PLANNER_TIMEOUT_MS", str(PLANNER_TIMEOUT_MS))) / 1000.0  # 5.0s SLA budget
+PLANNER_TIMEOUT_S: float = PLANNER_TIMEOUT_MS / 1000.0  # derived from validated constant
 
 _HISTORY_LIMIT = 3  # multi-turn context: last 3 turns from Redis session cache
 
