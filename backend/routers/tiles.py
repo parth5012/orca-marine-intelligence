@@ -110,7 +110,7 @@ async def get_tile(z: int, x: int, y: int, layer: str = "pfz") -> Response:
     Serve vector tile for coordinate (z, x, y).
     Queries PostGIS ST_AsMVT per layer when connected;
     Caches in Redis under 'tiles:{layer}:{z}/{x}/{y}' for 3600s;
-    Falls back to EMPTY_MVT_BYTES with 'X-Tile-Fallback: true' header when DB/Redis is down.
+    Returns 503 with 'X-Tile-Fallback: true' header when DB/Redis is down (no empty-tile caching).
     """
     if not (0 <= z <= 24):
         return Response(status_code=400, content="Invalid zoom level")
@@ -169,13 +169,13 @@ async def get_tile(z: int, x: int, y: int, layer: str = "pfz") -> Response:
             },
         )
 
-    # 4. Fallback to EMPTY_MVT_BYTES with X-Tile-Fallback: true
+    # 4. No empty-tile fallback: surface DB outage as 503 (never cache emptiness)
     return Response(
-        content=EMPTY_MVT_BYTES,
-        media_type="application/x-protobuf",
+        content="Tile unavailable: PostGIS offline",
+        status_code=503,
+        media_type="text/plain",
         headers={
-            "Content-Type": "application/x-protobuf",
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": "no-store",
             "X-Tile-Layer": safe_layer,
             "X-Tile-Coords": f"{z}/{x}/{y}",
             "X-Tile-Fallback": "true",

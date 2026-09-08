@@ -286,8 +286,8 @@ def combine_and_rank(
                 sea_entry = sea_results[idx]
         wave = _get_wave(sea_entry)
         if wave is None:
-            wave_val = 0.0  # missing -> assume safe
-            safe_sea = 1.0
+            wave_val = 2.0  # missing -> penalize as unknown/caution, never safe
+            safe_sea = 0.4
         else:
             wave_val = float(wave)
             if wave_val < 1.5:
@@ -302,8 +302,8 @@ def combine_and_rank(
                 weather_entry = weather_results[idx]
         wind = _get_wind(weather_entry)
         if wind is None:
-            wind_val = 0.0  # missing -> assume safe
-            wind_ok = 1.0
+            wind_val = 20.0  # missing -> penalize as unknown/caution, never safe
+            wind_ok = 0.4
         else:
             wind_val = float(wind)
             if wind_val < 15:
@@ -317,7 +317,7 @@ def combine_and_rank(
             if len(danger_results) == len(fish_results):
                 danger_entry = danger_results[idx]
         if danger_entry is None:
-            inside_eez = True
+            inside_eez = False
             inside_mpa = False
         else:
             # Defaults: inside_eez True, inside_mpa False if missing
@@ -328,7 +328,7 @@ def combine_and_rank(
                 inside_eez_raw = danger_entry.get("insideEEZ")
             if inside_mpa_raw is None:
                 inside_mpa_raw = danger_entry.get("insideMPA")
-            inside_eez = bool(inside_eez_raw) if inside_eez_raw is not None else True
+            inside_eez = bool(inside_eez_raw) if inside_eez_raw is not None else False
             inside_mpa = bool(inside_mpa_raw) if inside_mpa_raw is not None else False
 
         not_banned = 0.0 if (inside_mpa or not inside_eez) else 1.0

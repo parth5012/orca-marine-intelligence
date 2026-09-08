@@ -214,15 +214,14 @@ async def chat_voice(
     finally:
         await upload_file.close()
 
-    is_mock = False
     if not transcription_text:
-        # Graceful fallback mock for testing or offline environment without API key
-        is_mock = True
-        fname = getattr(upload_file, "filename", None) or "voice.wav"
-        transcription_text = f"Transcribed vernacular query from {fname}"
+        raise HTTPException(
+            status_code=503,
+            detail="Voice transcription unavailable: no transcription produced (missing GROQ_API_KEY or upstream failure).",
+        )
 
     return {
         "transcription": transcription_text,
         "session_id": resolved_session_id,
-        "mock": is_mock,
+        "mock": False,
     }

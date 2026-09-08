@@ -269,9 +269,9 @@ class TestSeaChecker:
     async def test_check_sea_empty_and_invalid(self):
         from backend.agents import sea_checker
         assert await sea_checker.check_sea_conditions([]) == []
-        # invalid point non-dict
+        # invalid point non-dict -> danger (fail-closed, never safe)
         res = await sea_checker.check_sea_conditions([None])
-        assert res[0]["status"] == "safe"
+        assert res[0]["status"] == "danger"
         assert "invalid" in res[0]["reason"].lower()
 
 
