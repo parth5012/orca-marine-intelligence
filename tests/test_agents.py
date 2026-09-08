@@ -596,6 +596,25 @@ class TestCombiner:
         assert "INCOIS" in result["citation"]
         assert "TestPlace" in result["citation"]
 
+    def test_missing_wave_and_wind_kept_unavailable_not_unsafe(self):
+        from backend.agents.combiner import combine_and_rank
+        fish = [
+            {"zone_id": "z1", "place": "CalmSpot", "sector": "KERALA", "lat": 10.0, "lon": 76.0, "distance_from_user_km": 5.0}
+        ]
+        # sea and weather empty (missing upstream data)
+        danger = [{"zone_id": "z1", "inside_eez": True, "inside_mpa": False}]
+        result = combine_and_rank(fish, [], [], danger, {"lat": 9.93, "lon": 76.26})
+
+        best = result["best"]
+        assert best is not None
+        assert best["wave_height_m"] is None
+        assert best["wind_kt"] is None
+        assert best["wave_available"] is False
+        assert best["wind_available"] is False
+        assert result["all_unsafe"] is False
+        assert "DO NOT SAIL" not in result["explanation"]
+        assert "wave data unavailable" in result["explanation"]
+
 
 # ---------------------------------------------------------------------------
 # Orchestrator — parallel gather, 10s timeout resilience, Malayalam, all-unsafe
