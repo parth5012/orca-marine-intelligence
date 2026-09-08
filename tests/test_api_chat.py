@@ -236,6 +236,142 @@ class TestChatStreamingEndpoint:
         assert parsed[1]["event"] == "error"
         assert "Database connection timeout" in parsed[1]["data"]["message"]
 
+    def test_planner_fallback_emits_non_fatal_status_event(self, client):
+        """Ticket #78: Verify planner failure emits non-fatal status fallback event instead of error."""
+        from backend.agents.planner_service import PlannerTimeoutError
+
+        with patch(
+            "backend.agents.planner_service.plan_query",
+            side_effect=PlannerTimeoutError("Gemini SLA breached", elapsed_ms=500),
+        ):
+            response = client.post(
+                "/api/chat",
+                json={
+                    "message": "Fish near Kochi?",
+                    "lat": 9.93,
+                    "lon": 76.26,
+                    "language": "en",
+                    "session_id": "fallback-test-sess",
+                },
+            )
+
+        assert response.status_code == 200
+        parsed = parse_sse_events(response.text)
+
+        # Verify status event with state: fallback
+        status_events = [p for p in parsed if p["event"] == "status"]
+        planner_fallback_events = [
+            p
+            for p in status_events
+            if p["data"].get("agent") == "planner"
+            and p["data"].get("state") == "fallback"
+        ]
+        assert len(planner_fallback_events) == 1
+        fb_event = planner_fallback_events[0]["data"]
+        assert fb_event["type"] == "status"
+        assert fb_event["agent"] == "planner"
+        assert fb_event["state"] == "fallback"
+        assert fb_event["message"] == "LLM planner unavailable, using fallback advisory"
+        assert fb_event["fallback"] is True
+        assert fb_event["elapsed_ms"] == 500
+
+        # Verify stream did NOT emit fatal error for planner
+        error_events = [p for p in parsed if p["event"] == "error"]
+        planner_errors = [
+            p for p in error_events if p["data"].get("agent") == "planner"
+        ]
+        assert len(planner_errors) == 0
+
+        # Verify stream completed with done event
+        done_events = [p for p in parsed if p["event"] == "done"]
+        assert len(done_events) == 1
+
+    def test_planner_fallback_chunked_replay_emits_status_fallback(self, client):
+        """Ticket #78: Verify chunked replay path also emits status fallback event for planner."""
+        from unittest.mock import AsyncMock
+
+        class MockGraphWithoutAstream:
+            pass
+
+        canned = {
+            "planner_error": {
+                "type": "status",
+                "agent": "planner",
+                "state": "fallback",
+                "message": "LLM planner unavailable, using fallback advisory",
+                "fallback": True,
+                "elapsed_ms": 500,
+            },
+            "map": {"center": [76.26, 9.93], "pfz_features": [], "route": []},
+            "safety": {"waves_m": 0.8, "wind_kts": 10.0, "danger": "none", "badge": "green"},
+            "reply": "Safe fishing advisory near Kochi.",
+            "evidence": ["INCOIS TextData"],
+            "language": "en",
+            "confidence": 0.62,
+            "session_id": "fallback-test-chunked",
+        }
+
+        with patch("backend.agents.graph.get_orca_graph", return_value=MockGraphWithoutAstream()):
+            with patch(
+                "backend.agents.graph.orchestrate_via_graph",
+                new=AsyncMock(return_value=dict(canned)),
+            ):
+                response = client.post(
+                    "/api/chat",
+                    json={
+                        "message": "Fish near Kochi?",
+                        "lat": 9.93,
+                        "lon": 76.26,
+                        "language": "en",
+                        "session_id": "fallback-test-chunked",
+                    },
+                )
+
+        assert response.status_code == 200
+        parsed = parse_sse_events(response.text)
+
+        status_events = [p for p in parsed if p["event"] == "status"]
+        planner_fallback_events = [
+            p
+            for p in status_events
+            if p["data"].get("agent") == "planner"
+            and p["data"].get("state") == "fallback"
+        ]
+        assert len(planner_fallback_events) == 1
+        fb_event = planner_fallback_events[0]["data"]
+        assert fb_event["type"] == "status"
+        assert fb_event["agent"] == "planner"
+        assert fb_event["state"] == "fallback"
+
+        # Verify stream completed with done event and no planner error
+        error_events = [p for p in parsed if p["event"] == "error" and p["data"].get("agent") == "planner"]
+        assert len(error_events) == 0
+        done_events = [p for p in parsed if p["event"] == "done"]
+        assert len(done_events) == 1
+
+    def test_planner_fatal_import_error_emits_sse_error_event(self, client):
+        """Ticket #78: Verify truly fatal planner failure (ImportError) emits SSE error event."""
+        with patch.dict("sys.modules", {"backend.agents.planner_service": None}):
+            response = client.post(
+                "/api/chat",
+                json={
+                    "message": "Fish near Kochi?",
+                    "lat": 9.93,
+                    "lon": 76.26,
+                    "language": "en",
+                    "session_id": "fatal-planner-sess",
+                },
+            )
+
+            assert response.status_code == 200
+            parsed = parse_sse_events(response.text)
+            error_events = [
+                p for p in parsed
+                if p["event"] == "error" and p["data"].get("agent") == "planner"
+            ]
+            assert len(error_events) == 1
+            assert error_events[0]["data"]["type"] == "error"
+            assert error_events[0]["data"]["fallback"] == "none"
 
 class TestChatHistoryEndpoint:
     """Tests for GET /api/chat/history."""

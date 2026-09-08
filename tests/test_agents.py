@@ -137,7 +137,105 @@ class TestFishFinder:
         with patch("backend.db.postgis.find_pfz_near", side_effect=failing_find):
             with patch.object(fish_finder, "_load_geojson_features", return_value=[]):
                 zones = await fish_finder.find_fishing_zones(lat=9.93, lon=76.26, radius_km=80.0)
-        assert zones == []
+                assert zones == []
+
+    @pytest.mark.asyncio
+    async def test_postgis_fast_check_ping_timeout_fallback_under_500ms(self):
+        from backend.agents import fish_finder
+        import time
+
+        fish_finder.reset_circuit_breaker()
+
+        fake_features = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"place": "FastFallbackZone", "sector": "SEC005", "sector_name": "KERALA"},
+                    "geometry": {"type": "Point", "coordinates": [76.26, 9.93]},
+                }
+            ],
+        }
+
+        # Simulate slow 4s connection hang on ping
+        async def slow_ping(*args, **kwargs):
+            await asyncio.sleep(4.0)
+            return True
+
+        t0 = time.perf_counter()
+        with patch.object(fish_finder, "ping_database", side_effect=slow_ping):
+            with patch.object(fish_finder, "_load_geojson_features", return_value=fake_features["features"]):
+                zones = await fish_finder.find_fishing_zones(lat=9.93, lon=76.26, radius_km=80.0, limit=5)
+        elapsed = time.perf_counter() - t0
+
+        # Acceptance: returns GeoJSON zones within 500ms (far less than 4s hang)
+        assert elapsed < 0.65, f"Expected < 650ms but took {elapsed:.2f}s"
+        assert len(zones) == 1
+        assert zones[0]["place"] == "FastFallbackZone"
+        assert fish_finder.is_db_degraded() is True
+
+    @pytest.mark.asyncio
+    async def test_postgis_circuit_breaker_tracks_degraded_state_across_requests(self):
+        from backend.agents import fish_finder
+        import time
+
+        fish_finder.reset_circuit_breaker()
+
+        fake_features = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"place": "DegradedFallbackZone", "sector": "SEC005", "sector_name": "KERALA"},
+                    "geometry": {"type": "Point", "coordinates": [76.26, 9.93]},
+                }
+            ],
+        }
+
+        # First request: ping fails and marks degraded
+        with patch.object(fish_finder, "ping_database", return_value=False):
+            with patch.object(fish_finder, "_load_geojson_features", return_value=fake_features["features"]):
+                zones1 = await fish_finder.find_fishing_zones(lat=9.93, lon=76.26, radius_km=80.0, limit=5)
+
+        assert len(zones1) == 1
+        assert fish_finder.is_db_degraded() is True
+
+        # Second request: circuit breaker open, should skip ping entirely
+        ping_mock = AsyncMock(return_value=False)
+        t0 = time.perf_counter()
+        with patch.object(fish_finder, "ping_database", ping_mock):
+            with patch.object(fish_finder, "_load_geojson_features", return_value=fake_features["features"]):
+                zones2 = await fish_finder.find_fishing_zones(lat=9.93, lon=76.26, radius_km=80.0, limit=5)
+        elapsed = time.perf_counter() - t0
+
+        assert elapsed < 0.1, f"Expected < 100ms on degraded path, took {elapsed:.2f}s"
+        assert len(zones2) == 1
+        assert zones2[0]["place"] == "DegradedFallbackZone"
+        # ping_database was not called on second request because circuit breaker was open
+        ping_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_postgis_circuit_breaker_recovery_after_cooldown(self):
+        from backend.agents import fish_finder
+        import time
+
+        fish_finder.reset_circuit_breaker()
+        fish_finder.set_db_degraded(True)
+        assert fish_finder.is_db_degraded() is True
+
+        # Simulate cooldown elapsed
+        fish_finder._db_last_failure_time = time.time() - 35.0
+        assert fish_finder.is_db_degraded() is False
+
+        # If ping now succeeds, DB recovers
+        with patch.object(fish_finder, "ping_database", return_value=True):
+            fake_find = AsyncMock(return_value=[{"place": "RecoveredZone", "distance_from_user_km": 10.0}])
+            with patch("backend.db.postgis.find_pfz_near", fake_find):
+                zones = await fish_finder.find_fishing_zones(lat=9.93, lon=76.26, radius_km=80.0, limit=5)
+
+        assert len(zones) == 1
+        assert zones[0]["place"] == "RecoveredZone"
+        assert fish_finder.is_db_degraded() is False
 
     def test_geojson_fallback_filters_by_sector_and_distance(self):
         from backend.agents.fish_finder import _geojson_fallback
