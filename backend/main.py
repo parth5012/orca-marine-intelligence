@@ -43,7 +43,14 @@ try:
 except ImportError:
     from routers import chat, geofence, pfz, tiles, weather
 
-logger = logging.getLogger("orca.api")
+try:
+    from backend.core.logging import get_logger, setup_logging
+    from backend.core.middleware import RequestLoggingMiddleware
+except ImportError:
+    from core.logging import get_logger, setup_logging
+    from core.middleware import RequestLoggingMiddleware
+
+logger = get_logger("orca.api")
 
 DEFAULT_ALLOWED_ORIGINS = "http://localhost:3000,https://cron-system.vercel.app"
 
@@ -117,11 +124,12 @@ def get_telemetry_status() -> Dict[str, Any]:
 async def lifespan(app: FastAPI):
     """
     Async lifespan handler verifying database connection,
-    Redis pool readiness, and environment variable configuration.
+    Redis pool readiness, environment variable configuration.
     Gracefully handles disconnected states without crashing.
     """
     global _start_time
     _start_time = time.time()
+    setup_logging()
     logger.info("Starting ORCA Marine Intelligence API...")
 
     # Log environment variable configuration
@@ -212,6 +220,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestLoggingMiddleware)
 
 # Mount live routers under /api
 app.include_router(chat.router, prefix="/api")
@@ -219,6 +228,16 @@ app.include_router(pfz.router, prefix="/api")
 app.include_router(weather.router, prefix="/api")
 app.include_router(geofence.router, prefix="/api")
 app.include_router(tiles.router, prefix="/api")
+
+
+@app.get("/")
+async def root() -> Dict[str, Any]:
+    """Root endpoint returning service identity and status."""
+    return {
+        "service": "orca-marine-intelligence",
+        "status": "ok",
+        "version": app.version,
+    }
 
 
 @app.get("/health")
