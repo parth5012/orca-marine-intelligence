@@ -10,7 +10,7 @@
 
 **Content Types:** All endpoints accept and return `application/json` unless noted otherwise (`GET /api/tiles/*.pbf` returns `application/x-protobuf`, `POST /api/chat` returns `text/event-stream`).
 
-**Fetch strategy (T5 rule, map #92):** reads that must survive backend-down go through Next.js proxies; only PFZ has a local-file fallback (`data/pfz-today.geojson`). The chat proxies are transport-only — `POST /api/chat` returns 504 when the backend is unavailable. Live-only telemetry (weather/current, geofence/status) calls the backend directly. Direct calls rely on `ALLOWED_ORIGINS`; proxies sidestep CORS.
+**Fetch strategy (T5 rule, map #92):** reads that must survive backend-down go through Next.js proxies; only PFZ has a local-file fallback (`data/pfz-today.geojson`). The chat proxies are transport-only — the Next.js `POST /api/chat` proxy returns 504 when the backend is unavailable (the FastAPI route itself returns 200/422 as documented below). Live-only telemetry (weather/current, geofence/status) calls the backend directly. Direct calls rely on `ALLOWED_ORIGINS`; proxies sidestep CORS.
 
 ---
 
