@@ -204,12 +204,14 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       const bearing = props.bearing ?? (props.direction ? `${props.direction}` : undefined);
       const dist = props.distance_km ?? props.distance ?? undefined;
 
-      let safetyStatus: 'safe' | 'caution' | 'danger' | 'unknown' = 'safe';
-      const dangerVal = String(props.danger || props.danger_status || '').toLowerCase();
+      let safetyStatus: 'safe' | 'caution' | 'danger' | 'unknown' = 'unknown';
+      const dangerVal = String(props.danger || props.danger_status || props.safety || '').toLowerCase();
       if (dangerVal.includes('danger') || dangerVal.includes('red') || dangerVal.includes('cyclone') || dangerVal.includes('violation')) {
         safetyStatus = 'danger';
       } else if (dangerVal.includes('caution') || dangerVal.includes('amber') || dangerVal.includes('warn')) {
         safetyStatus = 'caution';
+      } else if (dangerVal.includes('safe') || dangerVal.includes('green')) {
+        safetyStatus = 'safe';
       }
 
       cards.push({

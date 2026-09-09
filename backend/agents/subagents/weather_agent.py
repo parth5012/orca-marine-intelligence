@@ -453,12 +453,12 @@ async def check_weather(points: list[dict]) -> list[dict]:
                 "wind_dir": "N",
                 "wind_direction": "N",
                 "wind_deg": 0,
-                "wind_status": "safe",
+                "wind_status": "danger",
                 "cyclone_alert": False,
                 "nearest_cyclone_km": None,
                 "cyclone_name": None,
-                "status": "safe",
-                "reason": "invalid point — skipped",
+                "status": "danger",
+                "reason": "invalid point — unknown location treated as danger",
                 "source": "mock_heuristic",
             })
             continue

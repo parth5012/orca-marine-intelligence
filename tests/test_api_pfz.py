@@ -420,8 +420,8 @@ def test_get_pfz_history(client):
         assert "count" in first_snap
         assert "features" in first_snap
 
-    # Source should be postgis when DB has data, synthetic-duplicate when empty
-    assert data["source"] in ["postgis", "synthetic-duplicate"]
+    # Source should be postgis when DB has data, postgis-empty when empty (no synthetic data)
+    assert data["source"] in ["postgis", "postgis-empty"]
 
 
 def test_get_pfz_history_with_sector(client):

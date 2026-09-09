@@ -279,21 +279,24 @@ def combine_and_rank(
 
         # Sea: wave
         sea_entry = sea_lookup.get(zone_id)
-        # Fallback index alignment if zone_id not matched
+        # Fallback to index alignment if zone_id not matched
         if sea_entry is None and idx < len(sea_results) and isinstance(sea_results[idx], dict):
             # Only use index fallback if lengths match fish_results
             if len(sea_results) == len(fish_results):
                 sea_entry = sea_results[idx]
         wave = _get_wave(sea_entry)
         if wave is None:
-            wave_val = 0.0  # missing -> assume safe
-            safe_sea = 1.0
+            wave_val = None
+            safe_sea = 0.4  # uncertainty penalty in score, but not a threshold violation
+            wave_exceeded = False
         else:
             wave_val = float(wave)
             if wave_val < 1.5:
                 safe_sea = 1.0
+                wave_exceeded = False
             else:
                 safe_sea = max(0.0, 1.0 - (wave_val - 1.5) / 1.5)
+                wave_exceeded = True
 
         # Weather: wind
         weather_entry = weather_lookup.get(zone_id)
@@ -302,14 +305,17 @@ def combine_and_rank(
                 weather_entry = weather_results[idx]
         wind = _get_wind(weather_entry)
         if wind is None:
-            wind_val = 0.0  # missing -> assume safe
-            wind_ok = 1.0
+            wind_val = None
+            wind_ok = 0.4  # uncertainty penalty in score, but not a threshold violation
+            wind_exceeded = False
         else:
             wind_val = float(wind)
             if wind_val < 15:
                 wind_ok = 1.0
+                wind_exceeded = False
             else:
                 wind_ok = max(0.0, 1.0 - (wind_val - 15) / 15)
+                wind_exceeded = True
 
         # Danger: inside_eez, inside_mpa
         danger_entry = danger_lookup.get(zone_id)
@@ -317,7 +323,7 @@ def combine_and_rank(
             if len(danger_results) == len(fish_results):
                 danger_entry = danger_results[idx]
         if danger_entry is None:
-            inside_eez = True
+            inside_eez = False
             inside_mpa = False
         else:
             # Defaults: inside_eez True, inside_mpa False if missing
@@ -328,7 +334,7 @@ def combine_and_rank(
                 inside_eez_raw = danger_entry.get("insideEEZ")
             if inside_mpa_raw is None:
                 inside_mpa_raw = danger_entry.get("insideMPA")
-            inside_eez = bool(inside_eez_raw) if inside_eez_raw is not None else True
+            inside_eez = bool(inside_eez_raw) if inside_eez_raw is not None else False
             inside_mpa = bool(inside_mpa_raw) if inside_mpa_raw is not None else False
 
         not_banned = 0.0 if (inside_mpa or not inside_eez) else 1.0
@@ -341,6 +347,10 @@ def combine_and_rank(
             "safe_sea": round(float(safe_sea), 4),
             "wind_ok": round(float(wind_ok), 4),
             "not_banned": round(float(not_banned), 4),
+            "wave_exceeded": wave_exceeded,
+            "wind_exceeded": wind_exceeded,
+            "wave_available": wave_val is not None,
+            "wind_available": wind_val is not None,
             "score": score,
         }
 
@@ -353,9 +363,11 @@ def combine_and_rank(
             "lon": lon_f,
             "distance_km": round(float(dist_val), 2),
             "distance_from_user_km": round(float(dist_val), 2),
-            "wave_height_m": round(float(wave_val), 2),
-            "wind_kt": round(float(wind_val), 2),
-            "wind_speed_kt": round(float(wind_val), 2),
+            "wave_height_m": round(float(wave_val), 2) if wave_val is not None else None,
+            "wind_kt": round(float(wind_val), 2) if wind_val is not None else None,
+            "wind_speed_kt": round(float(wind_val), 2) if wind_val is not None else None,
+            "wave_available": wave_val is not None,
+            "wind_available": wind_val is not None,
             "inside_eez": inside_eez,
             "inside_mpa": inside_mpa,
             "score": score,
@@ -367,18 +379,18 @@ def combine_and_rank(
         }
         ranked.append(entry)
 
-    # Tie-breaker: sort descending score, then lower wave, then closer distance
-    ranked.sort(key=lambda z: (-z["score"], z["wave_height_m"], z["distance_km"]))
+    # Tie-breaker: sort by descending score, then lower wave, then closer distance
+    ranked.sort(key=lambda z: (-z["score"], z["wave_height_m"] if z["wave_height_m"] is not None else 999.0, z["distance_km"]))
 
-    # All-unsafe detection: every zone exceeds at least one safety threshold
-    # Thresholds: wave >=1.5 or wind >=15 or banned (not_banned==0)
+    # All-unsafe detection: every zone actually exceeds at least one safety threshold
+    # Thresholds: wave >= 1.5m, wind >= 15kt, or banned (not_banned == 0)
+    # Missing measurements (wave/wind unavailable) do not count as threshold violations.
     all_unsafe = False
     if ranked:
         unsafe_count = 0
         for z in ranked:
             bd = z["score_breakdown"]
-            # safe_sea <1 means wave >=1.5, wind_ok <1 means wind >=15, not_banned==0 banned
-            if bd["safe_sea"] < 1.0 or bd["wind_ok"] < 1.0 or bd["not_banned"] == 0.0:
+            if bd.get("wave_exceeded") or bd.get("wind_exceeded") or bd.get("not_banned") == 0.0:
                 unsafe_count += 1
         if unsafe_count == len(ranked):
             all_unsafe = True
@@ -399,39 +411,41 @@ def combine_and_rank(
     if best is None:
         explanation = "No fishing zones found within search radius. Try expanding the search area or check back later."
     elif all_unsafe:
-        # Warning advisory recommending not sailing
+        # Warning advisory recommending not to sail
         reasons = []
         bd = best["score_breakdown"]
-        if bd["safe_sea"] < 1.0:
+        if bd.get("wave_exceeded") and best.get("wave_height_m") is not None:
             reasons.append(f"wave {best['wave_height_m']}m exceeds safe limit 1.5m")
-        if bd["wind_ok"] < 1.0:
+        if bd.get("wind_exceeded") and best.get("wind_kt") is not None:
             reasons.append(f"wind {best['wind_kt']}kt exceeds safe limit 15kt")
-        if bd["not_banned"] == 0.0:
-            if not best["inside_eez"]:
+        if bd.get("not_banned") == 0.0:
+            if not best.get("inside_eez"):
                 reasons.append("outside Indian EEZ")
-            if best["inside_mpa"]:
+            if best.get("inside_mpa"):
                 reasons.append("inside Marine Protected Area (fishing banned)")
-        reason_str = "; ".join(reasons) if reasons else "all zones exceed safety thresholds"
+        reason_str = ", ".join(reasons) if reasons else "all zones exceed safety thresholds"
+        wave_str = f"wave {best['wave_height_m']}m" if best.get("wave_height_m") is not None else "wave unavailable"
+        wind_str = f"wind {best['wind_kt']}kt" if best.get("wind_kt") is not None else "wind unavailable"
         explanation = (
             f"Warning: All {len(ranked)} zones exceed safety thresholds ({reason_str}). "
-            f"Advisory: Do NOT sail — conditions are unsafe. "
-            f"Nearest option {best['place']} ({best['distance_km']}km, wave {best['wave_height_m']}m, wind {best['wind_kt']}kt) "
-            f"is also unsafe. Citation: {citation}."
+            f"Advisory: DO NOT SAIL as conditions are unsafe. "
+            f"Nearest option {best['place']} ({best['distance_km']}km, {wave_str}, {wind_str}) "
+            f"is unsafe. Citation: {citation}."
         )
     else:
         bd = best["score_breakdown"]
+        wave_str = f"wave {best['wave_height_m']}m" if best.get("wave_height_m") is not None else "wave data unavailable"
+        wind_str = f"wind {best['wind_kt']}kt" if best.get("wind_kt") is not None else "wind data unavailable"
         explanation = (
             f"Recommended: {best['place']} ({best['distance_km']}km away, "
-            f"wave {best['wave_height_m']}m, wind {best['wind_kt']}kt) — "
-            f"ranked #1 as the safest and closest option. "
+            f"{wave_str}, {wind_str}) "
+            f"ranked #1 as safest and closest option. "
             f"Score {best['score']} (closest {bd['closest']}, sea {bd['safe_sea']}, wind {bd['wind_ok']}, allowed {bd['not_banned']}). "
-            f"Safe sea (<1.5m), safe wind (<15kt), and outside restricted zones."
+            f"Safe sea (<1.5m) and safe wind (<15kt) outside restricted zones."
         )
-        # If best is banned or has caution, add note
+        # If best is banned or caution, add note
         if bd["not_banned"] == 0.0:
-            explanation += " Note: best zone is near restricted area — verify geofence."
-        # Add citation hint
-        # Keep explanation concise but informative
+            explanation += " Note: best zone near restricted area, verify geofence."
 
     # best dict shape: include place, lat, lon, score plus extra for map
     if best is not None:
@@ -443,9 +457,11 @@ def combine_and_rank(
             "lon": best["lon"],
             "distance_km": best["distance_km"],
             "distance_from_user_km": best["distance_km"],
-            "wave_height_m": best["wave_height_m"],
-            "wind_kt": best["wind_kt"],
-            "wind_speed_kt": best["wind_kt"],
+            "wave_height_m": best.get("wave_height_m"),
+            "wind_kt": best.get("wind_kt"),
+            "wind_speed_kt": best.get("wind_kt"),
+            "wave_available": best.get("wave_available", True),
+            "wind_available": best.get("wind_available", True),
             "inside_eez": best["inside_eez"],
             "inside_mpa": best["inside_mpa"],
             "score": best["score"],

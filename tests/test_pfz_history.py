@@ -7,7 +7,7 @@ Verifies:
 3. Sector filtering on history snapshots.
 4. Retention policy enforcement (1-30 days, max 30).
 5. Pagination limit parameter (default 500).
-6. DB-empty fallback clearly flagged with source='synthetic-duplicate' and warning field.
+6. DB-empty returns empty history with source='postgis-empty' and warning field (no synthetic data).
 7. Contract locking matching docs/API.md.
 """
 
@@ -196,7 +196,7 @@ def test_history_seeded_3_days_returns_3_snapshots(client):
     seeded_zones = build_seeded_3_day_zones()
     mock_session_factory = lambda: MockAsyncSession(seeded_zones)
 
-    with patch("backend.routers.pfz.AsyncSessionLocal", side_effect=mock_session_factory):
+    with patch("backend.db.session.AsyncSessionLocal", side_effect=mock_session_factory):
         response = client.get("/api/pfz/history?days=7")
 
     assert response.status_code == 200
@@ -243,7 +243,7 @@ def test_history_sector_filter_code(client):
     seeded_zones = build_seeded_3_day_zones()
     mock_session_factory = lambda: MockAsyncSession(seeded_zones)
 
-    with patch("backend.routers.pfz.AsyncSessionLocal", side_effect=mock_session_factory):
+    with patch("backend.db.session.AsyncSessionLocal", side_effect=mock_session_factory):
         response = client.get("/api/pfz/history?days=7&sector=SEC005")
 
     assert response.status_code == 200
@@ -267,7 +267,7 @@ def test_history_sector_filter_name_case_insensitive(client):
     seeded_zones = build_seeded_3_day_zones()
     mock_session_factory = lambda: MockAsyncSession(seeded_zones)
 
-    with patch("backend.routers.pfz.AsyncSessionLocal", side_effect=mock_session_factory):
+    with patch("backend.db.session.AsyncSessionLocal", side_effect=mock_session_factory):
         response = client.get("/api/pfz/history?days=7&sector=kerala")
 
     assert response.status_code == 200
@@ -287,14 +287,14 @@ def test_history_fallback_flag_when_db_empty(client):
     """When PostGIS returns no records, fallback must be clearly flagged with source and warning."""
     empty_session_factory = lambda: MockAsyncSession([])
 
-    with patch("backend.routers.pfz.AsyncSessionLocal", side_effect=empty_session_factory):
+    with patch("backend.db.session.AsyncSessionLocal", side_effect=empty_session_factory):
         response = client.get("/api/pfz/history?days=5")
 
     assert response.status_code == 200
     data = response.json()
 
-    # DB-empty fallback clearly flagged
-    assert data["source"] == "synthetic-duplicate", "Fallback must set source: synthetic-duplicate"
+    # DB-empty returns empty history with explicit warning (no synthetic data)
+    assert data["source"] == "postgis-empty", "Fallback must set source: postgis-empty"
     assert "warning" in data, "Fallback must include warning field"
     assert data["warning"] is not None and len(data["warning"]) > 0
 
@@ -303,14 +303,9 @@ def test_history_fallback_flag_when_db_empty(client):
         assert field in data
 
     assert data["days"] == 5
-    assert len(data["snapshots"]) == 5
-    assert data["count"] == len(data["features"])
-
-    for s in data["snapshots"]:
-        assert "date" in s
-        assert "count" in s
-        assert "features" in s
-        assert s["count"] == len(s["features"])
+    assert data["snapshots"] == []
+    assert data["features"] == []
+    assert data["count"] == 0
 
 
 def test_history_fallback_when_db_disconnected(client):
@@ -322,33 +317,33 @@ def test_history_fallback_when_db_disconnected(client):
         async def __aexit__(self, *args):
             pass
 
-    with patch("backend.routers.pfz.AsyncSessionLocal", side_effect=FailingSession):
+    with patch("backend.db.session.AsyncSessionLocal", side_effect=FailingSession):
         response = client.get("/api/pfz/history?days=3")
 
     assert response.status_code == 200
     data = response.json()
 
-    assert data["source"] == "synthetic-duplicate"
+    assert data["source"] == "postgis-empty"
     assert "warning" in data
-    assert len(data["snapshots"]) == 3
+    assert data["snapshots"] == []
+    assert data["features"] == []
 
 
 def test_history_fallback_with_sector_filter(client):
     """Fallback mode with sector filter must filter features to that sector."""
     empty_session_factory = lambda: MockAsyncSession([])
 
-    with patch("backend.routers.pfz.AsyncSessionLocal", side_effect=empty_session_factory):
+    with patch("backend.db.session.AsyncSessionLocal", side_effect=empty_session_factory):
         response = client.get("/api/pfz/history?days=3&sector=SEC005")
 
     assert response.status_code == 200
     data = response.json()
 
-    assert data["source"] == "synthetic-duplicate"
+    assert data["source"] == "postgis-empty"
     assert "warning" in data
     assert data["sector"] == "SEC005"
-    assert len(data["snapshots"]) == 3
-    for feat in data["features"]:
-        assert feat["properties"]["sector"] == "SEC005"
+    assert data["snapshots"] == []
+    assert data["features"] == []
 
 
 # ==============================================================================
@@ -368,7 +363,7 @@ def test_history_retention_30_days_max(client):
 
     # Exactly 30 days is allowed
     empty_session_factory = lambda: MockAsyncSession([])
-    with patch("backend.routers.pfz.AsyncSessionLocal", side_effect=empty_session_factory):
+    with patch("backend.db.session.AsyncSessionLocal", side_effect=empty_session_factory):
         resp_30 = client.get("/api/pfz/history?days=30")
     assert resp_30.status_code == 200
     assert resp_30.json()["days"] == 30
@@ -384,7 +379,7 @@ def test_history_limit_pagination(client):
     seeded_zones = build_seeded_3_day_zones()  # 6 zones total
     mock_session_factory = lambda: MockAsyncSession(seeded_zones)
 
-    with patch("backend.routers.pfz.AsyncSessionLocal", side_effect=mock_session_factory):
+    with patch("backend.db.session.AsyncSessionLocal", side_effect=mock_session_factory):
         response = client.get("/api/pfz/history?days=7&limit=2")
 
     assert response.status_code == 200

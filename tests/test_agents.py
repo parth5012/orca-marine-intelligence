@@ -269,9 +269,9 @@ class TestSeaChecker:
     async def test_check_sea_empty_and_invalid(self):
         from backend.agents import sea_checker
         assert await sea_checker.check_sea_conditions([]) == []
-        # invalid point non-dict
+        # invalid point non-dict -> danger (fail-closed, never safe)
         res = await sea_checker.check_sea_conditions([None])
-        assert res[0]["status"] == "safe"
+        assert res[0]["status"] == "danger"
         assert "invalid" in res[0]["reason"].lower()
 
 
@@ -595,6 +595,25 @@ class TestCombiner:
         result = combine_and_rank(fish, [], [], [], {"lat": 9.93, "lon": 76.26})
         assert "INCOIS" in result["citation"]
         assert "TestPlace" in result["citation"]
+
+    def test_missing_wave_and_wind_kept_unavailable_not_unsafe(self):
+        from backend.agents.combiner import combine_and_rank
+        fish = [
+            {"zone_id": "z1", "place": "CalmSpot", "sector": "KERALA", "lat": 10.0, "lon": 76.0, "distance_from_user_km": 5.0}
+        ]
+        # sea and weather empty (missing upstream data)
+        danger = [{"zone_id": "z1", "inside_eez": True, "inside_mpa": False}]
+        result = combine_and_rank(fish, [], [], danger, {"lat": 9.93, "lon": 76.26})
+
+        best = result["best"]
+        assert best is not None
+        assert best["wave_height_m"] is None
+        assert best["wind_kt"] is None
+        assert best["wave_available"] is False
+        assert best["wind_available"] is False
+        assert result["all_unsafe"] is False
+        assert "DO NOT SAIL" not in result["explanation"]
+        assert "wave data unavailable" in result["explanation"]
 
 
 # ---------------------------------------------------------------------------

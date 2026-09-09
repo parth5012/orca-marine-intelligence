@@ -236,6 +236,57 @@ class TestChatStreamingEndpoint:
         assert parsed[1]["event"] == "error"
         assert "Database connection timeout" in parsed[1]["data"]["message"]
 
+    def test_planner_fallback_emits_non_fatal_status_event(self, client):
+        """Ticket #78: Verify planner failure emits non-fatal status fallback event instead of error."""
+        from backend.agents.planner_service import PlannerTimeoutError
+
+        with patch(
+            "backend.agents.planner_service.plan_query",
+            side_effect=PlannerTimeoutError("Gemini SLA breached", elapsed_ms=500),
+        ):
+            response = client.post(
+                "/api/chat",
+                json={
+                    "message": "Fish near Kochi?",
+                    "lat": 9.93,
+                    "lon": 76.26,
+                    "language": "en",
+                    "session_id": "fallback-test-sess",
+                },
+            )
+
+        assert response.status_code == 200
+        parsed = parse_sse_events(response.text)
+
+        # Verify status event with state: fallback
+        status_events = [p for p in parsed if p["event"] == "status"]
+        planner_fallback_events = [
+            p
+            for p in status_events
+            if p["data"].get("agent") == "planner"
+            and p["data"].get("state") == "fallback"
+        ]
+        assert len(planner_fallback_events) == 1
+        fb_event = planner_fallback_events[0]["data"]
+        assert fb_event["type"] == "status"
+        assert fb_event["agent"] == "planner"
+        assert fb_event["state"] == "fallback"
+        assert fb_event["message"] == "LLM planner unavailable, using fallback advisory"
+        assert fb_event["fallback"] is True
+        assert fb_event["elapsed_ms"] == 500
+
+        # Verify stream did NOT emit fatal error for planner
+        error_events = [p for p in parsed if p["event"] == "error"]
+        planner_errors = [
+            p for p in error_events if p["data"].get("agent") == "planner"
+        ]
+        assert len(planner_errors) == 0
+
+        # Verify stream completed with done event
+        done_events = [p for p in parsed if p["event"] == "done"]
+        assert len(done_events) == 1
+
+
 
 class TestChatHistoryEndpoint:
     """Tests for GET /api/chat/history."""
@@ -285,17 +336,15 @@ class TestVoiceTranscriptionEndpoint:
         assert resp.status_code == 422
 
     def test_voice_offline_mock_fallback(self, client):
-        """Verify fallback transcription when GROQ_API_KEY not configured."""
+        """Verify 503 (no mock transcription) when GROQ_API_KEY not configured."""
         with patch.dict(os.environ, {}, clear=True):
             files = {"file": ("malayalam_sample.wav", b"RIFFFAKEWAVDATA", "audio/wav")}
             data = {"language": "ml", "session_id": "voice-sess-1"}
             resp = client.post("/api/chat/voice", files=files, data=data)
 
-            assert resp.status_code == 200
+            assert resp.status_code == 503
             body = resp.json()
-            assert body["session_id"] == "voice-sess-1"
-            assert "malayalam_sample.wav" in body["transcription"]
-            assert body.get("mock") is True
+            assert "transcription" in body.get("detail", "").lower() or "unavailable" in body.get("detail", "").lower()
 
     def test_voice_groq_whisper_success(self, client):
         """Verify Groq Whisper transcription API called when GROQ_API_KEY present."""
@@ -326,7 +375,7 @@ class TestVoiceTranscriptionEndpoint:
                 assert call_kwargs["data"]["language"] == "ml"
 
     def test_voice_groq_whisper_error_falls_back_gracefully(self, client):
-        """Verify Groq API failure falls back to informative mock transcription without crashing."""
+        """Verify Groq API failure returns 503 without fake transcription."""
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.text = "Internal Groq Error"
@@ -336,12 +385,9 @@ class TestVoiceTranscriptionEndpoint:
                 files = {"audio": ("query.wav", b"AUDIOBYTES", "audio/wav")}
                 resp = client.post("/api/chat/voice", files=files)
 
-                assert resp.status_code == 200
+                assert resp.status_code == 503
                 body = resp.json()
-                assert "transcription" in body
-                assert "query.wav" in body["transcription"]
-                assert "session_id" in body
-                assert body.get("mock") is True
+                assert "unavailable" in body.get("detail", "").lower()
 
     def test_voice_oversized_file_returns_413(self, client):
         """Verify audio file exceeding 25MB returns 413 HTTP status."""

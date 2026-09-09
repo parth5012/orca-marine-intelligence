@@ -329,7 +329,7 @@ async def check_sea_conditions(points: list[dict]) -> list[dict]:
     results: list[dict] = []
     for idx, pt in enumerate(points):
         if not isinstance(pt, dict):
-            # Defensive: non-dict entry
+            # Defensive: non-dict entry -> danger, never safe
             results.append({
                 "zone_id": f"unknown_{idx}",
                 "place": "",
@@ -337,10 +337,10 @@ async def check_sea_conditions(points: list[dict]) -> list[dict]:
                 "lon": None,
                 "wave_height_m": 0.0,
                 "current_kt": 0.0,
-                "wave_status": "safe",
-                "current_status": "safe",
-                "status": "safe",
-                "reason": "invalid point — skipped",
+                "wave_status": "danger",
+                "current_status": "danger",
+                "status": "danger",
+                "reason": "invalid point — unknown location treated as danger",
                 "source": "mock_heuristic",
             })
             continue

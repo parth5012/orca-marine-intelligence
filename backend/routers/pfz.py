@@ -8,7 +8,6 @@ Serves latest and historical PFZ GeoJSON data for frontend map and agent workflo
 Caches live INCOIS data in Redis (6h TTL) with automatic Copernicus Marine fallback.
 """
 
-import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -17,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from backend.db.redis import get_json, set_json
 from backend.ingest.copernicus_fallback import fetch_copernicus_fallback
-from backend.ingest.incois_textdata import ingest_textdata, load_local_pfz
+from backend.ingest.incois_textdata import ingest_textdata
 
 logger = logging.getLogger(__name__)
 
@@ -183,37 +182,9 @@ async def get_pfz_history(
     snapshots: List[Dict[str, Any]] = []
 
     if not is_db_result:
-        # DB-empty fallback clearly flagged: source: synthetic-duplicate + warning field
-        source = "synthetic-duplicate"
-        warning = "No historical records found in database; returning synthetic duplicate snapshots."
-
-        base_feats = load_local_pfz(sectors=[sec_up] if sec_up else None)
-        if not base_feats:
-            cop_data = await fetch_copernicus_fallback(sector=sec_up)
-            base_feats = cop_data.get("features", [])
-
-        for d in range(days):
-            hist_date = (today_date - timedelta(days=d)).isoformat()
-            day_features = []
-            for feat in base_feats:
-                if len(history_features) >= limit:
-                    break
-                feat_copy = json.loads(json.dumps(feat))
-                props = feat_copy.setdefault("properties", {})
-                props["valid_date"] = hist_date
-                props["timestamp"] = f"{hist_date}T11:30:00Z"
-                props["source"] = "synthetic-duplicate"
-                day_features.append(feat_copy)
-                history_features.append(feat_copy)
-
-            if day_features:
-                snapshots.append(
-                    {
-                        "date": hist_date,
-                        "count": len(day_features),
-                        "features": day_features,
-                    }
-                )
+        # No synthetic history: DB-empty returns empty with explicit warning
+        source = "postgis-empty"
+        warning = "No historical records found in database; returning empty history (no synthetic data)."
     else:
         source = "postgis"
         warning = None
