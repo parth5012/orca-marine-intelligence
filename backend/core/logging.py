@@ -22,14 +22,33 @@ from structlog.dev import ConsoleRenderer
 from structlog.processors import JSONRenderer
 from structlog.typing import EventDict, Processor
 
-_SENSITIVE_KEY_PATTERN = re.compile(r"(password|passwd|pwd|token|secret|authorization|api[_-]?key|cookie|set-cookie)", re.IGNORECASE)
+_SENSITIVE_KEY_PATTERN = re.compile(r"(password|passwd|pwd|token|secret|authorization|api[_-]?key|cookie|set-cookie|appid)", re.IGNORECASE)
+_URL_SECRET_PATTERN = re.compile(r"([?&](?:appid|api[_-]?key|token|secret)=)([^&\s]+)", re.IGNORECASE)
 
 
 def _redact_sensitive(_, __, event_dict: EventDict) -> EventDict:
     for key in list(event_dict.keys()):
         if _SENSITIVE_KEY_PATTERN.search(str(key)):
             event_dict[key] = "***REDACTED***"
+    # Redact secrets embedded in rendered messages / URLs (e.g. httpx logs full URL with ?appid=)
+    msg = event_dict.get("event")
+    if isinstance(msg, str) and _URL_SECRET_PATTERN.search(msg):
+        event_dict["event"] = _URL_SECRET_PATTERN.sub(r"\1***REDACTED***", msg)
     return event_dict
+
+
+class _RedactURLFilter(logging.Filter):
+    """Stdlib filter: strip query-string secrets before they reach formatters/handlers."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            rendered = record.getMessage()
+        except Exception:
+            return True
+        if _URL_SECRET_PATTERN.search(rendered):
+            record.args = ()
+            record.msg = _URL_SECRET_PATTERN.sub(r"\1***REDACTED***", rendered)
+        return True
 
 
 def _safe_json_serializer(obj: Any, **kwargs: Any) -> str:
@@ -142,6 +161,15 @@ def setup_logging(
         fw_logger = logging.getLogger(logger_name)
         fw_logger.handlers = []
         fw_logger.propagate = True
+
+    # Silence noisy httpx URL logs (they embed ?appid= / api keys at INFO) and
+    # redact any query-string secrets that still get emitted.
+    for logger_name in ("httpx", "httpcore"):
+        lib_logger = logging.getLogger(logger_name)
+        lib_logger.setLevel(logging.WARNING)
+        if not any(isinstance(f, _RedactURLFilter) for f in lib_logger.filters):
+            lib_logger.addFilter(_RedactURLFilter())
+    root_logger.addFilter(_RedactURLFilter())
 
 
 def bind_contextvars(**kwargs: Any) -> None:

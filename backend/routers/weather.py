@@ -102,8 +102,11 @@ async def get_current_weather(
         logger.warning("Redis cache read error for %s: %s", cache_key, exc)
 
     try:
-        weather_data = await asyncio.to_thread(fetch_live_weather, lat, lon)
-        marine_data = await asyncio.to_thread(fetch_open_meteo_marine, lat, lon)
+        # Run upstream providers concurrently: total latency = max(), not sum().
+        weather_data, marine_data = await asyncio.gather(
+            asyncio.to_thread(fetch_live_weather, lat, lon),
+            asyncio.to_thread(fetch_open_meteo_marine, lat, lon),
+        )
 
         wind_speed_kt = float(weather_data.get("wind_speed_kt", 10.0))
         wind_gust_kt = float(
