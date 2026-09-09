@@ -13,7 +13,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import MapView, {
   SafetyBadge,
@@ -21,6 +21,7 @@ import MapView, {
   formatDMS,
   COASTAL_PORTS,
   MapLayerToggles,
+  BasemapStyle,
 } from '@/map';
 
 const SECTORS = [
@@ -36,7 +37,40 @@ const SECTORS = [
   { label: 'West Bengal (SEC010)', value: 'WEST BENGAL', center: [21.5, 88.0], zoom: 8 },
 ];
 
-export default function MapPage() {
+export interface MapPageProps {
+  initialBasemapStyle?: BasemapStyle;
+  searchParams?: {
+    basemap?: string;
+    style?: string;
+    sector?: string;
+    [key: string]: string | string[] | undefined;
+  };
+}
+
+export default function MapPage({ initialBasemapStyle, searchParams }: MapPageProps = {}) {
+  const resolvedBasemapStyle = useMemo<BasemapStyle | undefined>(() => {
+    if (initialBasemapStyle) return initialBasemapStyle;
+    const candidate = searchParams?.basemap || searchParams?.style;
+    if (candidate && typeof candidate === 'string') {
+      const raw = candidate.trim().toLowerCase();
+      if (
+        raw === 'dark_all' ||
+        raw === 'voyager' ||
+        raw === 'light_all' ||
+        raw === 'esri_ocean' ||
+        raw === 'esri_dark' ||
+        raw === 'osm'
+      ) {
+        return raw as BasemapStyle;
+      }
+      if (raw === 'dark' || raw === 'carto_dark') return 'dark_all';
+      if (raw === 'positron' || raw === 'light') return 'light_all';
+      if (raw === 'ocean' || raw === 'esri_ocean_basemap') return 'esri_ocean';
+      if (raw === 'dark_gray' || raw === 'esri_dark_gray') return 'esri_dark';
+      if (raw === 'openstreetmap') return 'osm';
+    }
+    return undefined;
+  }, [initialBasemapStyle, searchParams]);
   const [mapCenter, setMapCenter] = useState<[number, number]>([9.93, 76.27]);
   const [mapZoom, setMapZoom] = useState<number>(8);
   const [selectedSector, setSelectedSector] = useState<string>('ALL');
@@ -386,6 +420,7 @@ export default function MapPage() {
             activeLayers={layers}
             highlightFeatures={selectedZone ? [selectedZone] : []}
             userLocation={userLocation}
+            initialBasemapStyle={resolvedBasemapStyle}
             onSelectZone={(zone) => {
               setSelectedZone(zone);
               setDrawerOpen(true);

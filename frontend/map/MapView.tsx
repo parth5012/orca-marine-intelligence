@@ -1,11 +1,12 @@
 /**
  * MapView Component
  *
- * Owner: M-D (Frontend & Maps) — Leaflet map with PFZ circles & maritime boundaries
+ * Owner: M-D (Frontend & Maps)
+ * Leaflet map for PFZ circles and maritime boundaries
  * Module: frontend/map/MapView.tsx
  *
  * Client-side dynamic wrapper around MapInner to prevent SSR `window is not defined`
- * errors with Leaflet.
+ * errors in Leaflet.
  */
 
 'use client';
@@ -14,7 +15,8 @@ import React from 'react';
 import dynamic from 'next/dynamic';
 import type { MapInnerProps, MapLayerToggles } from './MapInner';
 
-export type { MapLayerToggles };
+export type { MapLayerToggles, MapInnerProps };
+export type { BasemapStyle } from './carto';
 
 export type MapViewProps = MapInnerProps & {
   className?: string;
