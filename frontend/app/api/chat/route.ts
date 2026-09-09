@@ -9,11 +9,12 @@
  * BACKEND_API_URL → NEXT_PUBLIC_API_URL → localhost:8000 fallback.
  *
  * Handles:
- *   POST /api/chat       → ${backendBase}/api/chat  (JSON, SSE stream)
- *   POST /api/chat/stream→ ${backendBase}/api/chat/stream (alias)
- *   GET  /api/chat/history→ ${backendBase}/api/chat/history (GET passthrough)
+ *   POST /api/chat → ${backendBase}/api/chat (JSON, SSE stream)
  *
  * SSE passthrough: forwards text/event-stream without buffering.
+ *
+ * Wayfinder T3 (map #92): no /stream suffix, no history passthrough —
+ * backend aliases deleted; single primary only.
  */
 import { NextRequest, NextResponse } from "next/server";
 
@@ -44,10 +45,7 @@ async function proxyWithTimeout(
 
 export async function POST(request: NextRequest) {
   const backendBase = getBackendBase();
-  const url = new URL(request.url);
-  // Preserve path suffix: /api/chat or /api/chat/stream
-  const suffix = url.pathname.endsWith("/stream") ? "/stream" : "";
-  const backendUrl = `${backendBase}/api/chat${suffix}`;
+  const backendUrl = `${backendBase}/api/chat`;
 
   const contentType = request.headers.get("content-type") || "";
 
@@ -87,34 +85,6 @@ export async function POST(request: NextRequest) {
   }
 
   // Fallback: no body (should not happen for SSE)
-  const text = await backendRes.text();
-  return new Response(text, {
-    status: backendRes.status,
-    headers: { "content-type": backendRes.headers.get("content-type") || "application/json" },
-  });
-}
-
-export async function GET(request: NextRequest) {
-  const backendBase = getBackendBase();
-  const url = new URL(request.url);
-  const backendUrl = new URL(`${backendBase}/api/chat/history`);
-  // Forward query params (session_id, etc.)
-  url.searchParams.forEach((v, k) => backendUrl.searchParams.set(k, v));
-
-  let backendRes: Response;
-  try {
-    backendRes = await proxyWithTimeout(backendUrl.toString(), {
-      method: "GET",
-      headers: { accept: "application/json" },
-    });
-  } catch (e: any) {
-    const isAbort = e?.name === "AbortError";
-    return NextResponse.json(
-      { detail: isAbort ? "Backend timeout" : "Backend unavailable" },
-      { status: 504 }
-    );
-  }
-
   const text = await backendRes.text();
   return new Response(text, {
     status: backendRes.status,
