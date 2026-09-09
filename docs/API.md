@@ -2,13 +2,15 @@
 
 **Base URL:** `http://localhost:8000` (development) or `https://orca-marine-intelligence-api.onrender.com` (production)
 
-**Spec version:** 0.1.0 · **Framework:** FastAPI (`backend/main.py`) · **Mounted** `backend/main.py:48-53`
+**Spec version:** 0.1.0 · **Framework:** FastAPI (`backend/main.py`) · **Mounted** `backend/main.py:226-230`
 
 **Authentication:** None for MVP. API key authentication planned for production.
 
-**CORS:** Configured via `ALLOWED_ORIGINS` environment variable. Default allows `http://localhost:3000` and `https://cron-system.vercel.app`.
+**CORS:** Configured via `ALLOWED_ORIGINS` environment variable (`backend/main.py:55,211`). Default allows `http://localhost:3000` and `https://cron-system.vercel.app`.
 
-**Content Types:** All endpoints accept and return `application/json` unless noted otherwise (`GET /api/tiles/*.pbf` → `application/x-protobuf`, `POST /api/chat/stream` → `text/event-stream`).
+**Content Types:** All endpoints accept and return `application/json` unless noted otherwise (`GET /api/tiles/*.pbf` returns `application/x-protobuf`, `POST /api/chat` returns `text/event-stream`).
+
+**Fetch strategy (T5 rule, map #92):** reads that must survive backend-down go through Next.js proxies with local fallback (PFZ + chat pattern); live-only telemetry (weather/current, geofence/status) calls the backend directly. Direct calls rely on `ALLOWED_ORIGINS`; proxies sidestep CORS.
 
 ---
 
@@ -16,152 +18,117 @@
 
 | # | Method | Path | Tag | Frontend Consumer | Priority |
 |---|--------|------|-----|-------------------|----------|
-| 1 | `GET` | `/health` | `system` | App shell (`frontend/app/page.tsx`) Render/Vercel probe · `backend/main.py:56` | **P0** |
-| 2 | `GET` | `/api/pfz/today` | `pfz` | `frontend/app/api/pfz/route.ts:22` → `MapView.tsx:28` + `frontend/app/map/page.tsx:13` · `backend/routers/pfz.py:30` | **P0** |
-| 3 | `GET` | `/api/pfz/history` | `pfz` | History slider (post-MVP) · `backend/routers/pfz.py:125` | P2 |
-| 4 | `GET` | `/api/tiles/{z}/{x}/{y}.pbf` | `tiles` | `MapView.tsx:29` EEZ/MPA layers (MapLibre/Leaflet) · `backend/routers/tiles.py:29` | **P0** (W2) |
-| 5 | `POST` | `/api/chat` | `chat` | `ChatPanel.tsx:24`, `useSSEChat.ts:270` **primary SSE stream** · `backend/routers/chat.py:53` | **P0** |
-| 6 | `POST` | `/api/chat/stream` | `chat` | `ChatPanel.tsx:14` alias for `POST /api/chat` (SSE stream) · `backend/routers/chat.py:54` | **P0** |
-| 7 | `GET` | `/api/chat/history` | `chat` | `ChatPanel.tsx:27` multi-turn (`session_id`) · `backend/routers/chat.py:137` | **P0** |
-| 8 | `POST` | `/api/chat/voice` | `chat` | `useSSEChat.ts:587` Vernacular voice transcription (Groq Whisper) · `backend/routers/chat.py:152` | P1 |
-| 9 | `GET` | `/api/weather/current` | `weather` | `SafetyBadge.tsx:24` · `backend/routers/weather.py:79` | P1 |
-| 10 | `GET` | `/api/weather/cyclone` | `weather` | `SafetyBadge.tsx` + `DangerAgent` · `backend/routers/weather.py:167` | P1 |
-| 11 | `POST` | `/api/geofence/check` | `geofence` | `SafetyBadge.tsx:20` chat `danger` · `backend/routers/geofence.py:31` | P1 |
-| 12 | `POST` | `/api/geofence/route` | `geofence` | `MapView.tsx:32` route safety · `backend/routers/geofence.py:39` | P1 |
+| 1 | `GET` | `/health` | `system` | No in-app caller (Render/Vercel probe only) · `backend/main.py:243` | **P0** |
+| 2 | `GET` | `/api/pfz/today` | `pfz` | `MapInner.tsx:200` via proxy `GET /api/pfz` · `backend/routers/pfz.py:29` | **P0** |
+| 3 | `GET` | `/api/tiles/config` | `tiles` | No UI caller yet (deferred to W2 MVT cutover, T3) · `backend/routers/tiles.py:30` | P2 |
+| 4 | `GET` | `/api/tiles/{z}/{x}/{y}.pbf` | `tiles` | No UI caller yet (`MapView` uses raster today; W2 MVT) · `backend/routers/tiles.py:107` | P1 |
+| 5 | `POST` | `/api/chat` | `chat` | `useSSEChat.ts:273` direct + `:298` proxy fallback (via `ChatPanel`) · `backend/routers/chat.py:54` | **P0** |
+| 6 | `POST` | `/api/chat/voice` | `chat` | `useSSEChat.ts:625` direct + `:644` proxy fallback (via `ChatPanel`) · `backend/routers/chat.py:137` | P1 |
+| 7 | `GET` | `/api/weather/current` | `weather` | `MapInner.tsx:227` direct · `backend/routers/weather.py:79` | P1 |
+| 8 | `GET` | `/api/weather/cyclone` | `weather` | `DangerAgent` internal only (no UI caller, T3) · `backend/routers/weather.py:170` | P2 |
+| 9 | `GET` | `/api/geofence/status` | `geofence` | `frontend/app/map/page.tsx:94` direct · `backend/routers/geofence.py:58` | P1 |
 
-P0 = app broken without it. P1 = safety/UX degraded. P2 = post-MVP.
+P0 = app broken without it. P1 = safety/UX degraded. P2 = deferred/internal.
 
-> **Next.js proxy (not FastAPI but required):** `GET /api/pfz` `frontend/app/api/pfz/route.ts:22` — server-side fetch of `GET /api/pfz/today`, cached 6h via `unstable_cache`, serves stale `data/pfz-today.geojson` on backend down. Fixes INCOIS CORS.
+> **Next.js proxies (not FastAPI but required):** `GET /api/pfz` (`frontend/app/api/pfz/route.ts:39`) proxies `GET /api/pfz/today` with 3s timeout, `revalidate: 3600`, and `data/pfz-today.geojson` local fallback (503 when backend and file both unavailable). `POST /api/chat` (`frontend/app/api/chat/route.ts:45`) proxies with 3s timeout and unbuffered SSE passthrough (504 on timeout/unavailable). `POST /api/chat/voice` (`frontend/app/api/chat/voice/route.ts:27`) proxies multipart upload with 10s timeout (504 on timeout/unavailable).
+
+> **Removed in T3 (map #92, human grill):** `POST /api/chat/stream` (unused alias), `GET /api/chat/history` (post-MVP), `GET /api/pfz/history` (post-MVP slider), `GET`+`POST /api/geofence/check`, `POST /api/geofence/route`. All return 404. Tests assert removal.
 
 ---
 
 ## GET /health
 
-Health check endpoint for monitoring and deployment verification. Frontend calls on mount in `frontend/app/page.tsx` (30s interval); shows degraded banner on `503`.
+Readiness probe. Returns `ok` only when database AND Redis are connected, otherwise `degraded`. There is no in-app caller (`frontend/app/page.tsx` performs no fetch); Render/Vercel probes hit it directly.
 
-**File:** `backend/main.py:56`
+**File:** `backend/main.py:243`
 
-**Response `200`:**
+**Response `200` (healthy):**
 
 ```json
 {
   "status": "ok",
-  "service": "orca-marine-intelligence"
+  "service": "orca-marine-intelligence",
+  "version": "0.1.0",
+  "uptime": 12.5,
+  "database": "connected",
+  "redis": "connected",
+  "data_source": "live",
+  "telemetry": { "langsmith": { "enabled": false } }
 }
 ```
 
-**Status Codes:**
-- `200` — Service is healthy
-- `503` — Service is unhealthy (PostGIS or Redis unreachable — TODO: add checks)
+`status` is `"degraded"` when either dependency is down. Always HTTP 200 (no 503).
 
 ---
 
 ## GET /api/pfz/today
 
-Returns today's Potential Fishing Zone data as a GeoJSON FeatureCollection. Single shared list all 4 agents read (`docs/ORCA_GeoJSON_Architecture.md:99`). Data is sourced from INCOIS TextData and cached in Redis for 6 hours. Never call INCOIS from browser — this proxy fixes CORS.
+Today's Potential Fishing Zone data as a GeoJSON FeatureCollection. Never call INCOIS from the browser — use the `GET /api/pfz` proxy (fixes CORS, adds offline fallback).
 
-**File:** `backend/routers/pfz.py:30`
+**File:** `backend/routers/pfz.py:29`
 
-**Cache:** Redis `pfz:today` 6h TTL → PostGIS → `data/pfz-today.geojson` fallback.
+**Cache:** Redis `pfz:today` 6h TTL, then live INCOIS ingest with Copernicus Marine fallback.
 
 **Query Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `sector` | string | No | Filter by sector name (e.g., "KERALA", "GUJARAT" / SEC005) |
-| `max_distance_km` | number | No | Maximum distance from coast in km (default: 100) |
+| `sector` | string | No | Filter by sector code or name (e.g. `SEC005` or `KERALA`) |
 | `bbox` | string | No | Viewport culling: `minLon,minLat,maxLon,maxLat` |
+| `limit` | integer | No | Max features (default: 1000, 1-5000) |
 
 **Response `200` (`application/geo+json`):**
 
 ```json
 {
   "type": "FeatureCollection",
+  "valid_until": "2026-09-09T14:00:00+00:00",
+  "source": "incois_textdata",
+  "sector_count": 4,
+  "count": 2,
+  "metadata": {
+    "valid_until": "2026-09-09T14:00:00+00:00",
+    "source": "incois_textdata",
+    "sector_count": 4,
+    "count": 2
+  },
   "features": [
     {
       "type": "Feature",
-      "properties": {
-        "zone_id": "SEC005_001",
-        "place": "Pallithottam",
-        "direction": "SW",
-        "bearing": 232,
-        "depth": "55-60",
-        "distance_km": 645,
-        "intensity": "high",
-        "source": "incois_textdata",
-        "sector": "KERALA"
-      },
-      "geometry": {
-        "type": "Point",
-        "coordinates": [76.167, 8.555]
-      }
+      "properties": { "zone_id": "SEC005_001", "place": "Pallithottam", "sector": "KERALA" },
+      "geometry": { "type": "Point", "coordinates": [76.167, 8.555] }
     }
-  ],
-  "metadata": {
-    "count": 437,
-    "timestamp": "2026-09-02T11:30:00+05:30",
-    "source": "incois_textdata"
-  }
+  ]
 }
 ```
 
-**Frontend:** `MapView.tsx:28` draws `CircleMarker` per feature, popup shows `place/bearing/distance/depth/citation`.
+**Frontend:** `MapInner.tsx:200` fetches the `/api/pfz` proxy and draws one `CircleMarker` per feature.
 
 **Status Codes:**
-- `200` — Success
-- `502` — INCOIS upstream unavailable (returns cached data if available)
-- `503` — Database unavailable
+- `200` — Success (empty `features` when upstream and cache both miss)
+- `400` — Invalid `bbox` (expected 4 numbers, min <= max)
 
 ---
 
-## GET /api/pfz/history
+## GET /api/tiles/config
 
-Historical PFZ data for slider (post-MVP).
+Raster basemap catalog for map clients (CARTO + OSM URL templates, attribution, zoom ranges). No UI caller yet — deferred to the W2 MVT cutover (T3).
 
-**File:** `backend/routers/pfz.py:125`
+**File:** `backend/routers/tiles.py:30`
 
-**Query Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `days` | integer | No | Last N days, 1-30 (default: 7, max: 30) |
-| `sector` | string | No | Optional INCOIS sector code or name filter (e.g. SEC005 or KERALA) |
-| `limit` | integer | No | Max number of historical features to return (default: 500, max: 5000) |
-
-**Response `200` (PostGIS Real History):**
+**Response `200` (`application/json`, `Cache-Control: public, max-age=3600`):**
 
 ```json
 {
-  "type": "FeatureCollection",
-  "days": 7,
-  "sector": "SEC005",
-  "start_date": "2026-08-31",
-  "end_date": "2026-09-07",
-  "source": "postgis",
-  "snapshots": [
-    {
-      "date": "2026-09-07",
-      "count": 2,
-      "features": [...]
-    }
-  ],
-  "features": [...],
-  "count": 2
-}
-```
-
-**Response `200` (DB-Empty — no synthetic data):**
-
-```json
-{
-  "type": "FeatureCollection",
-  "days": 7,
-  "sector": null,
-  "start_date": "2026-08-31",
-  "end_date": "2026-09-07",
-  "source": "postgis-empty",
-  "warning": "No historical records found in database; returning empty history (no synthetic data).",
-  "snapshots": [],
-  "features": [],
-  "count": 0
+  "status": "success",
+  "default_style": "dark_all",
+  "carto_key_configured": false,
+  "layers": {
+    "carto_dark": { "id": "carto_dark", "type": "raster", "url": "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png" },
+    "carto_voyager": { "id": "carto_voyager", "type": "raster", "url": "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" },
+    "carto_positron": { "id": "carto_positron", "type": "raster", "url": "https://{s}.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png" },
+    "osm": { "id": "osm", "type": "raster", "url": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" }
+  },
+  "cache": { "max_age_seconds": 3600 }
 }
 ```
 
@@ -169,40 +136,36 @@ Historical PFZ data for slider (post-MVP).
 
 ## GET /api/tiles/{z}/{x}/{y}.pbf
 
-Returns vector tiles (Mapbox Vector Tile format) for map rendering. Used by MapLibre/Leaflet on the frontend for efficient spatial data display. W1 `MapView` fetches full GeoJSON; W2 switches to tiles (critical for 2G at sea).
+Mapbox Vector Tiles from PostGIS (`ST_AsMVT`) with Redis 1h cache (`tiles:{layer}:{z}/{x}/{y}`). No UI caller yet — `MapView` uses raster today; W2 switches to tiles (critical for 2G at sea).
 
-**File:** `backend/routers/tiles.py:29`
+**File:** `backend/routers/tiles.py:107`
 
 **Path Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `z` | integer | Zoom level (0-24) |
-| `x` | integer | Tile x coordinate |
-| `y` | integer | Tile y coordinate |
+| `z` | integer | Zoom level (0-24, else 400) |
+| `x` | integer | Tile x (0 <= x < 2^z, else 400) |
+| `y` | integer | Tile y (0 <= y < 2^z, else 400) |
 
 **Query Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `layer` | string | No | Tile layer: "pfz", "eez", "mpa", or "recommendation" (default: "pfz") |
+| `layer` | string | No | `pfz` (default), `eez`, `mpa`, or `recommendation`. Unknown values fall back to `pfz` (not an error). |
 
-**Response:** `application/x-protobuf` (MVT format), `Cache-Control: public, max-age=3600`, `Access-Control-Allow-Origin: *`, `X-Tile-Fallback: true` (on DB/Redis fallback)
-
-**Impl:** `SELECT ST_AsMVT(...)` from PostGIS + Redis tile cache 1h (`tiles:{layer}:{z}/{x}/{y}`).
+**Response:** `application/x-protobuf` with `Cache-Control: public, max-age=3600`, `X-Tile-Layer`, `X-Tile-Coords`.
 
 **Status Codes:**
-- `200` — Success
-- `400` — Invalid tile coordinates
-- `503` — PostGIS unavailable
+- `200` — Tile bytes (live or Redis-cached)
+- `400` — Invalid zoom or tile coordinates
+- `503` — PostGIS offline (`text/plain`, `Cache-Control: no-store`, `X-Tile-Fallback: true`; emptiness is never cached)
 
 ---
 
 ## POST /api/chat
 
-Send a conversational query to the ORCA multi-agent system and receive a live Server-Sent Events (`text/event-stream`) stream. The orchestrator detects intent, coordinates specialist agents (planner, fish finder, sea checker, weather agent, danger agent), streams reasoning updates and token chunks, and delivers unified advisory with map features, safety evaluations, and citations.
+Conversational query to the ORCA multi-agent system as a live Server-Sent Events (`text/event-stream`) stream. Single primary endpoint (the old `/api/chat/stream` alias was deleted in T3).
 
-*Note: `POST /api/chat/stream` is a direct alias for `POST /api/chat` with identical streaming behavior.*
-
-**File:** `backend/routers/chat.py:53`
+**File:** `backend/routers/chat.py:54`
 
 **Headers:**
 ```
@@ -214,21 +177,21 @@ Accept: text/event-stream
 
 ```json
 {
-  "message": "എവിടെ മത്സ്യം?",
+  "message": "Where is fish today?",
   "lat": 9.9312,
   "lon": 76.2673,
   "session_id": "abc-123",
-  "language": "ml"
+  "language": "en"
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `message` | string | Yes | User query in any of the 22 supported languages |
+| `message` | string | Yes | User query |
 | `lat` | number | No | GPS latitude (WGS84) |
 | `lon` | number | No | GPS longitude (WGS84) |
-| `session_id` | string | No | Multi-turn session ID for conversation memory (Redis). Generated if omitted. |
-| `language` | string | No | Preferred response language code (default: `"en"`) |
+| `session_id` | string | No | Multi-turn session ID (Redis). Generated if omitted. |
+| `language` | string | No | Response language code (default: `"en"`) |
 
 **Response Headers:**
 ```
@@ -254,10 +217,12 @@ data: <JSON>
 | `map` | Spatial analysis | `{"type":"map","center":[76.26,9.93],"pfz_features":[...],"route":[[76.27,9.93],[76.38,9.95]]}` | `onMapHighlight` → flyTo and draw route |
 | `safety` | Marine evaluation | `{"type":"safety","waves_m":0.8,"wind_kts":8,"danger":"none","badge":"green"}` | Update `SafetyBadge` (green/amber/red) |
 | `evidence` | Data citations | `{"type":"evidence","items":["INCOIS SEC005 KERALA 02-Sep-2026"]}` | Render citation footer |
-| `done` | Stream complete | `{"type":"done","language":"ml","confidence":0.87,"session_id":"abc-123","reply":"..."}` | Close stream, persist `session_id` |
+| `done` | Stream complete | `{"type":"done","language":"en","confidence":0.87,"session_id":"abc-123"}` | Close stream, persist `session_id` |
 | `error` | Agent error | `{"type":"error","agent":"orchestrator","message":"error description"}` | Show error state |
 
-`safety.badge` is `green` (wave <1.5m, wind <15kt, allowed), `amber` (1.5-2.5m / 15-25kt), `red` (>2.5m / >30kt forbidden).
+`safety.badge` is `green` (wave <1.5m, wind <15kt), `amber` (1.5-2.5m / 15-25kt), `red` (>2.5m / >30kt forbidden).
+
+**Frontend:** `useSSEChat.ts:273` posts direct to the backend, falling back to the `POST /api/chat` Next.js proxy (`:298`) when the direct fetch fails (HTTPS deployments).
 
 **Status Codes:**
 - `200` — Stream initiated (`text/event-stream`)
@@ -265,60 +230,11 @@ data: <JSON>
 
 ---
 
-## POST /api/chat/stream
-
-Alias for `POST /api/chat`. Maintained for explicit SSE client routing.
-
-**File:** `backend/routers/chat.py:54`
-
-Accepts identical request body, headers, and emits identical SSE frames as `POST /api/chat`.
-
----
-
-## GET /api/chat/history
-
-Retrieve conversation history for a session from Redis (mandated for multi-turn refinement).
-
-**File:** `backend/routers/chat.py:137`
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `session_id` | string | Yes | Multi-turn conversation session ID |
-| `limit` | integer | No | Max number of conversation turns (default: 10, min: 1, max: 100) |
-
-**Response `200`:**
-
-```json
-{
-  "session_id": "abc-123",
-  "messages": [
-    {
-      "role": "user",
-      "content": "Where is fish today?",
-      "timestamp": "2026-09-02T11:30:00Z"
-    },
-    {
-      "role": "assistant",
-      "content": "Fish found 12km off Kochi...",
-      "timestamp": "2026-09-02T11:30:05Z"
-    }
-  ]
-}
-```
-
-**Status Codes:**
-- `200` — Success
-- `422` — Validation error (missing `session_id` or invalid `limit`)
-
----
-
 ## POST /api/chat/voice
 
-Ingest vernacular voice audio, transcribe via Groq Whisper (`whisper-large-v3`), and return transcription with session continuity. When `GROQ_API_KEY` is not configured or upstream fails, gracefully falls back to mock transcription with `mock: true`.
+Vernacular voice audio transcribed via Groq Whisper (`whisper-large-v3`). There is **no mock fallback**: when `GROQ_API_KEY` is missing or upstream produces nothing, the endpoint returns 503.
 
-**File:** `backend/routers/chat.py:152`
+**File:** `backend/routers/chat.py:137`
 
 **Content-Type:** `multipart/form-data`
 
@@ -328,40 +244,34 @@ Ingest vernacular voice audio, transcribe via Groq Whisper (`whisper-large-v3`),
 |-----------|------|----------|-------------|
 | `file` | File | Required* | Audio file (`.wav`, `.m4a`, `.mp3`, etc.). *Either `file` or `audio` must be provided. |
 | `audio` | File | Required* | Alternative form field for audio file. |
-| `session_id` | string | No | Multi-turn session ID for conversation continuity. Generated if omitted. |
+| `session_id` | string | No | Multi-turn session ID. Generated if omitted. |
 | `lat` | number | No | GPS latitude (WGS84). |
 | `lon` | number | No | GPS longitude (WGS84). |
-| `language` | string | No | Language hint for Whisper transcription (default: `"en"`). |
+| `language` | string | No | Language hint for Whisper (default: `"en"`). |
 
-**Response `200` (live transcription):**
+**Response `200`:**
 
 ```json
 {
-  "transcription": "എവിടെ മത്സ്യം കിട്ടും? (Where is fish available?)",
+  "transcription": "Where is fish available?",
   "session_id": "voice-sess-1",
   "mock": false
 }
 ```
 
-**Response `200` (fallback / missing GROQ_API_KEY):**
-
-```json
-{
-  "transcription": "Transcribed vernacular query from voice.wav",
-  "session_id": "voice-sess-1",
-  "mock": true
-}
-```
+**Frontend:** `useSSEChat.ts:625` posts direct to the backend, falling back to the `POST /api/chat/voice` Next.js proxy (`:644`, 10s timeout, multipart passthrough).
 
 **Status Codes:**
-- `200` — Transcription successful (or mock fallback)
-- `413` — Payload Too Large: Audio file exceeds maximum limit of 25MB (`25 * 1024 * 1024` bytes)
-- `422` — Unprocessable Entity: Missing audio file (neither `file` nor `audio` provided)
+- `200` — Transcription successful (`mock` is always `false`)
+- `413` — Audio file exceeds 25MB (`25 * 1024 * 1024` bytes)
+- `422` — Missing audio file (neither `file` nor `audio` provided)
+- `503` — Transcription unavailable (missing key or upstream failure)
 
 ---
+
 ## GET /api/weather/current
 
-Returns current live weather and marine conditions for a point. Combines OpenWeatherMap API / Open-Meteo Weather with Open-Meteo Marine API, cached in Redis with a 30-minute TTL.
+Live weather and marine conditions for a point. Combines OpenWeatherMap / Open-Meteo Weather with Open-Meteo Marine, cached in Redis with a 30-minute TTL.
 
 **File:** `backend/routers/weather.py:79`
 
@@ -403,32 +313,32 @@ Composite safety `status` classification:
 - `caution`: `wind_speed_kt > 15.0` or `wave_height_m > 1.5` or `current_speed_kt > 1.5` or `pressure_hpa < 1005.0`
 - `safe`: otherwise
 
+**Frontend:** `MapInner.tsx:227` fetches direct (live telemetry per T5 rule) with a synthetic offline estimate fallback.
+
 **Status Codes:**
 - `200` — Success (`cached: true` if served from Redis 30m cache)
 - `400` — Invalid coordinates: `lat` must be in [-90, 90] and `lon` in [-180, 180]
 - `422` — Validation error: Missing `lat`/`lon` or non-numeric parameter
-- `502` — Bad Gateway: Failed retrieving live weather data from upstream providers
+- `502` — Bad Gateway: upstream providers unavailable after retries
 
 ---
 
 ## GET /api/weather/cyclone
 
-Returns active cyclone warnings and coastal barometric pressure anomalies. Evaluates IMD bulletins and coastal pressure thresholds (<995 hPa).
+Active cyclone warnings and coastal pressure anomalies (IMD bulletins, <995 hPa threshold). `DangerAgent` internal only — no UI caller (T3 grill decision).
 
-**File:** `backend/routers/weather.py:167`
+**File:** `backend/routers/weather.py:170`
 
 **Query Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `lat` | number | No | Optional latitude for point-specific cyclone evaluation (-90.0 to 90.0) |
-| `lon` | number | No | Optional longitude for point-specific cyclone evaluation (-180.0 to 180.0) |
-
-*Note: If checking a specific location, both `lat` and `lon` must be provided together.*
+| `lat` | number | No | Optional latitude (-90.0 to 90.0). Must be provided together with `lon`. |
+| `lon` | number | No | Optional longitude (-180.0 to 180.0). Must be provided together with `lat`. |
 
 **Cache:** Redis 30-minute TTL (`weather:cyclone:{round(lat, 2)}:{round(lon, 2)}` or `weather:cyclone:coastal`)
 
-**Response `200` (safe / no cyclone):**
+**Response `200` (no cyclone):**
 
 ```json
 {
@@ -443,113 +353,55 @@ Returns active cyclone warnings and coastal barometric pressure anomalies. Evalu
 }
 ```
 
-**Response `200` (active warning):**
-
-```json
-{
-  "alert_level": "warning",
-  "nearest_cyclone_distance_km": 120.0,
-  "max_wind_speed_kt": 45.0,
-  "description": "Deep depression intensifying into cyclonic storm off Odisha coast.",
-  "regions_affected": ["Odisha", "West Bengal"],
-  "last_updated": "2026-09-07T12:00:00Z",
-  "active": true,
-  "nearest_cyclone_km": 120.0
-}
-```
-
-`alert_level` values: `safe`, `advisory`, `warning`, `severe`.
+`alert_level` values: `safe`, `advisory`, `warning`, `severe`. `active` is true for `warning`/`severe`; `nearest_cyclone_km` mirrors `nearest_cyclone_distance_km`.
 
 **Status Codes:**
 - `200` — Success (cached in Redis with 30m TTL)
 - `400` — Invalid coordinates (out of range, NaN, or only one of `lat`/`lon` provided)
 - `422` — Validation error: Non-numeric parameter
-- `502` — Bad Gateway: Failed retrieving cyclone warnings from upstream providers
+- `502` — Bad Gateway: upstream providers unavailable
 
 ---
 
-## POST /api/geofence/check
+## GET /api/geofence/status
 
-Check if a geographic point falls within restricted zones (EEZ or MPA boundaries).
+Active Marine Protected Areas, sovereign EEZ zones, and IMBL buffer thresholds with boundary counts.
 
-**File:** `backend/routers/geofence.py:31`
+**File:** `backend/routers/geofence.py:58`
 
-**Request Body:**
+**Response `200` (`GeofenceStatusResponse`):**
 
 ```json
 {
-  "lat": 9.93,
-  "lon": 76.27
+  "status": "ok",
+  "active_mpas": ["Vembanad", "Gulf of Mannar"],
+  "eez_zones": ["West Coast EEZ", "East Coast EEZ"],
+  "imbl_buffer_km": 2.0,
+  "imbl_caution_threshold_km": 5.0,
+  "eez_caution_threshold_km": 10.0,
+  "count_protected_boundaries": 4,
+  "protected_boundaries_count": 4,
+  "boundary_counts": { "eez": 2, "mpa": 2, "total": 4 }
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `lat` | number | Yes | Latitude (WGS84) |
-| `lon` | number | Yes | Longitude (WGS84) |
-
-**Response `200`:**
-
-```json
-{
-  "inside_eez": true,
-  "inside_mpa": false,
-  "eez_country": "India",
-  "nearest_mpa": null,
-  "distance_to_mpa_km": null,
-  "near_imbl": false,
-  "distance_to_imbl_km": 12.4,
-  "restricted": false
-}
-```
-
-`restricted = inside_mpa || near_imbl(<2km) || cyclone`. Impl: PostGIS `ST_Contains(eez_boundaries.geom, point)` + `ST_DWithin(mpa, 0)` + `ST_Distance(IMBL)`.
-
-**Status Codes:**
-- `200` — Success
-- `400` — Missing lat/lon
-- `503` — PostGIS unavailable
+**Frontend:** `frontend/app/map/page.tsx:94` fetches direct (fire-and-forget; backend offline keeps local boundaries). Per-point checks and route validation were deleted in T3 — the drawer shows static clearance copy.
 
 ---
 
-## POST /api/geofence/route
-
-Check if a route crosses any restricted zones. Used to draw warning on `MapView` polyline.
-
-**File:** `backend/routers/geofence.py:39`
-
-**Request Body:**
-
-```json
-{ "route": [[76.27, 9.93], [76.38, 9.95]], "format": "lonlat" }
-```
-or GeoJSON `{"type":"LineString","coordinates":[[76.27,9.93],...]}`
-
-**Response `200`:**
-
-```json
-{ "crosses_mpa": false, "crosses_eez_boundary": false, "crosses_imbl": false, "intersections": [], "safe": true }
-```
-
-If not safe: `"intersections": [{"zone":"Vembanad MPA","at":[76.3,9.94]}]`.
-
-**Status Codes:**
-- `200` — Success
-- `400` — Invalid GeoJSON
-- `503` — PostGIS unavailable
-
----
-
-## Frontend Call Map
+## Frontend Call Map (verified against code)
 
 | Frontend File | Calls |
 |---------------|-------|
-| `frontend/app/page.tsx:32` | `GET /health`, `POST /api/chat/stream`, `GET /api/pfz/today` (via proxy) |
-| `frontend/chat/ChatPanel.tsx:24` | `POST /api/chat/stream` (primary), `POST /api/chat` (fallback), `GET /api/chat/history`, `POST /api/chat/voice` |
-| `frontend/chat/bhashini.ts:41` | **Direct** to Bhashini ULCA (not via backend) |
-| `frontend/map/MapView.tsx:28` | `GET /api/pfz/today` via `frontend/app/api/pfz/route.ts:22`, `GET /api/tiles/{z}/{x}/{y}.pbf?layer=` |
-| `frontend/map/SafetyBadge.tsx` | Props from chat `safety` + direct `GET /api/weather/current`, `POST /api/geofence/check` |
-| `frontend/app/map/page.tsx:13` | `GET /api/pfz/today` standalone |
+| `frontend/map/MapInner.tsx:200` | `GET /api/pfz` proxy → draws PFZ `CircleMarker`s |
+| `frontend/map/MapInner.tsx:227` | `GET /api/weather/current` direct (+ synthetic offline estimate) |
+| `frontend/app/map/page.tsx:94` | `GET /api/geofence/status` direct (fire-and-forget) |
+| `frontend/chat/useSSEChat.ts:273,298` | `POST /api/chat` direct, fallback to `POST /api/chat` proxy |
+| `frontend/chat/useSSEChat.ts:625,644` | `POST /api/chat/voice` direct, fallback to `POST /api/chat/voice` proxy |
+| `frontend/chat/ChatPanel.tsx` | Via `useSSEChat` hook only (no direct fetches; no history fetch) |
+| `frontend/map/SafetyBadge.tsx` | Presentational props only (no fetches) |
+| `frontend/app/page.tsx` | No fetches (no health poll) |
+| `frontend/chat/bhashini.ts` | **Direct** to Bhashini ULCA (not via backend) |
 
 ---
 
@@ -578,7 +430,7 @@ app.include_router(tiles.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(weather.router, prefix="/api")
 app.include_router(geofence.router, prefix="/api")
-# CORS
+# CORS (backend/main.py:55,211)
 app.add_middleware(CORSMiddleware,
   allow_origins=os.getenv("ALLOWED_ORIGINS","http://localhost:3000,https://cron-system.vercel.app").split(","),
   allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -596,4 +448,4 @@ API version is embedded in the URL path (`/api/...`). Breaking changes will incr
 
 ---
 
-*Merged from `docs/BACKEND_ROUTES.md` — covers 11 backend routes (10 FastAPI + 1 Next.js proxy) required for full frontend operation. `POST /api/chat/stream` is the only route not yet scaffolded and must be added before `ChatPanel` SSE works. See also `docs/ORCA_GeoJSON_Architecture.md`, `docs/ORCA_Codebase_Guide.md`.*
+*Rewritten for Wayfinder map #92 (T4): routes validated against `backend/routers/*.py` Pydantic models, callers verified by code read, T3 pruned routes removed, T5 fetch rule recorded. See also `docs/ORCA_GeoJSON_Architecture.md`, `docs/ORCA_Codebase_Guide.md`.*
