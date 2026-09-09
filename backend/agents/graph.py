@@ -120,7 +120,7 @@ class ORCAState(TypedDict, total=False):
     planner_elapsed_ms: int
     planner_confidence: float
 
-TIMEOUT_S = 10.0
+TIMEOUT_S = 30.0
 
 # ---------------------------------------------------------------------------
 # Lazy imports — keep graph importable even if langgraph not installed
@@ -1415,8 +1415,8 @@ async def orchestrate_stream_via_graph(
         return
 
     # Budgets: configurable sub-agent budget (default 10.0s, 5-10s range)
-    NODE_TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "10.0"))
-    P95_BUDGET_S = float(os.getenv("ORCA_P95_BUDGET_S", "12.0"))
+    NODE_TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "30.0"))
+    P95_BUDGET_S = float(os.getenv("ORCA_P95_BUDGET_S", "32.0"))
     # Current compiled topology: planner -> fish_finder ->
     # parallel_analysis -> decision_agent. Sub-agent names kept for
     # forward-compat (never emitted today — see parallel_analysis_node).

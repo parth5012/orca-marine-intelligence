@@ -98,7 +98,7 @@ SYNTHESIZER_MODEL = "gemini-2.5-flash"
 
 # Sub-agent SLA budget: 1.4s (map decision #26 observed per-node budget).
 # Keeps full pipeline P95<2.0s when added after parallel_analysis.
-SYNTHESIZER_TIMEOUT_MS: int = int(os.getenv("ORCA_SYNTHESIZER_TIMEOUT_MS", "10000"))
+SYNTHESIZER_TIMEOUT_MS: int = int(os.getenv("ORCA_SYNTHESIZER_TIMEOUT_MS", "30000"))
 SYNTHESIZER_TIMEOUT_S: float = SYNTHESIZER_TIMEOUT_MS / 1000.0
 
 # Transport timeout (ms) for the google-genai HTTP client. asyncio.wait_for

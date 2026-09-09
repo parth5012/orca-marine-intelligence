@@ -70,7 +70,7 @@ except ImportError:
         _resolve_location,
     )
 
-TIMEOUT_S = 10.0
+TIMEOUT_S = 30.0
 DEFAULT_CONFIDENCE = 0.87
 DEGRADED_CONFIDENCE = 0.62
 

@@ -544,7 +544,7 @@ def _resolve_api_key() -> str | None:
 class _HttpxGroqClient:
     """Lightweight Groq API client using httpx with OpenAI-compatible endpoint."""
 
-    def __init__(self, api_key: str, timeout_s: float = 5.0):
+    def __init__(self, api_key: str, timeout_s: float = 30.0):
         self.api_key = api_key
         self.timeout_s = timeout_s
 
@@ -569,7 +569,6 @@ class _HttpxGroqClient:
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0.0,
-            "max_tokens": 512,
         }
         with httpx.Client(timeout=self.timeout_s) as client:
             resp = client.post(url, headers=headers, json=data)
@@ -650,17 +649,19 @@ def _strip_code_fences(text: str) -> str:
     return s
 
 
-def _build_planner_config(max_output_tokens: int = 512) -> Any | None:
-    """Build the structured-output GenerateContentConfig (None for stubs)."""
+def _build_planner_config(max_output_tokens: int | None = None) -> Any | None:
+    """Build the structured-output GenerateContentConfig (None for stubs). No token cap by default."""
     try:
         from google.genai import types as _types  # lazy: optional dep at runtime
 
-        return _types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=PlannerOutput,
-            temperature=0.0,
-            max_output_tokens=max_output_tokens,
-        )
+        kwargs: dict[str, Any] = {
+            "response_mime_type": "application/json",
+            "response_schema": PlannerOutput,
+            "temperature": 0.0,
+        }
+        if max_output_tokens is not None:
+            kwargs["max_output_tokens"] = max_output_tokens
+        return _types.GenerateContentConfig(**kwargs)
     except ImportError:
         return None  # injected stub clients in tests may not need SDK types
 
@@ -669,17 +670,17 @@ def _generate_structured_json(
     prompt: str,
     client: Any | None = None,
     *,
-    max_output_tokens: int = 512,
+    max_output_tokens: int | None = None,
 ) -> str:
-    """Synchronous structured-JSON call (Groq primary, Gemini fallback). Returns raw JSON text."""
+    """Synchronous structured-JSON call (Groq primary, Gemini fallback). Returns raw JSON text. No token cap by default."""
     client = _get_or_create_client(client)
 
     # 1. Groq SDK client (has chat.completions)
     if hasattr(client, "chat") and hasattr(client.chat, "completions"):
         try:
-            completion = client.chat.completions.create(
-                model=PLANNER_MODEL,
-                messages=[
+            create_kwargs: dict[str, Any] = {
+                "model": PLANNER_MODEL,
+                "messages": [
                     {
                         "role": "system",
                         "content": (
@@ -689,10 +690,12 @@ def _generate_structured_json(
                     },
                     {"role": "user", "content": prompt},
                 ],
-                response_format={"type": "json_object"},
-                temperature=0.0,
-                max_tokens=max_output_tokens,
-            )
+                "response_format": {"type": "json_object"},
+                "temperature": 0.0,
+            }
+            if max_output_tokens is not None:
+                create_kwargs["max_tokens"] = max_output_tokens
+            completion = client.chat.completions.create(**create_kwargs)
             text = completion.choices[0].message.content
             if not text or not str(text).strip():
                 raise PlannerAPIError(f"groq {PLANNER_MODEL} returned empty response")

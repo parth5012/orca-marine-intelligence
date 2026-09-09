@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field, field_validator
 PLANNER_MODEL = os.getenv("ORCA_PLANNER_MODEL", "openai/gpt-oss-120b")  # Groq primary; <3000ms SLA budget
 
 
-def _parse_timeout_ms(raw: str | None, default: int = 5000) -> int:
+def _parse_timeout_ms(raw: str | None, default: int = 30000) -> int:
     """Validate ORCA_PLANNER_TIMEOUT_MS once; fall back safely on bad input."""
     try:
         value = int(str(raw) if raw is not None else default)
@@ -39,7 +39,7 @@ def _parse_timeout_ms(raw: str | None, default: int = 5000) -> int:
 
 
 PLANNER_TIMEOUT_MS: int = _parse_timeout_ms(
-    os.getenv("ORCA_PLANNER_TIMEOUT_MS"), 5000
+    os.getenv("ORCA_PLANNER_TIMEOUT_MS"), 30000
 )
 
 CLARIFICATION_THRESHOLD = 0.6  # confidence < 0.6 -> ask GPS, never guess
