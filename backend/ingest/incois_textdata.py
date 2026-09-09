@@ -11,10 +11,12 @@ Falls back to local data/pfz-today.geojson or Copernicus Marine fallback
 when INCOIS is offline or network fails.
 """
 
+import asyncio
 import json
 import logging
 import os
 import re
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -22,6 +24,10 @@ from typing import Any, Dict, List, Optional
 from scripts.dms_to_decimal import dms_to_decimal
 
 logger = logging.getLogger(__name__)
+
+# Module-level circuit breaker state for INCOIS web scraper
+_INCOIS_CIRCUIT_OPEN_UNTIL: float = 0.0
+_CIRCUIT_COOLDOWN_SECONDS: float = 120.0
 
 # Sector mappings for all 14 INCOIS coastal sectors
 INCOIS_SECTORS: Dict[str, str] = {
@@ -254,10 +260,21 @@ async def fetch_incois_sectors(
     """
     Fetch INCOIS TextData from government portal for given sectors (SEC001 to SEC014).
     If network fails, session expires, or portal is offline, loads latest local data/pfz-today.geojson.
-    If local data is also unavailable, falls back to Copernicus Marine fallback.
+    If local data is unavailable, falls back to Copernicus Marine fallback.
     """
+    global _INCOIS_CIRCUIT_OPEN_UNTIL
+
     target_sectors = sectors or list(INCOIS_SECTORS.keys())
     features: List[Dict[str, Any]] = []
+
+    # Fast-fail circuit breaker check
+    now_ts = time.time()
+    if now_ts < _INCOIS_CIRCUIT_OPEN_UNTIL:
+        logger.info(
+            "INCOIS circuit breaker is OPEN (cooldown %.1fs remaining); fast-failing to local GeoJSON",
+            _INCOIS_CIRCUIT_OPEN_UNTIL - now_ts,
+        )
+        return load_local_pfz(sectors=target_sectors)
 
     # Attempt live web fetch from INCOIS
     try:
@@ -267,30 +284,65 @@ async def fetch_incois_sectors(
         client_cookies = {"JSESSIONID": sess} if sess else {}
 
         async with httpx.AsyncClient(
-            timeout=10.0, follow_redirects=True, cookies=client_cookies
+            timeout=8.0, follow_redirects=True, cookies=client_cookies
         ) as client:
-            # Attempt to initialize session cookie if not provided
+            # Probe home endpoint or initialize session cookie
             if not sess:
                 try:
-                    home_resp = await client.get(INCOIS_HOME_URL, timeout=3.0)
+                    home_resp = await client.get(INCOIS_HOME_URL, timeout=2.5)
+                    if home_resp.status_code >= 500:
+                        logger.warning(
+                            "INCOIS home probe returned status %d; tripping circuit breaker",
+                            home_resp.status_code,
+                        )
+                        _INCOIS_CIRCUIT_OPEN_UNTIL = time.time() + _CIRCUIT_COOLDOWN_SECONDS
+                        return load_local_pfz(sectors=target_sectors)
                     if "JSESSIONID" in home_resp.cookies:
                         client.cookies.set("JSESSIONID", home_resp.cookies["JSESSIONID"])
-                except Exception:
-                    pass
+                except Exception as probe_err:
+                    logger.debug("INCOIS home probe failed: %s", probe_err)
 
-            for sec in target_sectors:
+            # Concurrent sector scrape with aggregate SLA timeout (max 4.0s total)
+            async def _fetch_sec(sec: str) -> List[Dict[str, Any]]:
                 sec_name = INCOIS_SECTORS.get(sec, "COASTAL")
                 url = INCOIS_SECTOR_URL.format(sector=sec)
                 try:
-                    resp = await client.get(url, timeout=4.0)
+                    resp = await client.get(url, timeout=3.0)
                     if resp.status_code == 200 and len(resp.text) > 100:
-                        parsed = parse_incois_table(resp.text, sec, sec_name)
-                        if parsed:
-                            features.extend(parsed)
+                        return parse_incois_table(resp.text, sec, sec_name)
+                    elif resp.status_code >= 500:
+                        return [{"__server_error__": resp.status_code}]
                 except Exception as req_exc:
                     logger.debug("Failed fetching sector %s: %s", sec, req_exc)
+                return []
+
+            try:
+                sector_tasks = [_fetch_sec(sec) for sec in target_sectors]
+                results = await asyncio.wait_for(
+                    asyncio.gather(*sector_tasks, return_exceptions=True),
+                    timeout=4.0,
+                )
+                server_errors = 0
+                for res in results:
+                    if isinstance(res, list):
+                        for item in res:
+                            if "__server_error__" in item:
+                                server_errors += 1
+                            else:
+                                features.append(item)
+                # If multiple sectors returned 500/503, trip breaker for 120s
+                if server_errors >= 2 and not features:
+                    logger.warning(
+                        "INCOIS returned %d server errors (500s); tripping circuit breaker for 120s",
+                        server_errors,
+                    )
+                    _INCOIS_CIRCUIT_OPEN_UNTIL = time.time() + _CIRCUIT_COOLDOWN_SECONDS
+            except asyncio.TimeoutError:
+                logger.warning("INCOIS parallel sector fetch timed out (>4.0s); tripping circuit breaker for 120s")
+                _INCOIS_CIRCUIT_OPEN_UNTIL = time.time() + _CIRCUIT_COOLDOWN_SECONDS
     except Exception as exc:
         logger.warning("Live INCOIS web scrape encounter error: %s", exc)
+        _INCOIS_CIRCUIT_OPEN_UNTIL = time.time() + _CIRCUIT_COOLDOWN_SECONDS
 
     # If live fetch returned no features, load local data/pfz-today.geojson
     if not features:

@@ -318,6 +318,23 @@ async def test_fallback_behavior_when_primary_fails():
 
 
 @pytest.mark.asyncio
+async def test_incois_circuit_breaker_fast_fails():
+    """Verify that when circuit breaker is tripped, fetch_incois_sectors returns immediately."""
+    import time
+    from backend.ingest import incois_textdata
+
+    incois_textdata._INCOIS_CIRCUIT_OPEN_UNTIL = time.time() + 60.0
+    try:
+        t0 = time.time()
+        features = await incois_textdata.fetch_incois_sectors(sectors=["SEC005"])
+        elapsed = time.time() - t0
+        assert elapsed < 0.2  # Immediate fast-fail, no HTTP attempt
+        assert len(features) > 0
+    finally:
+        incois_textdata._INCOIS_CIRCUIT_OPEN_UNTIL = 0.0
+
+
+@pytest.mark.asyncio
 async def test_redis_caching():
     """Verify Redis caching layer stores and retrieves pfz:today."""
     test_doc = {
