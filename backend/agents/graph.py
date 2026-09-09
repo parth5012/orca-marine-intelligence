@@ -128,7 +128,7 @@ TIMEOUT_S = 10.0
 # Upstream warning: installed langgraph's cache base imports JsonPlusSerializer
 # without allowed_objects; ORCA instantiates no cache, so suppress it here.
 import warnings
-warnings.filterwarnings("ignore", message=".*allowed_objects.*")
+warnings.filterwarnings("ignore", message=".*allowed_objects.*", category=Warning, module=r"langgraph\..*")
 
 try:
     from langgraph.graph import StateGraph, START, END
