@@ -20,24 +20,21 @@ All 5 lanes are independent (no overlapping files). See `CONTRIBUTING.md` for br
 
 ---
 
-## 2. Set up your personal harness (3 minutes, once)
+## 2. Log in the shared harness files (local-only, gitignored)
 
-Your harness is **local-only** — it never hits git (see `.gitignore` § Harness). Do this on clone:
+Your harness is **local-only** — it never hits git (see `.gitignore` § Harness). All 5 lanes share **one** log and **one** blocked file (merged 2026-09-09 from the old per-lane `LOG_M-X.md` files, now deleted). Tag your lane in the `Owner` column instead of keeping a separate file:
 
 ```bash
-# pick your lane, e.g. M-A
-cp LOG.md LOG_M-A.md 2>/dev/null || echo "# LOG — M-A" > LOG_M-A.md
-cp BLOCKED.md BLOCKED_M-A.md 2>/dev/null || echo "# BLOCKED — M-A" > BLOCKED_M-A.md
-touch LEARNINGS.md TECH_DEBT.md   # optional, also gitignored
+touch LOG.md BLOCKED.md LEARNINGS.md TECH_DEBT.md   # all gitignored, create once
 ```
 
-From now on, **log in your `LOG_M-X.md`, not in `AGENTS.md` and not in docs**. One line per task:
+From now on, **log in `LOG.md`, not in `AGENTS.md` and not in docs**. One line per task:
 
 ```
 2026-09-03 | orchestrator gather | done | artifacts: backend/agents/orchestrator.py | next: combiner weights
 ```
 
-If you're blocked, add one line to `BLOCKED_M-X.md`:
+If you're blocked, add one line to `BLOCKED.md`:
 
 ```
 2026-09-03 | ingest SEC005 | JSESSIONID expired | tried: re-fetch TextDataHome 1× | need: retry backoff
@@ -93,7 +90,7 @@ Don't crash the pipeline because one agent timed out (>10s) — return partial w
 
 ## 5. Benchmark yourself (Fri 16:00 before Global Test)
 
-Add to your `LOG_M-X.md` / PR description:
+Add to your `LOG.md` / PR description:
 
 - **completion rate** — % of your tools that return `success`
 - **retries per task** — avg retries for your riskiest tool (target ≤1)
@@ -118,4 +115,4 @@ Add to your `LOG_M-X.md` / PR description:
 - **Architecture**: `docs/ORCA_GeoJSON_Architecture.md`
 - **Branch/PR rules**: `CONTRIBUTING.md`
 
-> This `AGENTS.md` is general — **modify your personal `LOG_M-X.md` / `BLOCKED_M-X.md` workflow as your lane needs**. If you improve a pattern (e.g., better retry for Bhashini), share the learning in your PR description so others can adopt it.
+> This `AGENTS.md` is general — **modify your personal `LOG.md` / `BLOCKED.md` workflow as your lane needs**. If you improve a pattern (e.g., better retry for Bhashini), share the learning in your PR description so others can adopt it.
