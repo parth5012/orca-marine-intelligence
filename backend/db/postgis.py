@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Optional
 from datetime import date
 from sqlalchemy import select, func, cast, text
 from sqlalchemy.dialects.postgresql import insert
-from geoalchemy2 import Geometry
+from geoalchemy2 import Geography, Geometry
 from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_Contains, ST_MakePoint, ST_SetSRID
 
 from backend.db.session import AsyncSessionLocal, engine, init_db
@@ -172,8 +172,8 @@ async def find_pfz_near(
     async with AsyncSessionLocal() as session:
         # Create user reference point in WGS84
         user_point = func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326)
-        user_geog = cast(user_point, Geometry(geometry_type="GEOGRAPHY"))
-        zone_geog = cast(PFZZone.geom, Geometry(geometry_type="GEOGRAPHY"))
+        user_geog = cast(user_point, Geography(srid=4326))
+        zone_geog = cast(PFZZone.geom, Geography(srid=4326))
 
         radius_meters = radius_km * 1000.0
 
@@ -213,7 +213,7 @@ async def check_geofence(lat: float, lon: float) -> Dict[str, Any]:
     """
     async with AsyncSessionLocal() as session:
         boat_point = func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326)
-        boat_geog = cast(boat_point, Geometry(geometry_type="GEOGRAPHY"))
+        boat_geog = cast(boat_point, Geography(srid=4326))
 
         # 1. Check EEZ containment
         eez_query = select(EEZBoundary).where(
