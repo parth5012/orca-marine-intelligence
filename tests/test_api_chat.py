@@ -133,7 +133,7 @@ class TestChatStreamingEndpoint:
 
         assert response.status_code == 200
         assert "text/event-stream" in response.headers.get("content-type", "")
-        assert response.headers.get("cache-control") == "no-cache"
+        assert response.headers.get("cache-control") == "no-store"
         assert response.headers.get("x-accel-buffering") == "no"
 
         parsed = parse_sse_events(response.text)
