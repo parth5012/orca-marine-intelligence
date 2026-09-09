@@ -1,19 +1,20 @@
-# ORCA Marine Intelligence â€” Docker Compose (Local Development)
-# Owner: M-C (Backend API & Platform) — Docker env (PostGIS+Redis)
+# ORCA Marine Intelligence — Docker Compose (Local Development)
+# Owner: M-C (Backend API & Platform) — Docker env (PostGIS + Redis + Backend)
 #
 # Services:
-#   - postgis   : PostgreSQL + PostGIS (port 5432)
-#   - redis     : Redis cache (port 6379)
-#   - backend   : FastAPI application (port 8000)
+#   - postgis: PostgreSQL with PostGIS (port 5432)
+#   - redis: Redis cache (port 6379)
+#   - backend: FastAPI application (port 8000)
 #
 # Usage:
-#   docker compose -f infra/docker-compose.yml up -d
-#   docker compose -f infra/docker-compose.yml down
+#   docker compose up -d          # Starts all services (or just PostGIS + Redis: docker compose up -d postgis redis)
+#   docker compose down           # Stops all containers
 
 services:
   postgis:
     image: postgis/postgis:16-3.4
     container_name: orca-postgis
+    restart: unless-stopped
     environment:
       POSTGRES_DB: orca_marine
       POSTGRES_USER: orca
@@ -22,7 +23,7 @@ services:
       - "5432:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
-      - ../backend/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U orca -d orca_marine"]
       interval: 10s
@@ -32,6 +33,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: orca-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -44,9 +46,10 @@ services:
 
   backend:
     build:
-      context: ..
+      context: .
       dockerfile: backend/Dockerfile
     container_name: orca-backend
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://orca:orca@postgis:5432/orca_marine
       REDIS_URL: redis://redis:6379/0
