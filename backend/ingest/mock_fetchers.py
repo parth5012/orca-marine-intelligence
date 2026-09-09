@@ -931,7 +931,8 @@ def mock_check_geofence_boundaries(
 
     Returns:
         dict with {status, summary, next_actions, artifacts, results,
-        scenario, source}. Each result matches POST /api/geofence/check
+        scenario, source}. Each result matches the former POST
+        /api/geofence/check shape (endpoint pruned in T3; mock kept for agents)
         plus agent fields: {lat, lon, inside_eez, inside_mpa, mpa_name,
         eez_country, nearest_mpa, distance_to_mpa_km, near_imbl,
         distance_to_imbl_km, restricted, status, warnings, is_safe}.

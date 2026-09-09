@@ -220,42 +220,18 @@ class TestAPIRouterVerification:
             assert prop in props, f"Missing property {prop} in PFZ feature"
 
     def test_geofence_check_mpa_violation_and_eez_safe(self, client: TestClient):
-        """GET /api/geofence/check flags violation inside MPA and confirms safe inside EEZ."""
-        # Gulf of Mannar MPA: 9.0° N, 79.0° E -> danger_violation
+        """T3 prune: GET /api/geofence/check deleted — must 404."""
         mpa_resp = client.get(f"/api/geofence/check?lat={GULF_OF_MANNAR_LAT}&lon={GULF_OF_MANNAR_LON}")
-        assert mpa_resp.status_code == 200
-        mpa_data = mpa_resp.json()
-        assert mpa_data["inside_mpa"] is True
-        assert mpa_data["safety_status"] == "danger_violation"
-        assert any("Marine Protected Area" in alert or "Mannar" in alert for alert in mpa_data["alerts"])
-
-        # Kochi Territorial Waters: 9.93° N, 76.26° E -> safe
+        assert mpa_resp.status_code == 404
         safe_resp = client.get(f"/api/geofence/check?lat={KOCHI_LAT}&lon={KOCHI_LON}")
-        assert safe_resp.status_code == 200
-        safe_data = safe_resp.json()
-        assert safe_data["inside_eez"] is True
-        assert safe_data["inside_mpa"] is False
-        assert safe_data["near_imbl"] is False
-        assert safe_data["safety_status"] == "safe"
+        assert safe_resp.status_code == 404
 
     def test_geofence_route_detects_crossings(self, client: TestClient):
-        """POST /api/geofence/route detects prohibited zone crossings."""
-        # Safe route off Kochi
-        safe_coords = [[76.26, 9.93], [76.20, 9.90]]
-        s_resp = client.post("/api/geofence/route", json={"coordinates": safe_coords})
-        assert s_resp.status_code == 200
-        s_data = s_resp.json()
-        assert s_data["safe"] is True
-        assert len(s_data["violations"]) == 0
-
-        # Crossing through Gulf of Mannar MPA
-        danger_coords = [[78.50, 9.00], [79.50, 9.00]]
-        d_resp = client.post("/api/geofence/route", json={"coordinates": danger_coords})
-        assert d_resp.status_code == 200
-        d_data = d_resp.json()
-        assert d_data["safe"] is False
-        assert len(d_data["violations"]) > 0
-        assert any("Marine Protected Area" in v or "Gulf of Mannar" in v for v in d_data["violations"])
+        """T3 prune: POST /api/geofence/route deleted — must 404."""
+        s_resp = client.post("/api/geofence/route", json={"coordinates": [[76.26, 9.93], [76.20, 9.90]]})
+        assert s_resp.status_code == 404
+        d_resp = client.post("/api/geofence/route", json={"coordinates": [[78.50, 9.00], [79.50, 9.00]]})
+        assert d_resp.status_code == 404
 
 
 # ==============================================================================
@@ -497,12 +473,12 @@ class TestLatencyPerformanceBenchmark:
         assert pfz_resp.status_code == 200
         assert t_pfz_ms < 50.0, f"Cached PFZ endpoint took {t_pfz_ms:.2f}ms (threshold 50ms)"
 
-        # 4. Geofence point check (in-memory ray-casting)
+        # 4. Geofence status (boundary metadata; check endpoint pruned in T3)
         t0 = time.perf_counter()
-        geo_resp = client.get(f"/api/geofence/check?lat={KOCHI_LAT}&lon={KOCHI_LON}")
+        geo_resp = client.get("/api/geofence/status")
         t_geo_ms = (time.perf_counter() - t0) * 1000
         assert geo_resp.status_code == 200
-        assert t_geo_ms < 50.0, f"Geofence check endpoint took {t_geo_ms:.2f}ms (threshold 50ms)"
+        assert t_geo_ms < 50.0, f"Geofence status endpoint took {t_geo_ms:.2f}ms (threshold 50ms)"
 
     def test_streaming_response_latency_sla(self, client: TestClient):
         """Measures SSE stream latency ensuring P95 budget (<2.0s) and fast TTFB."""
@@ -874,9 +850,9 @@ def test_isro_r8_latency_and_performance_sla(client: TestClient, primed_pfz_cach
         assert resp.status_code == 200
         assert t_health < 50.0
 
-    # 2. Geofence point check SLA < 50ms
+    # 2. Geofence status SLA < 50ms (check endpoint pruned in T3)
     t0 = time.perf_counter()
-    g_resp = client.get(f"/api/geofence/check?lat={KOCHI_LAT}&lon={KOCHI_LON}")
+    g_resp = client.get("/api/geofence/status")
     t_geo = (time.perf_counter() - t0) * 1000
     assert g_resp.status_code == 200
     assert t_geo < 50.0
@@ -888,9 +864,9 @@ def test_isro_r8_latency_and_performance_sla(client: TestClient, primed_pfz_cach
     assert p_resp.status_code == 200
     assert t_pfz < 50.0
 
-    # 4. Route check SLA < 50ms
+    # 4. Pruned route endpoint stays gone (T3) — must 404 fast
     t0 = time.perf_counter()
     r_resp = client.post("/api/geofence/route", json={"coordinates": [[76.26, 9.93], [76.20, 9.90]]})
     t_route = (time.perf_counter() - t0) * 1000
-    assert r_resp.status_code == 200
+    assert r_resp.status_code == 404
     assert t_route < 50.0
