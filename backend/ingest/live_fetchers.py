@@ -30,6 +30,10 @@ OPEN_METEO_WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 OPENWEATHERMAP_API_URL = "https://api.openweathermap.org/data/2.5/weather"
 IMD_CYCLONE_URL = "https://mausam.imd.gov.in/responsive/cycloneinformation.php"
 HTTP_TIMEOUT_S = 6.0
+# OpenWeatherMap backup: fail-fast (was 6s x3 = ~19s stall per call).
+# Open-Meteo is primary; OWM only tried on Open-Meteo failure.
+OWM_TIMEOUT_S = 3.0
+OWM_RETRIES = 1
 
 # Paths
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -564,10 +568,12 @@ def fetch_openweathermap(
     lat: float,
     lon: float,
     api_key: Optional[str] = None,
-    timeout_s: float = HTTP_TIMEOUT_S,
+    timeout_s: float = OWM_TIMEOUT_S,
+    max_retries: int = OWM_RETRIES,
 ) -> dict[str, Any]:
     """
     Fetch current live weather from OpenWeatherMap API using OPENWEATHER_API_KEY.
+    Backup provider only (fail-fast): Open-Meteo is primary.
     """
     key = api_key or os.getenv("OPENWEATHER_API_KEY")
     if not key:
@@ -580,7 +586,7 @@ def fetch_openweathermap(
         "units": "metric",
     }
 
-    resp = _http_get_with_retry(OPENWEATHERMAP_API_URL, params=params, timeout_s=timeout_s)
+    resp = _http_get_with_retry(OPENWEATHERMAP_API_URL, params=params, timeout_s=timeout_s, max_retries=max_retries)
     payload = resp.json()
 
     main = payload.get("main", {})
@@ -629,16 +635,26 @@ def fetch_live_weather(
     timeout_s: float = HTTP_TIMEOUT_S,
 ) -> dict[str, Any]:
     """
-    Query OpenWeatherMap API using OPENWEATHER_API_KEY (or fall back to Open-Meteo
-    Weather API if the key is missing or network fails).
+    Open-Meteo primary, OpenWeatherMap backup (fail-fast 3s x1).
+    OWM previously stalled 6s x3 (~19s) per call on TLS timeouts.
     """
+    try:
+        return fetch_open_meteo_weather(lat, lon, timeout_s=timeout_s)
+    except Exception as exc:
+        logger.warning(
+            "Open-Meteo fetch failed for (%s, %s): %s. Trying OWM backup.",
+            lat, lon, exc,
+        )
     key = api_key or os.getenv("OPENWEATHER_API_KEY")
     if key:
         try:
-            return fetch_openweathermap(lat, lon, api_key=key, timeout_s=timeout_s)
+            return fetch_openweathermap(
+                lat, lon, api_key=key,
+                timeout_s=OWM_TIMEOUT_S, max_retries=OWM_RETRIES,
+            )
         except Exception as exc:
             logger.warning(
-                "OpenWeatherMap fetch failed for (%s, %s): %s. Falling back to Open-Meteo.",
+                "OWM backup failed for (%s, %s): %s.",
                 lat, lon, exc,
             )
 
