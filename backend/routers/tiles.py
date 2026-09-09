@@ -48,9 +48,10 @@ async def get_tiles_config() -> Response:
     )
 
     def _carto_url(template: str) -> str:
-        # Only append ?api_key when a real key is configured; otherwise keyless CDN.
-        if has_carto_key:
-            return f"{template}?api_key={raw_key}"
+        # Security: GET /api/tiles/config is unauthenticated + publicly
+        # cacheable (max-age=3600). Never embed CARTO_API_KEY in its URLs —
+        # always emit the keyless public CDN template. has_carto_key is
+        # reported separately for observability only.
         return template
 
     config = {

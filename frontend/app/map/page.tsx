@@ -22,6 +22,7 @@ import MapView, {
   COASTAL_PORTS,
   MapLayerToggles,
   BasemapStyle,
+  normalizeBasemapStyle,
 } from '@/map';
 
 const SECTORS = [
@@ -52,22 +53,7 @@ export default function MapPage({ initialBasemapStyle, searchParams }: MapPagePr
     if (initialBasemapStyle) return initialBasemapStyle;
     const candidate = searchParams?.basemap || searchParams?.style;
     if (candidate && typeof candidate === 'string') {
-      const raw = candidate.trim().toLowerCase();
-      if (
-        raw === 'dark_all' ||
-        raw === 'voyager' ||
-        raw === 'light_all' ||
-        raw === 'esri_ocean' ||
-        raw === 'esri_dark' ||
-        raw === 'osm'
-      ) {
-        return raw as BasemapStyle;
-      }
-      if (raw === 'dark' || raw === 'carto_dark') return 'dark_all';
-      if (raw === 'positron' || raw === 'light') return 'light_all';
-      if (raw === 'ocean' || raw === 'esri_ocean_basemap') return 'esri_ocean';
-      if (raw === 'dark_gray' || raw === 'esri_dark_gray') return 'esri_dark';
-      if (raw === 'openstreetmap') return 'osm';
+      return normalizeBasemapStyle(candidate);
     }
     return undefined;
   }, [initialBasemapStyle, searchParams]);

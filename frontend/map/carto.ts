@@ -81,6 +81,38 @@ export const ESRI_DARK_ATTRIBUTION =
   '&copy; <a href="https://www.esri.com/" target="_blank" rel="noopener noreferrer">Esri</a> &mdash; Esri, DeLorme, NAVTEQ';
 
 /**
+ * Normalizes a user-supplied basemap alias to a canonical BasemapStyle.
+ * Single source of truth — reuse in tile URLs, env defaults, and query resolvers.
+ * Returns undefined for unrecognized values so callers can fall back.
+ */
+export function normalizeBasemapStyle(
+  raw: string | string[] | undefined | null
+): BasemapStyle | undefined {
+  if (!raw || Array.isArray(raw)) return undefined;
+  const alias = raw.trim().toLowerCase();
+  const table: Record<string, BasemapStyle> = {
+    dark_all: 'dark_all',
+    dark: 'dark_all',
+    carto_dark: 'dark_all',
+    voyager: 'voyager',
+    carto_voyager: 'voyager',
+    light_all: 'light_all',
+    light: 'light_all',
+    positron: 'light_all',
+    carto_positron: 'light_all',
+    esri_ocean: 'esri_ocean',
+    ocean: 'esri_ocean',
+    esri_ocean_basemap: 'esri_ocean',
+    esri_dark: 'esri_dark',
+    dark_gray: 'esri_dark',
+    esri_dark_gray: 'esri_dark',
+    osm: 'osm',
+    openstreetmap: 'osm',
+  };
+  return table[alias];
+}
+
+/**
  * Returns dynamic attribution HTML according to the selected basemap style.
  */
 export function getBasemapAttribution(style: BasemapStyle): string {
@@ -141,24 +173,7 @@ export function getBasemapTileUrl(
   style: BasemapStyle = 'dark_all',
   apiKey?: string
 ): string {
-  const validStyles: Record<string, BasemapStyle> = {
-    dark_all: 'dark_all',
-    dark: 'dark_all',
-    carto_dark: 'dark_all',
-    voyager: 'voyager',
-    carto_voyager: 'voyager',
-    light_all: 'light_all',
-    positron: 'light_all',
-    carto_positron: 'light_all',
-    esri_ocean: 'esri_ocean',
-    ocean: 'esri_ocean',
-    esri_dark: 'esri_dark',
-    dark_gray: 'esri_dark',
-    osm: 'osm',
-    openstreetmap: 'osm',
-  };
-
-  const safeStyle = validStyles[style] || 'dark_all';
+  const safeStyle = normalizeBasemapStyle(style) || 'dark_all';
 
   if (safeStyle === 'osm') {
     return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
@@ -179,9 +194,19 @@ export function getBasemapTileUrl(
       : undefined);
 
   const key = (rawKey || '').trim();
+  const normalizedKey = key.toLowerCase();
   const baseUrl = `https://{s}.basemaps.cartocdn.com/rastertiles/${safeStyle}/{z}/{x}/{y}{r}.png`;
 
-  if (key && !key.toLowerCase().startsWith('your_')) {
+  // Keyless CDN fallback: reject placeholders and null-like literals
+  // (matches backend/routers/tiles.py has_carto_key logic).
+  if (
+    key &&
+    normalizedKey !== 'undefined' &&
+    normalizedKey !== 'null' &&
+    normalizedKey !== 'none' &&
+    normalizedKey !== 'your_carto_api_key_here' &&
+    !normalizedKey.startsWith('your_')
+  ) {
     return `${baseUrl}?api_key=${encodeURIComponent(key)}`;
   }
 
@@ -196,22 +221,10 @@ export function getDefaultBasemapStyle(): BasemapStyle {
     typeof process !== 'undefined' &&
     process.env.NEXT_PUBLIC_CARTO_BASEMAP_STYLE
   ) {
-    const raw = process.env.NEXT_PUBLIC_CARTO_BASEMAP_STYLE.trim().toLowerCase();
-    if (raw === 'positron' || raw === 'light' || raw === 'carto_positron') return 'light_all';
-    if (raw === 'dark' || raw === 'carto_dark') return 'dark_all';
-    if (raw === 'ocean' || raw === 'esri_ocean_basemap') return 'esri_ocean';
-    if (raw === 'dark_gray' || raw === 'esri_dark_gray') return 'esri_dark';
-    if (raw === 'openstreetmap') return 'osm';
-    if (
-      raw === 'dark_all' ||
-      raw === 'voyager' ||
-      raw === 'light_all' ||
-      raw === 'esri_ocean' ||
-      raw === 'esri_dark' ||
-      raw === 'osm'
-    ) {
-      return raw as BasemapStyle;
-    }
+    return (
+      normalizeBasemapStyle(process.env.NEXT_PUBLIC_CARTO_BASEMAP_STYLE) ||
+      'dark_all'
+    );
   }
 
   return 'dark_all';
