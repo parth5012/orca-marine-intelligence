@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -93,6 +94,42 @@ def _nearest_hour_index(times_list: list[str], target_dt: Optional[datetime] = N
     return min(range(len(parsed)), key=lambda i: abs((parsed[i] - target).total_seconds()))
 
 
+def _http_get_with_retry(
+    url: str,
+    params: dict[str, Any] | None = None,
+    timeout_s: float = HTTP_TIMEOUT_S,
+    max_retries: int = 3,
+    backoff_factor: float = 0.5,
+) -> httpx.Response:
+    """Execute HTTP GET with bounded retries and exponential backoff.
+
+    Handles transient connection resets, TLS handshakes, and timeouts.
+    Never returns mock data; raises RuntimeError if all retries are exhausted.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            with httpx.Client(timeout=timeout_s) as client:
+                resp = client.get(url, params=params)
+                resp.raise_for_status()
+                return resp
+        except (httpx.HTTPError, OSError) as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                sleep_s = backoff_factor * (2 ** (attempt - 1))
+                logger.warning(
+                    "HTTP GET to %s failed (attempt %d/%d): %s. Retrying in %.2fs...",
+                    url, attempt, max_retries, exc, sleep_s,
+                )
+                time.sleep(sleep_s)
+            else:
+                logger.error(
+                    "HTTP GET to %s failed after %d attempts: %s",
+                    url, max_retries, exc,
+                )
+    raise RuntimeError(f"Live fetch failed for {url} after {max_retries} retries: {last_exc}") from last_exc
+
+
 # ---------------------------------------------------------------------------
 # 1. Open-Meteo Marine Live Fetcher
 # ---------------------------------------------------------------------------
@@ -124,10 +161,8 @@ def fetch_open_meteo_marine(
         "timezone": "Asia/Kolkata",
     }
     try:
-        with httpx.Client(timeout=timeout_s) as client:
-            resp = client.get(OPEN_METEO_MARINE_URL, params=params)
-            resp.raise_for_status()
-            payload = resp.json()
+        resp = _http_get_with_retry(OPEN_METEO_MARINE_URL, params=params, timeout_s=timeout_s)
+        payload = resp.json()
 
         hourly = payload.get("hourly", {})
         times = hourly.get("time", [])
@@ -222,8 +257,8 @@ def fetch_open_meteo_marine(
             "source": "open_meteo_live",
         }
     except Exception as exc:
-        logger.warning("Failed to fetch live Open-Meteo marine data for (%s, %s): %s", lat, lon, exc)
-        raise
+        logger.error("Failed to fetch live Open-Meteo marine data for (%s, %s): %s", lat, lon, exc)
+        raise RuntimeError(f"Live marine weather fetch failed after retries for ({lat}, {lon}): {exc}") from exc
 
 
 # Alias for backward compatibility
@@ -261,10 +296,8 @@ def fetch_open_meteo_weather(
         "timezone": "Asia/Kolkata",
     }
     try:
-        with httpx.Client(timeout=timeout_s) as client:
-            resp = client.get(OPEN_METEO_WEATHER_URL, params=params)
-            resp.raise_for_status()
-            payload = resp.json()
+        resp = _http_get_with_retry(OPEN_METEO_WEATHER_URL, params=params, timeout_s=timeout_s)
+        payload = resp.json()
 
         hourly = payload.get("hourly", {})
         times = hourly.get("time", [])
@@ -347,8 +380,8 @@ def fetch_open_meteo_weather(
             "source": "open_meteo_live",
         }
     except Exception as exc:
-        logger.warning("Failed to fetch live Open-Meteo weather for (%s, %s): %s", lat, lon, exc)
-        raise
+        logger.error("Failed to fetch live Open-Meteo weather for (%s, %s): %s", lat, lon, exc)
+        raise RuntimeError(f"Live weather forecast fetch failed after retries for ({lat}, {lon}): {exc}") from exc
 
 
 def compute_departure_window_advisory(
@@ -380,14 +413,11 @@ def compute_departure_window_advisory(
             "forecast_days": 2,
             "timezone": "Asia/Kolkata",
         }
-        with httpx.Client(timeout=timeout_s) as client:
-            resp_m = client.get(OPEN_METEO_MARINE_URL, params=params_m)
-            resp_m.raise_for_status()
-            payload_m = resp_m.json()
+        resp_m = _http_get_with_retry(OPEN_METEO_MARINE_URL, params=params_m, timeout_s=timeout_s)
+        payload_m = resp_m.json()
 
-            resp_w = client.get(OPEN_METEO_WEATHER_URL, params=params_w)
-            resp_w.raise_for_status()
-            payload_w = resp_w.json()
+        resp_w = _http_get_with_retry(OPEN_METEO_WEATHER_URL, params=params_w, timeout_s=timeout_s)
+        payload_w = resp_w.json()
 
         m_hourly = payload_m.get("hourly", {})
         w_hourly = payload_w.get("hourly", {})
@@ -549,10 +579,9 @@ def fetch_openweathermap(
         "appid": key,
         "units": "metric",
     }
-    with httpx.Client(timeout=timeout_s) as client:
-        resp = client.get(OPENWEATHERMAP_API_URL, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
+
+    resp = _http_get_with_retry(OPENWEATHERMAP_API_URL, params=params, timeout_s=timeout_s)
+    payload = resp.json()
 
     main = payload.get("main", {})
     wind = payload.get("wind", {})

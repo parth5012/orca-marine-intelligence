@@ -160,7 +160,7 @@ async def get_current_weather(
         logger.error("Failed fetching live weather for (%s, %s): %s", lat, lon, exc, exc_info=True)
         raise HTTPException(
             status_code=502,
-            detail="Failed retrieving live weather data from upstream providers.",
+            detail=f"Live weather fetch failed: upstream providers unavailable after retries ({exc}).",
         )
 
 

@@ -17,6 +17,7 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -31,6 +32,7 @@ from backend.ingest.live_fetchers import (
     fetch_openweathermap,
     fetch_live_weather,
     fetch_imd_cyclone_alerts,
+    _http_get_with_retry,
 )
 from backend.agents.subagents import weather_agent, danger_agent
 
@@ -206,11 +208,45 @@ class TestCurrentWeatherEndpoint:
         assert resp.status_code == 422
 
     def test_current_weather_upstream_failure_returns_502(self, client):
-        """When upstream weather fetcher raises exception, returns 502 Bad Gateway."""
+        """When upstream weather fetcher raises exception, returns 502 Bad Gateway with failure message."""
         with patch("backend.routers.weather.fetch_live_weather", side_effect=RuntimeError("Upstream down")):
             resp = client.get("/api/weather/current?lat=9.93&lon=76.26")
             assert resp.status_code == 502
+            assert "failed" in resp.json()["detail"].lower()
             assert "upstream" in resp.json()["detail"].lower()
+
+    def test_http_get_with_retry_succeeds_on_transient_failure(self):
+        """_http_get_with_retry retries on transient connection error and succeeds without mock data."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"hourly": {"wave_height": [1.2]}}
+
+        with patch("httpx.Client") as mock_client_cls, patch("time.sleep") as mock_sleep:
+            mock_client = MagicMock()
+            mock_client.__enter__.return_value = mock_client
+            mock_client.get.side_effect = [
+                httpx.ConnectError("WinError 10054"),
+                mock_resp,
+            ]
+            mock_client_cls.return_value = mock_client
+
+            resp = _http_get_with_retry("https://example.com/api", max_retries=2, backoff_factor=0.01)
+            assert resp == mock_resp
+            assert mock_client.get.call_count == 2
+            mock_sleep.assert_called_once()
+
+    def test_http_get_with_retry_exhausted_raises_error_no_mock_data(self):
+        """_http_get_with_retry raises RuntimeError when retries exhausted and never returns mock data."""
+        with patch("httpx.Client") as mock_client_cls, patch("time.sleep"):
+            mock_client = MagicMock()
+            mock_client.__enter__.return_value = mock_client
+            mock_client.get.side_effect = httpx.ConnectError("WinError 10054: connection reset")
+            mock_client_cls.return_value = mock_client
+
+            with pytest.raises(RuntimeError) as exc_info:
+                _http_get_with_retry("https://example.com/api", max_retries=3, backoff_factor=0.01)
+            assert "Live fetch failed" in str(exc_info.value)
+            assert "3 retries" in str(exc_info.value)
 
 
 class TestCycloneWarningsEndpoint:
