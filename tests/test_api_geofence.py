@@ -46,111 +46,18 @@ def client():
 
 
 # ---------------------------------------------------------------------------
-# 1. Geofence Point Check Endpoint Tests (GET & POST)
+# 1. Geofence Point Check Endpoints REMOVED (T3 prune, Wayfinder map #92)
 # ---------------------------------------------------------------------------
 class TestGeofenceCheckEndpoint:
-    """Tests for /api/geofence/check (GET & POST)."""
+    """T3 prune: GET+POST /api/geofence/check deleted — must 404."""
 
-    def test_safe_point_kochi_get(self, client):
-        """Safe point test (Kochi 9.93, 76.26): inside sovereign EEZ, clear of MPAs and IMBL."""
+    def test_check_get_gone(self, client):
         resp = client.get("/api/geofence/check", params={"lat": 9.93, "lon": 76.26})
-        assert resp.status_code == 200
-        data = resp.json()
+        assert resp.status_code == 404
 
-        assert data["inside_eez"] is True
-        assert data["inside_mpa"] is False
-        assert data["near_imbl"] is False
-        assert data["safety_status"] == "safe"
-        assert data["alerts"] == []
-        assert data["distance_to_imbl_km"] > 5.0
-        assert data["distance_to_eez_border_km"] > 10.0
-        assert data["latency_ms"] < 50.0
-
-    def test_safe_point_kochi_post(self, client):
-        """POST /api/geofence/check produces identical result for Kochi coordinate."""
-        resp = client.post(
-            "/api/geofence/check",
-            json={"lat": 9.93, "lon": 76.26, "heading_deg": 180.0, "speed_kt": 8.5},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["inside_eez"] is True
-        assert data["inside_mpa"] is False
-        assert data["near_imbl"] is False
-        assert data["safety_status"] == "safe"
-        assert data["heading_deg"] == 180.0
-        assert data["speed_kt"] == 8.5
-
-    def test_mpa_violation_gulf_of_mannar(self, client):
-        """MPA violation test: Gulf of Mannar (9.0, 79.0) inside MPA sanctuary -> danger_violation."""
-        resp = client.post("/api/geofence/check", json={"lat": 9.0, "lon": 79.0})
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["inside_mpa"] is True
-        assert data["safety_status"] == "danger_violation"
-        assert "Mannar" in (data["nearest_mpa_name"] or "")
-        assert any("Inside Marine Protected Area" in alert for alert in data["alerts"])
-
-    def test_mpa_violation_vembanad(self, client):
-        """MPA violation test: Vembanad sanctuary (9.65, 76.45) inside MPA -> danger_violation."""
-        resp = client.get("/api/geofence/check", params={"lat": 9.65, "lon": 76.45})
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["inside_mpa"] is True
-        assert data["safety_status"] == "danger_violation"
-        assert "Vembanad" in (data["nearest_mpa_name"] or "")
-        assert any("Inside Marine Protected Area" in alert for alert in data["alerts"])
-
-    def test_near_imbl_violation(self, client):
-        """Near IMBL test (<2km to international border, e.g. 9.10, 79.53) -> near_imbl=True, danger_violation."""
-        resp = client.get("/api/geofence/check", params={"lat": 9.10, "lon": 79.53})
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["distance_to_imbl_km"] <= 2.0
-        assert data["near_imbl"] is True
-        assert data["safety_status"] == "danger_violation"
-        assert any("Approaching International Maritime Boundary Line" in alert for alert in data["alerts"])
-
-    def test_caution_approaching_eez_border(self, client):
-        """Caution status when inside EEZ but within 10km of border (9.0, 77.45)."""
-        resp = client.get("/api/geofence/check", params={"lat": 9.0, "lon": 77.45})
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["inside_eez"] is True
-        assert data["inside_mpa"] is False
-        assert data["distance_to_eez_border_km"] <= 10.0
-        assert data["safety_status"] == "caution"
-        assert any("Approaching EEZ boundary" in alert for alert in data["alerts"])
-
-    def test_outside_eez_violation(self, client):
-        """Outside sovereign EEZ (2.0, 60.0 in international waters) -> danger_violation."""
-        resp = client.get("/api/geofence/check", params={"lat": 2.0, "lon": 60.0})
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["inside_eez"] is False
-        assert data["safety_status"] == "danger_violation"
-        assert any("Outside sovereign Exclusive Economic Zone" in alert for alert in data["alerts"])
-
-    def test_coordinate_validation_out_of_range(self, client):
-        """Invalid latitude (>90 or <-90) and longitude (>180 or <-180) return HTTP 400."""
-        resp1 = client.get("/api/geofence/check", params={"lat": 95.0, "lon": 76.0})
-        assert resp1.status_code == 400
-
-        resp2 = client.post("/api/geofence/check", json={"lat": 9.93, "lon": 185.0})
-        assert resp2.status_code == 400
-
-    def test_missing_coordinates_returns_400(self, client):
-        """Empty POST body returns HTTP 400."""
-        resp = client.post("/api/geofence/check", json={})
-        assert resp.status_code in (400, 422)
-
-
+    def test_check_post_gone(self, client):
+        resp = client.post("/api/geofence/check", json={"lat": 9.93, "lon": 76.26})
+        assert resp.status_code == 404
 # ---------------------------------------------------------------------------
 # 2. Geofence Status Endpoint Tests
 # ---------------------------------------------------------------------------
@@ -180,59 +87,17 @@ class TestGeofenceStatusEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# 3. Geofence Route Endpoint Tests
+# 3. Geofence Route Endpoint REMOVED (T3 prune, Wayfinder map #92)
 # ---------------------------------------------------------------------------
 class TestGeofenceRouteEndpoint:
-    """Tests for POST /api/geofence/route."""
+    """T3 prune: POST /api/geofence/route deleted — must 404."""
 
-    def test_safe_route_in_kochi_waters(self, client):
-        """A planned route entirely within safe Kochi waters returns safe=True, zero violations."""
-        route_coords = [[76.26, 9.93], [76.20, 9.90]]
-        resp = client.post("/api/geofence/route", json={"coordinates": route_coords})
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["safe"] is True
-        assert data["violations"] == []
-        assert len(data["waypoint_checks"]) == 2
-        assert data["min_distance_to_imbl_km"] > 10.0
-
-    def test_route_crossing_marine_protected_area(self, client):
-        """A route passing through the Gulf of Mannar MPA returns safe=False with violation."""
-        route_coords = [[78.50, 9.00], [79.50, 9.00]]
-        resp = client.post("/api/geofence/route", json={"coordinates": route_coords})
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["safe"] is False
-        assert len(data["violations"]) > 0
-        assert any("Gulf Mannar" in v or "Marine Protected Area" in v for v in data["violations"])
-
-    def test_route_approaching_imbl_boundary(self, client):
-        """A route waypoint within 2km of IMBL triggers near_imbl violation."""
-        route_coords = [[79.50, 9.10], [79.53, 9.10]]
-        resp = client.post("/api/geofence/route", json={"coordinates": route_coords})
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["safe"] is False
-        assert data["min_distance_to_imbl_km"] <= 2.0
-        assert any("International Maritime Boundary Line" in v for v in data["violations"])
-
-    def test_route_dict_waypoint_format(self, client):
-        """Accepts dict-style waypoints [{'lat': ..., 'lon': ...}] transparently."""
-        dict_waypoints = [{"lat": 9.93, "lon": 76.26}, {"lat": 9.90, "lon": 76.20}]
-        resp = client.post("/api/geofence/route", json={"coordinates": dict_waypoints})
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["safe"] is True
-        assert len(data["waypoint_checks"]) == 2
-
-    def test_route_empty_coordinates_fails(self, client):
-        """Empty route array raises HTTP 400 Bad Request."""
-        resp = client.post("/api/geofence/route", json={"coordinates": []})
-        assert resp.status_code == 400
+    def test_route_gone(self, client):
+        resp = client.post(
+            "/api/geofence/route",
+            json={"coordinates": [[76.26, 9.93], [76.20, 9.90]]},
+        )
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

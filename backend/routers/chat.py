@@ -10,9 +10,10 @@ conversation memory via Redis, and vernacular voice transcription.
 
 Endpoints:
   POST /api/chat          Send query, receive SSE advisory stream
-  POST /api/chat/stream   Alias for POST /api/chat (SSE streaming)
-  GET  /api/chat/history  Retrieve conversation history
   POST /api/chat/voice    Ingest vernacular voice audio, transcribe via Groq Whisper
+
+Wayfinder T3 (map #92): /chat/stream alias and /chat/history deleted per
+human grill decision — single primary kept, history deferred post-MVP.
 """
 
 from __future__ import annotations
@@ -24,16 +25,16 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 try:
     from backend.agents.graph import orchestrate_stream_via_graph
-    from backend.db.redis import append_message, get_history
+    from backend.db.redis import append_message
 except ImportError:
     from agents.graph import orchestrate_stream_via_graph  # type: ignore
-    from db.redis import append_message, get_history  # type: ignore
+    from db.redis import append_message  # type: ignore
 
 logger = logging.getLogger("orca.chat")
 
@@ -51,7 +52,6 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat")
-@router.post("/chat/stream")
 async def chat(req: ChatRequest) -> StreamingResponse:
     """Process chat query through ORCA multi-agent system and stream SSE events."""
     session_id: str = req.session_id or uuid.uuid4().hex
@@ -132,21 +132,6 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         media_type="text/event-stream",
         headers=headers,
     )
-
-
-@router.get("/chat/history")
-async def chat_history(
-    session_id: str = Query(..., description="Multi-turn conversation session ID"),
-    limit: int = Query(
-        10, ge=1, le=100, description="Max number of conversation turns"
-    ),
-) -> Dict[str, Any]:
-    """Retrieve conversation history for a session."""
-    history = await get_history(session_id, limit=limit)
-    return {
-        "session_id": session_id,
-        "messages": history,
-    }
 
 
 @router.post("/chat/voice")

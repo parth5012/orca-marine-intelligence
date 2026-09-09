@@ -411,45 +411,16 @@ def test_endpoint_serves_from_redis(client):
 
 
 # ==============================================================================
-# 6. GET /api/pfz/history Endpoint Tests
+# 6. GET /api/pfz/history Endpoint Tests — T3 PRUNED (Wayfinder map #92)
 # ==============================================================================
 
 def test_get_pfz_history(client):
-    """Verify GET /api/pfz/history returns historical snapshots."""
+    """Verify GET /api/pfz/history is gone (T3 prune → 404)."""
     response = client.get("/api/pfz/history?days=5")
-    assert response.status_code == 200
-    data = response.json()
-
-    assert data["type"] == "FeatureCollection"
-    assert data["days"] == 5
-    assert "start_date" in data
-    assert "end_date" in data
-    assert "snapshots" in data
-    # With real PostGIS data, only days with actual records return snapshots
-    # Don't assert exact count - could be 0 (no DB) or N (days with data)
-    assert isinstance(data["snapshots"], list)
-    assert "features" in data
-    assert isinstance(data["features"], list)
-
-    if data["snapshots"]:
-        first_snap = data["snapshots"][0]
-        assert "date" in first_snap
-        assert "count" in first_snap
-        assert "features" in first_snap
-
-    # Source should be postgis when DB has data, postgis-empty when empty (no synthetic data)
-    assert data["source"] in ["postgis", "postgis-empty"]
+    assert response.status_code == 404
 
 
 def test_get_pfz_history_with_sector(client):
-    """Verify historical query filtered by sector."""
+    """Verify historical query with sector filter is gone (T3 prune → 404)."""
     response = client.get("/api/pfz/history?days=3&sector=SEC005")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["sector"] == "SEC005"
-    # With real PostGIS data, may have 0-N snapshots depending on what's in DB
-    assert isinstance(data["snapshots"], list)
-    # All features should be filtered to SEC005 if any exist
-    for feat in data["features"]:
-        if feat.get("properties", {}).get("sector"):
-            assert feat["properties"]["sector"] == "SEC005"
+    assert response.status_code == 404

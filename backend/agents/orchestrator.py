@@ -297,7 +297,7 @@ async def orchestrate_stream(
     query: str, language: str, location: dict | None = None, session_id: str | None = None
 ) -> AsyncGenerator[dict, None]:
     """
-    SSE streaming variant of orchestrate() for POST /api/chat/stream — always via graph.
+    SSE streaming variant of orchestrate() for POST /api/chat — always via graph.
 
     Yields dict events with a ``type`` field in strict order:
         status (running/done) -> map (early onMapHighlight) -> safety -> token(s) -> evidence -> done

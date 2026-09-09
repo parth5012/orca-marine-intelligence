@@ -1,15 +1,18 @@
 """
 PFZ Data Proxy Router
 
-Owner: M-C (Backend API & Platform) — GET /api/pfz/today, GET /api/pfz/history
+Owner: M-C (Backend API & Platform) — GET /api/pfz/today
 Module: backend/routers/pfz.py
 
-Serves latest and historical PFZ GeoJSON data for frontend map and agent workflows.
+Serves latest PFZ GeoJSON data for frontend map and agent workflows.
 Caches live INCOIS data in Redis (6h TTL) with automatic Copernicus Marine fallback.
+
+Wayfinder T3 (map #92): GET /api/pfz/history deleted per human grill
+decision (post-MVP slider deferred) — today endpoint only.
 """
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -119,103 +122,3 @@ async def get_today_pfz(
         },
         "features": limited_features,
     }
-
-
-@router.get("/pfz/history")
-async def get_pfz_history(
-    days: int = Query(7, ge=1, le=30, description="Number of historical days to return (1-30)"),
-    sector: Optional[str] = Query(None, description="Optional INCOIS sector code filter"),
-    limit: int = Query(500, ge=1, le=5000, description="Max number of historical features to return"),
-) -> Dict[str, Any]:
-    """
-    Return historical PFZ data for the last `days` days.
-    Queries PostGIS if connected; otherwise constructs historical snapshots from local / fallback data.
-    """
-    history_features: List[Dict[str, Any]] = []
-    is_db_result = False
-    today_date = date.today()
-    sec_up = sector.strip().upper() if sector and sector.strip() else None
-
-    # 1. Attempt PostGIS query if database is connected
-    try:
-        from sqlalchemy import func, select
-        from backend.db.models import PFZZone
-        from backend.db.session import AsyncSessionLocal
-
-        start_date = today_date - timedelta(days=days)
-        async with AsyncSessionLocal() as session:
-            stmt = select(PFZZone).where(PFZZone.valid_date >= start_date)
-            if sec_up:
-                stmt = stmt.where(
-                    (func.upper(PFZZone.sector) == sec_up) | (func.upper(PFZZone.sector_name) == sec_up)
-                )
-            stmt = stmt.order_by(PFZZone.valid_date.desc(), PFZZone.id.asc()).limit(limit)
-            res = await session.execute(stmt)
-            zones = res.scalars().all()
-
-            if zones:
-                is_db_result = True
-                for z in zones:
-                    history_features.append(
-                        {
-                            "type": "Feature",
-                            "geometry": {"type": "Point", "coordinates": [z.lon, z.lat]},
-                            "properties": {
-                                "zone_id": z.zone_id,
-                                "place": z.place,
-                                "sector": z.sector,
-                                "sector_name": z.sector_name,
-                                "dir": z.direction,
-                                "direction": z.direction,
-                                "bearing": z.bearing,
-                                "distance": z.distance_km,
-                                "depth": z.depth_range,
-                                "valid_date": str(z.valid_date),
-                                "source": z.source or "incois_textdata",
-                            },
-                        }
-                    )
-    except Exception as db_exc:
-        logger.debug("Database historical query skipped: %s", db_exc)
-
-    # 2. If no database records found, construct historical snapshots from fallback
-    snapshots: List[Dict[str, Any]] = []
-
-    if not is_db_result:
-        # No synthetic history: DB-empty returns empty with explicit warning
-        source = "postgis-empty"
-        warning = "No historical records found in database; returning empty history (no synthetic data)."
-    else:
-        source = "postgis"
-        warning = None
-
-        # Group database records into snapshots by valid_date
-        date_groups: Dict[str, List[Dict[str, Any]]] = {}
-        for feat in history_features:
-            v_date = feat.get("properties", {}).get("valid_date", str(today_date))
-            date_groups.setdefault(v_date, []).append(feat)
-
-        for v_date, feats in sorted(date_groups.items(), reverse=True):
-            snapshots.append(
-                {
-                    "date": v_date,
-                    "count": len(feats),
-                    "features": feats,
-                }
-            )
-
-    response: Dict[str, Any] = {
-        "type": "FeatureCollection",
-        "days": days,
-        "sector": sector,
-        "start_date": (today_date - timedelta(days=days)).isoformat(),
-        "end_date": today_date.isoformat(),
-        "source": source,
-        "snapshots": snapshots,
-        "features": history_features,
-        "count": len(history_features),
-    }
-    if warning:
-        response["warning"] = warning
-
-    return response
