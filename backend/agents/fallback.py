@@ -356,8 +356,21 @@ def _resolve_location(query: str, location: dict | None) -> tuple[float, float] 
         # No GPS provided -> use named port
         return port_match
 
-    # 2. No named port in query -> fallback to explicit location if present
+    # 2. No named port in query -> fallback to explicit location if present.
+    # Inland GPS (>threshold from coastline) with no named port is NOT a
+    # searchable marine location — return None so callers fire the coastal
+    # GPS clarification prompt instead of a misleading DO NOT SAIL.
     if explicit is not None:
+        try:
+            if _is_inland(float(explicit[0]), float(explicit[1])):
+                logger.info(
+                    "GPS (%s, %s) is inland with no named port; returning None for clarification",
+                    explicit[0],
+                    explicit[1],
+                )
+                return None
+        except Exception:
+            pass
         return explicit
 
     return None

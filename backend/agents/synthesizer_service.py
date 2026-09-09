@@ -394,7 +394,27 @@ def validate_synthesized_text(
     for n in expected_numbers:
         if n not in seen:
             seen.append(n)
-    missing = verify_numbers_preserved(seen, unmasked_text)
+    # Tolerant numeric check: LLM paraphrase ("8 kts" for "8.2kt", "1m" for
+    # "1.2m", "0km" for "0.0") must pass; true omission must still fail.
+    # Trivial zeros (distance 0.0 for current-location) are skipped — the LLM
+    # naturally drops them. Others pass if any number in the reply is within
+    # 0.55 (allows int-rounding, catches hallucinated values).
+    try:
+        _reply_nums = [float(n) for n in _NUMBER_RE.findall(unmasked_text or "")]
+    except Exception:
+        _reply_nums = []
+    missing: list[str] = []
+    for n in seen:
+        try:
+            _e = float(n)
+        except (TypeError, ValueError):
+            if n not in (unmasked_text or ""):
+                missing.append(n)
+            continue
+        if _e == 0.0:
+            continue
+        if not any(abs(_t - _e) <= 0.55 for _t in _reply_nums):
+            missing.append(n)
     if missing:
         raise SynthesizerAPIError(
             f"synthesizer dropped metrics {missing} (metric hallucination/omission)"

@@ -409,7 +409,12 @@ def combine_and_rank(
 
     # Generate human-readable explanation
     if best is None:
-        explanation = "No fishing zones found within search radius. Try expanding the search area or check back later."
+        explanation = (
+            "No fishing zones found within search radius. "
+            "If you're inland, share a coastal GPS (latitude, longitude) or mention a nearby "
+            "coastal place like Kochi, Munambam, Beypore, Kollam, Vizag, Veraval, or Chennai. "
+            "Otherwise try expanding the search area or check back later."
+        )
     elif all_unsafe:
         # Warning advisory recommending not to sail
         reasons = []

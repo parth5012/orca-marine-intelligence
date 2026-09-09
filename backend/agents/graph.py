@@ -155,6 +155,10 @@ try:
         _parse_intent,
         _resolve_location,
         _parse_relative_offset,
+        _is_inland,
+        _parse_explicit_location,
+        _distance_to_coastline_km,
+        _haversine_km,
     )
 except ImportError:
     # fallback for direct script runs (uvicorn main:app inside backend/)
@@ -163,6 +167,10 @@ except ImportError:
         _parse_intent,
         _resolve_location,
         _parse_relative_offset,
+        _is_inland,
+        _parse_explicit_location,
+        _distance_to_coastline_km,
+        _haversine_km,
     )
 
 # Shared formatting/degraded helpers (single source of truth: orchestrator).
@@ -420,6 +428,27 @@ async def planner_node(state: ORCAState) -> dict:
                 "planner_elapsed_ms": elapsed_ms,
                 "planner_confidence": 0.0,
             }
+        # Inland GPS with no named port: ask for coastal GPS instead of a
+        # misleading mid-land PFZ search / DO NOT SAIL.
+        _needs_clar = False
+        _clar_text = None
+        try:
+            _exp = _parse_explicit_location(location) if "_parse_explicit_location" in dir() else None
+            if user_location_det is None and _exp is not None and _is_inland(float(_exp[0]), float(_exp[1])):
+                try:
+                    _dist = _distance_to_coastline_km(float(_exp[0]), float(_exp[1]))
+                    _dist_s = f" (~{int(round(_dist))}km from the coast)"
+                except Exception:
+                    _dist_s = ""
+                _needs_clar = True
+                _clar_text = (
+                    f"You're inland{_dist_s} — ORCA tracks marine fishing zones. "
+                    "Please share a coastal GPS (latitude, longitude) or mention a nearby "
+                    "coastal place like Kochi, Munambam, Beypore, Kollam, Vizag, Veraval, or "
+                    "Chennai so I can find safe fishing zones near you."
+                )
+        except Exception:
+            pass
         return {
             "intent": intent_det,
             "user_location": user_location_det,
@@ -432,8 +461,8 @@ async def planner_node(state: ORCAState) -> dict:
             "reasoning_trace": [
                 f"planner fallback: {exc} using deterministic intent/location"
             ],
-            "needs_clarification": False,
-            "clarification_text": None,
+            "needs_clarification": _needs_clar,
+            "clarification_text": _clar_text,
             "planner_status": "fallback_deterministic",
             "planner_error": sse_fallback,
             "planner_elapsed_ms": elapsed_ms,
@@ -465,6 +494,7 @@ async def planner_node(state: ORCAState) -> dict:
 
     degraded = False
     cached_session = None
+    _xcheck_notes: list[str] = []
     if needs_clarification:
         intent = mapped_intent if mapped_intent is not None else _parse_intent(query)
         user_location = None
@@ -480,6 +510,53 @@ async def planner_node(state: ORCAState) -> dict:
                 degraded = bool(_deg)
                 if mapped_intent is None:
                     intent = _parse_intent(query)
+            else:
+                # Cross-check LLM coords vs deterministic port registry ground
+                # truth. The LLM may geocode a named port to the wrong place
+                # (e.g. Kochi, Japan) or echo stale session coords — a blind
+                # trust yields 0 zones and a misleading "No fishing zones"
+                # reply for coastal queries that do have data.
+                try:
+                    _det = _resolve_location(query, location)
+                except Exception:
+                    _det = None
+                if _det is not None:
+                    try:
+                        _drift = _haversine_km(
+                            float(user_location["lat"]), float(user_location["lon"]),
+                            float(_det[0]), float(_det[1]),
+                        )
+                    except Exception:
+                        _drift = 0.0
+                    if _drift > 50.0:
+                        user_location = {"lat": float(_det[0]), "lon": float(_det[1])}
+                        _xcheck_notes.append(
+                            f"planner cross-check: LLM coords drifted {_drift:.0f}km from "
+                            f"registry port; snapped to deterministic fix (auditable)"
+                        )
+                # Inland LLM fix with no coastal grounding → clarify instead
+                # of searching mid-land (0 zones + false DO NOT SAIL).
+                try:
+                    _inland = _is_inland(float(user_location["lat"]), float(user_location["lon"]))
+                except Exception:
+                    _inland = False
+                if _inland and _det is None:
+                    try:
+                        _dist = _distance_to_coastline_km(float(user_location["lat"]), float(user_location["lon"]))
+                        _dist_s = f" (~{int(round(_dist))}km from the coast)"
+                    except Exception:
+                        _dist_s = ""
+                    needs_clarification = True
+                    clarification_text = (
+                        f"You're inland{_dist_s} — ORCA tracks marine fishing zones. "
+                        "Please share a coastal GPS (latitude, longitude) or mention a nearby "
+                        "coastal place like Kochi, Munambam, Beypore, Kollam, Vizag, Veraval, or "
+                        "Chennai so I can find safe fishing zones near you."
+                    )
+                    user_location = None
+                    _xcheck_notes.append(
+                        "planner cross-check: LLM fix is inland; clarification requested (auditable)"
+                    )
         else:
             _, user_location_det, cached_det, _deg = await _deterministic_baseline()
             user_location = user_location_det
@@ -500,6 +577,8 @@ async def planner_node(state: ORCAState) -> dict:
         reasoning_trace: list[str] = list(getattr(plan, "reasoning_trace", []) or [])
     except Exception:
         reasoning_trace = []
+    if _xcheck_notes:
+        reasoning_trace = list(reasoning_trace) + list(_xcheck_notes)
     try:
         planner_confidence = float(getattr(plan, "confidence", 0.0) or 0.0)
     except (TypeError, ValueError):
@@ -818,6 +897,21 @@ async def decision_agent(state: ORCAState) -> dict:
         danger_field = "none" if danger_s == "safe" else danger_s
         if "unknown" in (sea_s, wind_s, danger_s):
             danger_field = "unknown" if danger_field == "none" else danger_field
+        # Veto parity: combiner all_unsafe / banned (outside EEZ, inside MPA)
+        # must force red+DANGER even when per-zone danger lookup missed
+        # (e.g. zone_id mismatch) — badge previously stayed green vs DO NOT SAIL text.
+        try:
+            _veto = bool((combined or {}).get("all_unsafe"))
+        except Exception:
+            _veto = False
+        _b = best or {}
+        try:
+            _banned = bool(_b.get("inside_mpa")) or (_b.get("inside_eez") is False)
+        except Exception:
+            _banned = False
+        if _veto or _banned:
+            badge = "red"
+            danger_field = "danger"
         safety = {"waves_m": waves_m, "wind_kts": wind_kts, "danger": danger_field, "badge": badge}
     else:
         safety = {"waves_m": None, "wind_kts": None, "danger": "unknown", "badge": "amber"}
@@ -1507,6 +1601,7 @@ async def orchestrate_stream_via_graph(
         fish = fish_results or []
         if not fish:
             return {"type": "safety", "waves_m": None, "wind_kts": None, "danger": "unknown", "badge": "amber", "provisional": True}
+        combined: dict = {}
         try:
             from backend.agents import combiner as cb  # type: ignore
 
@@ -1544,6 +1639,19 @@ async def orchestrate_stream_via_graph(
         danger_field = "none" if danger_s == "safe" else danger_s
         if "unknown" in (sea_s, wind_s, danger_s) and danger_field == "none":
             danger_field = "unknown"
+        # Veto parity (mirror decision_agent): combiner all_unsafe / banned
+        # forces red+DANGER even on zone_id lookup miss.
+        try:
+            _veto = bool((combined or {}).get("all_unsafe"))
+        except Exception:
+            _veto = False
+        try:
+            _banned = bool(best.get("inside_mpa")) or (best.get("inside_eez") is False)
+        except Exception:
+            _banned = False
+        if _veto or _banned:
+            badge = "red"
+            danger_field = "danger"
         waves_m = best.get("wave_height_m")
         wind_kts = best.get("wind_kt") if best.get("wind_kt") is not None else best.get("wind_speed_kt")
         return {"type": "safety", "waves_m": waves_m, "wind_kts": wind_kts, "danger": danger_field, "badge": badge, "provisional": True}
