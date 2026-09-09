@@ -223,18 +223,7 @@ def fetch_open_meteo_marine(
         }
     except Exception as exc:
         logger.warning("Failed to fetch live Open-Meteo marine data for (%s, %s): %s", lat, lon, exc)
-        return {
-            "wave_height_m": 1.2,
-            "current_speed_kt": 1.0,
-            "wave_period_s": 7.0,
-            "swell_wave_height_m": 0.8,
-            "swell_wave_period_s": 6.5,
-            "current_dir": "NW",
-            "wave_status": "safe",
-            "current_status": "safe",
-            "status": "safe",
-            "source": "open_meteo_fallback",
-        }
+        raise
 
 
 # Alias for backward compatibility
@@ -359,21 +348,7 @@ def fetch_open_meteo_weather(
         }
     except Exception as exc:
         logger.warning("Failed to fetch live Open-Meteo weather for (%s, %s): %s", lat, lon, exc)
-        return {
-            "temperature_c": 28.0,
-            "humidity_pct": 75.0,
-            "pressure_hpa": 1012.0,
-            "surface_pressure_hpa": 1012.0,
-            "wind_speed_kt": 10.0,
-            "wind_direction": "W",
-            "wind_deg": 270,
-            "wind_gusts_kt": 13.0,
-            "wind_gust_kt": 13.0,
-            "wind_status": "safe",
-            "cyclone_danger": False,
-            "status": "safe",
-            "source": "open_meteo_fallback",
-        }
+        raise
 
 
 def compute_departure_window_advisory(
@@ -706,25 +681,7 @@ def fetch_live_incois_pfz(
             logger.warning("Error reading %s: %s", target_file, exc)
 
     if not zones:
-        # Generate proximate marine baseline points if geojson empty
-        for i in range(count):
-            plat = center_lat + 0.05 * (i + 1)
-            plon = center_lon - 0.08 * (i + 1)
-            zones.append({
-                "zone_id": f"{sector}_Zone_{i+1}",
-                "place": f"Offshore Zone {i+1}",
-                "sector": sector,
-                "lat": plat,
-                "lon": plon,
-                "bearing": 260 + i * 5,
-                "direction": "W",
-                "distance_km": round(15.0 + i * 8.0, 1),
-                "depth_m": "35-55",
-                "sst_c": 28.5,
-                "chlorophyll_mg_m3": 1.2,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "source": "live_coastal_baseline",
-            })
+        logger.warning("No live INCOIS PFZ zones found near (%s, %s) - returning empty", center_lat, center_lon)
 
     features: list[dict[str, Any]] = []
     for z in zones:
@@ -770,19 +727,9 @@ def fetch_live_ocean_state(points: list[dict[str, Any]], timeout_s: float = HTTP
         zone_id = pt.get("zone_id", f"pt_{idx}")
         place = pt.get("place", f"Zone {idx}")
 
-        if lat is not None and lon is not None:
-            live_data = fetch_open_meteo_wave_current(float(lat), float(lon), timeout_s=timeout_s)
-        else:
-            live_data = {
-                "wave_height_m": 1.0,
-                "current_speed_kt": 0.8,
-                "wave_period_s": 7.0,
-                "current_dir": "NW",
-                "wave_status": "safe",
-                "current_status": "safe",
-                "status": "safe",
-                "source": "fallback_missing_coords",
-            }
+        if lat is None or lon is None:
+            raise ValueError("Latitude and longitude are required for ocean state fetch")
+        live_data = fetch_open_meteo_wave_current(float(lat), float(lon), timeout_s=timeout_s)
 
         st = live_data["status"]
         if st == "safe":
@@ -841,20 +788,9 @@ def fetch_live_marine_weather(points: list[dict[str, Any]], timeout_s: float = H
         zone_id = pt.get("zone_id", f"pt_{idx}")
         place = pt.get("place", f"Zone {idx}")
 
-        if lat is not None and lon is not None:
-            live_data = fetch_open_meteo_weather(float(lat), float(lon), timeout_s=timeout_s)
-        else:
-            live_data = {
-                "wind_speed_kt": 9.0,
-                "wind_direction": "W",
-                "wind_deg": 270,
-                "wind_gusts_kt": 12.0,
-                "surface_pressure_hpa": 1012.0,
-                "wind_status": "safe",
-                "cyclone_danger": False,
-                "status": "safe",
-                "source": "fallback_missing_coords",
-            }
+        if lat is None or lon is None:
+            raise ValueError("Latitude and longitude are required for weather fetch")
+        live_data = fetch_open_meteo_weather(float(lat), float(lon), timeout_s=timeout_s)
 
         st = live_data["status"]
         if st == "safe":
@@ -1140,28 +1076,45 @@ def fetch_live_geofence_boundaries(points: list[dict[str, Any]]) -> dict[str, An
         zone_id = pt.get("zone_id", f"pt_{idx}")
         place = pt.get("place", f"Zone {idx}")
 
-        inside_eez = True  # Default assume coastal fishing zone is inside territorial EEZ
+        if lat is None or lon is None:
+            raise ValueError("Latitude and longitude are required for geofence check")
+        flat = float(lat)
+        flon = float(lon)
+
+        # Check EEZ containment (fail-closed: no EEZ data -> outside)
+        inside_eez = False
+        for eez in eez_features:
+            geom = eez.get("geometry", {})
+            gtype = geom.get("type")
+            coords = geom.get("coordinates", [])
+            if gtype == "Polygon":
+                if _point_in_polygon(flon, flat, coords):
+                    inside_eez = True
+                    break
+            elif gtype == "MultiPolygon":
+                for poly in coords:
+                    if _point_in_polygon(flon, flat, poly):
+                        inside_eez = True
+                        break
+                if inside_eez:
+                    break
         inside_mpa = False
         imbl_distance_km = 45.0
 
-        if lat is not None and lon is not None:
-            flat = float(lat)
-            flon = float(lon)
-
-            # Check MPA containment
-            for mpa in mpa_features:
-                geom = mpa.get("geometry", {})
-                gtype = geom.get("type")
-                coords = geom.get("coordinates", [])
-                if gtype == "Polygon":
-                    if _point_in_polygon(flon, flat, coords):
+        # Check MPA containment
+        for mpa in mpa_features:
+            geom = mpa.get("geometry", {})
+            gtype = geom.get("type")
+            coords = geom.get("coordinates", [])
+            if gtype == "Polygon":
+                if _point_in_polygon(flon, flat, coords):
+                    inside_mpa = True
+                    break
+            elif gtype == "MultiPolygon":
+                for poly in coords:
+                    if _point_in_polygon(flon, flat, poly):
                         inside_mpa = True
                         break
-                elif gtype == "MultiPolygon":
-                    for poly in coords:
-                        if _point_in_polygon(flon, flat, poly):
-                            inside_mpa = True
-                            break
 
         if inside_mpa:
             st = "violation"

@@ -14,6 +14,7 @@ export interface TranslationResult {
   text: string;
   sourceLang: string;
   targetLang: string;
+  translated: boolean;
 }
 
 export interface DetectionResult {
@@ -76,7 +77,7 @@ export async function translate(
   targetLang: string
 ): Promise<TranslationResult> {
   if (!text || sourceLang === targetLang) {
-    return { text, sourceLang, targetLang };
+    return { text, sourceLang, targetLang, translated: false };
   }
 
   // If ULCA API key is configured
@@ -115,17 +116,19 @@ export async function translate(
         const data = await res.json();
         const translatedText =
           data?.pipelineResponse?.[0]?.output?.[0]?.target || text;
-        return { text: translatedText, sourceLang, targetLang };
+        const didTranslate = translatedText !== text;
+        return { text: translatedText, sourceLang, targetLang, translated: didTranslate };
       }
     } catch (e) {
       console.warn('Bhashini ULCA translate fallback to original text:', e);
     }
   }
 
-  // Graceful fallback to original text
+  // No silent translation: flag untranslated text explicitly
   return {
     text,
     sourceLang,
     targetLang,
+    translated: false,
   };
 }

@@ -4,7 +4,7 @@ Real MVT Vector Tile & Redis Cache Integration Tests
 Tests:
 1. Real non-empty MVT protobuf generation from PostGIS (ST_AsMVT)
 2. Redis cache hit under 'tiles:{layer}:{z}/{x}/{y}' (3600s TTL)
-3. Fallback to EMPTY_MVT_BYTES with 'X-Tile-Fallback: true' when DB/Redis down
+3. 503 with 'X-Tile-Fallback: true' when DB/Redis down (no empty-tile caching)
 4. HTTP 400 on invalid coordinates and zoom levels
 5. Layer allowlist locking to pfz | eez | mpa | recommendation
 6. Frontend URL format verification: /api/tiles/{z}/{x}/{y}.pbf?layer={layer}
@@ -131,18 +131,15 @@ def test_tile_caches_in_redis_after_db_success(client):
 
 def test_tile_fallback_when_db_returns_none(client):
     """
-    When PostGIS is down (returns None), falls back to EMPTY_MVT_BYTES
-    with 'X-Tile-Fallback: true' header.
+    When PostGIS is down (returns None), returns 503 with
+    'X-Tile-Fallback: true' header (no empty-tile caching).
     """
     with patch("backend.routers.tiles.get_mvt_tile", new=AsyncMock(return_value=None)):
         res = client.get("/api/tiles/10/716/483.pbf?layer=pfz")
 
-        assert res.status_code == 200
-        assert res.content == EMPTY_MVT_BYTES
-        assert res.content == b""
+        assert res.status_code == 503
         assert res.headers.get("x-tile-fallback") == "true"
-        assert res.headers["content-type"] == "application/x-protobuf"
-        assert res.headers["cache-control"] == "public, max-age=3600"
+        assert res.headers["cache-control"] == "no-store"
         assert res.headers["x-tile-layer"] == "pfz"
         assert res.headers["x-tile-coords"] == "10/716/483"
 
@@ -150,26 +147,24 @@ def test_tile_fallback_when_db_returns_none(client):
 def test_tile_fallback_when_db_raises_exception(client):
     """
     When PostGIS query raises a connection exception, endpoint catches it,
-    logs error, and falls back to EMPTY_MVT_BYTES + X-Tile-Fallback: true.
+    logs error, and returns 503 + X-Tile-Fallback: true.
     """
     with patch("backend.routers.tiles.get_mvt_tile", new=AsyncMock(side_effect=Exception("DB connection refused"))):
         res = client.get("/api/tiles/10/716/483.pbf?layer=mpa")
 
-        assert res.status_code == 200
-        assert res.content == EMPTY_MVT_BYTES
+        assert res.status_code == 503
         assert res.headers.get("x-tile-fallback") == "true"
 
 
 def test_tile_fallback_when_redis_and_db_both_fail(client):
     """
-    When both Redis and PostGIS fail, gracefully returns fallback tile.
+    When both Redis and PostGIS fail, returns 503 fallback (no empty tile).
     """
     with patch("backend.routers.tiles.get_tile_cache", new=AsyncMock(side_effect=Exception("Redis down"))):
         with patch("backend.routers.tiles.get_mvt_tile", new=AsyncMock(side_effect=Exception("PostGIS down"))):
             res = client.get("/api/tiles/10/716/483.pbf?layer=recommendation")
 
-            assert res.status_code == 200
-            assert res.content == EMPTY_MVT_BYTES
+            assert res.status_code == 503
             assert res.headers.get("x-tile-fallback") == "true"
             assert res.headers["x-tile-layer"] == "recommendation"
 

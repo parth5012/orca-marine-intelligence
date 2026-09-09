@@ -342,7 +342,7 @@ def _clear_geojson_cache() -> None:
 def _fallback_check_eez(lat: float, lon: float) -> tuple[bool, float | None]:
     """
     Returns (inside_eez, distance_to_boundary_km).
-    If no EEZ data available, returns (True, None) with warning handled by caller.
+    If no EEZ data available, returns (False, None) fail-closed with warning handled by caller.
     """
     multipolygons, _ = _load_cached_geojson("eez", _GEOJSON_CANDIDATES_EEZ)
     if not multipolygons:
@@ -351,7 +351,7 @@ def _fallback_check_eez(lat: float, lon: float) -> tuple[bool, float | None]:
         if multipolygons_imbl:
             multipolygons = multipolygons_imbl
         else:
-            return True, None
+            return False, None
 
     inside = False
     min_dist = float("inf")
@@ -770,18 +770,18 @@ async def check_safety_batch(
         except asyncio.TimeoutError:
             res = {
                 "is_safe": False,
-                "status": "caution",
-                "warnings": [f"Danger check timed out after {TIMEOUT_S}s — treat as caution"],
-                "inside_eez": True,
+                "status": "danger",
+                "warnings": [f"Danger check timed out after {TIMEOUT_S}s — treat as danger (fail-closed)"],
+                "inside_eez": False,
                 "inside_mpa": False,
                 "mpa_name": None,
             }
         except Exception as exc:
             res = {
                 "is_safe": False,
-                "status": "caution",
-                "warnings": [f"Danger check error: {exc}"],
-                "inside_eez": True,
+                "status": "danger",
+                "warnings": [f"Danger check error: {exc} — treat as danger (fail-closed)"],
+                "inside_eez": False,
                 "inside_mpa": False,
                 "mpa_name": None,
             }

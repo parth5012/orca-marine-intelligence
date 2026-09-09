@@ -148,7 +148,7 @@ Historical PFZ data for slider (post-MVP).
 }
 ```
 
-**Response `200` (DB-Empty Fallback):**
+**Response `200` (DB-Empty — no synthetic data):**
 
 ```json
 {
@@ -157,17 +157,11 @@ Historical PFZ data for slider (post-MVP).
   "sector": null,
   "start_date": "2026-08-31",
   "end_date": "2026-09-07",
-  "source": "synthetic-duplicate",
-  "warning": "No historical records found in database; returning synthetic duplicate snapshots.",
-  "snapshots": [
-    {
-      "date": "2026-09-07",
-      "count": 483,
-      "features": [...]
-    }
-  ],
-  "features": [...],
-  "count": 500
+  "source": "postgis-empty",
+  "warning": "No historical records found in database; returning empty history (no synthetic data).",
+  "snapshots": [],
+  "features": [],
+  "count": 0
 }
 ```
 

@@ -421,17 +421,15 @@ class TestVoiceTranscriptionEndpoint:
         assert resp.status_code == 422
 
     def test_voice_offline_mock_fallback(self, client):
-        """Verify fallback transcription when GROQ_API_KEY not configured."""
+        """Verify 503 (no mock transcription) when GROQ_API_KEY not configured."""
         with patch.dict(os.environ, {}, clear=True):
             files = {"file": ("malayalam_sample.wav", b"RIFFFAKEWAVDATA", "audio/wav")}
             data = {"language": "ml", "session_id": "voice-sess-1"}
             resp = client.post("/api/chat/voice", files=files, data=data)
 
-            assert resp.status_code == 200
+            assert resp.status_code == 503
             body = resp.json()
-            assert body["session_id"] == "voice-sess-1"
-            assert "malayalam_sample.wav" in body["transcription"]
-            assert body.get("mock") is True
+            assert "transcription" in body.get("detail", "").lower() or "unavailable" in body.get("detail", "").lower()
 
     def test_voice_groq_whisper_success(self, client):
         """Verify Groq Whisper transcription API called when GROQ_API_KEY present."""
@@ -462,7 +460,7 @@ class TestVoiceTranscriptionEndpoint:
                 assert call_kwargs["data"]["language"] == "ml"
 
     def test_voice_groq_whisper_error_falls_back_gracefully(self, client):
-        """Verify Groq API failure falls back to informative mock transcription without crashing."""
+        """Verify Groq API failure returns 503 without fake transcription."""
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.text = "Internal Groq Error"
@@ -472,12 +470,9 @@ class TestVoiceTranscriptionEndpoint:
                 files = {"audio": ("query.wav", b"AUDIOBYTES", "audio/wav")}
                 resp = client.post("/api/chat/voice", files=files)
 
-                assert resp.status_code == 200
+                assert resp.status_code == 503
                 body = resp.json()
-                assert "transcription" in body
-                assert "query.wav" in body["transcription"]
-                assert "session_id" in body
-                assert body.get("mock") is True
+                assert "unavailable" in body.get("detail", "").lower()
 
     def test_voice_oversized_file_returns_413(self, client):
         """Verify audio file exceeding 25MB returns 413 HTTP status."""

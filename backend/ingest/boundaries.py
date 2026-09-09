@@ -534,8 +534,8 @@ def check_point_in_eez(lat: float, lon: float) -> Tuple[bool, float]:
     """
     eez_features = get_eez_boundaries()
     if not eez_features:
-        # Fallback if no EEZ boundary loaded: assume coastal India is inside
-        return True, 50.0
+        # No EEZ data: fail-closed as unknown (never assume inside)
+        return False, float("inf")
 
     inside = False
     for feat in eez_features:
