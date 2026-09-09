@@ -41,8 +41,13 @@ import {
   BASEMAP_OPTIONS,
   getBasemapTileUrl,
   getDefaultBasemapStyle,
+  getBasemapAttribution,
+  getBasemapMaxNativeZoom,
+  getBasemapMaxZoom,
   CARTO_ATTRIBUTION,
   OSM_ATTRIBUTION,
+  ESRI_OCEAN_ATTRIBUTION,
+  ESRI_DARK_ATTRIBUTION,
 } from './carto';
 
 export interface MapLayerToggles {
@@ -369,15 +374,16 @@ export default function MapInner({
         {/* Base Tile Layer: CartoDB Dark Matter / Voyager for marine styling */}
         <TileLayer
           key={tileError ? 'osm-fallback' : basemapStyle}
-          attribution={tileError || basemapStyle === 'osm' ? OSM_ATTRIBUTION : CARTO_ATTRIBUTION}
+          attribution={getBasemapAttribution(tileError ? 'osm' : basemapStyle)}
           url={getBasemapTileUrl(tileError ? 'osm' : basemapStyle)}
-          maxZoom={18}
+          maxZoom={getBasemapMaxZoom(tileError ? 'osm' : basemapStyle)}
+          maxNativeZoom={getBasemapMaxNativeZoom(tileError ? 'osm' : basemapStyle)}
           eventHandlers={{
             tileerror: () => {
               tileErrorsRef.current += 1;
               if (tileErrorsRef.current >= 3 && !tileError && basemapStyle !== 'osm') {
                 console.warn(
-                  `CARTO tiles reported persistent failures (${tileErrorsRef.current}) on style "${basemapStyle}". Falling back to OpenStreetMap.`
+                  `Basemap tiles reported persistent failures (${tileErrorsRef.current}) on style "${basemapStyle}". Falling back to OpenStreetMap.`
                 );
                 setTileError(true);
               }

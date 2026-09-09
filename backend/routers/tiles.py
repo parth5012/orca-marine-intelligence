@@ -38,7 +38,20 @@ async def get_tiles_config() -> Response:
         or os.getenv("NEXT_PUBLIC_CARTO_API_KEY")
         or ""
     ).strip()
-    has_carto_key = bool(raw_key and not raw_key.lower().startswith("your_"))
+    normalized = raw_key.lower()
+    # Keyless CARTO CDN works when blank; treat common placeholders as unconfigured.
+    has_carto_key = bool(
+        raw_key
+        and normalized not in ("", "undefined", "null", "none")
+        and normalized != "your_carto_api_key_here"
+        and not normalized.startswith("your_")
+    )
+
+    def _carto_url(template: str) -> str:
+        # Only append ?api_key when a real key is configured; otherwise keyless CDN.
+        if has_carto_key:
+            return f"{template}?api_key={raw_key}"
+        return template
 
     config = {
         "status": "success",
@@ -49,7 +62,7 @@ async def get_tiles_config() -> Response:
                 "id": "carto_dark",
                 "name": "CARTO Dark Matter",
                 "type": "raster",
-                "url": "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png",
+                "url": _carto_url("https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png"),
                 "subdomains": ["a", "b", "c", "d"],
                 "attribution": '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                 "min_zoom": 0,
@@ -60,7 +73,7 @@ async def get_tiles_config() -> Response:
                 "id": "carto_voyager",
                 "name": "CARTO Voyager",
                 "type": "raster",
-                "url": "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+                "url": _carto_url("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"),
                 "subdomains": ["a", "b", "c", "d"],
                 "attribution": '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                 "min_zoom": 0,
@@ -71,12 +84,34 @@ async def get_tiles_config() -> Response:
                 "id": "carto_positron",
                 "name": "CARTO Positron",
                 "type": "raster",
-                "url": "https://{s}.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png",
+                "url": _carto_url("https://{s}.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png"),
                 "subdomains": ["a", "b", "c", "d"],
                 "attribution": '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                 "min_zoom": 0,
                 "max_zoom": 19,
                 "theme": "high_contrast",
+            },
+            "esri_ocean": {
+                "id": "esri_ocean",
+                "name": "Esri Ocean Basemap",
+                "type": "raster",
+                "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean/MapServer/tile/{z}/{y}/{x}",
+                "attribution": '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Sources: GEBCO, NOAA, CHS, OSU, UNH, CSUMB, National Geographic, DeLorme, NAVTEQ, and Esri',
+                "min_zoom": 0,
+                "max_native_zoom": 13,
+                "max_zoom": 18,
+                "theme": "ocean",
+            },
+            "esri_dark": {
+                "id": "esri_dark",
+                "name": "Esri Dark Gray",
+                "type": "raster",
+                "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+                "attribution": '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Esri, DeLorme, NAVTEQ',
+                "min_zoom": 0,
+                "max_native_zoom": 16,
+                "max_zoom": 18,
+                "theme": "night_tactical",
             },
             "osm": {
                 "id": "osm",
