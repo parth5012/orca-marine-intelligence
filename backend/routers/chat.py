@@ -123,7 +123,8 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                 await save_turn(full_reply)
 
     headers = {
-        "Cache-Control": "no-cache",
+        # no-store: session-specific stream, must never sit in an intermediary cache
+        "Cache-Control": "no-store",
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }

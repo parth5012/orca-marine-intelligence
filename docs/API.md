@@ -10,7 +10,7 @@
 
 **Content Types:** All endpoints accept and return `application/json` unless noted otherwise (`GET /api/tiles/*.pbf` returns `application/x-protobuf`, `POST /api/chat` returns `text/event-stream`).
 
-**Fetch strategy (T5 rule, map #92):** reads that must survive backend-down go through Next.js proxies with local fallback (PFZ + chat pattern); live-only telemetry (weather/current, geofence/status) calls the backend directly. Direct calls rely on `ALLOWED_ORIGINS`; proxies sidestep CORS.
+**Fetch strategy (T5 rule, map #92):** reads that must survive backend-down go through Next.js proxies; only PFZ has a local-file fallback (`data/pfz-today.geojson`). The chat proxies are transport-only — `POST /api/chat` returns 504 when the backend is unavailable. Live-only telemetry (weather/current, geofence/status) calls the backend directly. Direct calls rely on `ALLOWED_ORIGINS`; proxies sidestep CORS.
 
 ---
 
@@ -196,7 +196,7 @@ Accept: text/event-stream
 **Response Headers:**
 ```
 Content-Type: text/event-stream
-Cache-Control: no-cache
+Cache-Control: no-store
 Connection: keep-alive
 X-Accel-Buffering: no
 ```
@@ -220,7 +220,7 @@ data: <JSON>
 | `done` | Stream complete | `{"type":"done","language":"en","confidence":0.87,"session_id":"abc-123"}` | Close stream, persist `session_id` |
 | `error` | Agent error | `{"type":"error","agent":"orchestrator","message":"error description"}` | Show error state |
 
-`safety.badge` is `green` (wave <1.5m, wind <15kt), `amber` (1.5-2.5m / 15-25kt), `red` (>2.5m / >30kt forbidden).
+`safety.badge` follows `backend/routers/weather.py`: `green` requires wave <1.5m and wind <15kt; `amber` covers wave 1.5-2.5m or wind 15-25kt (boundary values 1.5m, 2.5m, 15kt, 25kt are `amber`); `red` covers wave >2.5m or wind >25kt (including 26-30kt).
 
 **Frontend:** `useSSEChat.ts:273` posts direct to the backend, falling back to the `POST /api/chat` Next.js proxy (`:298`) when the direct fetch fails (HTTPS deployments).
 
@@ -407,17 +407,15 @@ Active Marine Protected Areas, sovereign EEZ zones, and IMBL buffer thresholds w
 
 ## Error Response Format
 
-All error responses follow this format:
+FastAPI `HTTPException` responses (422, 413, 503 — e.g. `POST /api/chat/voice`) use FastAPI's native envelope; there is no custom exception handler:
 
 ```json
 {
-  "error": "descriptive_error_code",
-  "message": "Human-readable description of what went wrong",
-  "details": {}
+  "detail": "Audio file required as 'file' or 'audio' in multipart form data"
 }
 ```
 
-Codes: `invalid_request`, `validation_error`, `upstream_unavailable`, `db_unavailable`, `agent_timeout`.
+In-stream agent failures use the SSE error event instead (`{"type":"error","agent":"orchestrator","message":"..."}`); they do not close the HTTP response with an error status.
 
 ---
 
