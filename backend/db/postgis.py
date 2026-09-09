@@ -99,7 +99,64 @@ async def upsert_pfz_features(features: List[Dict[str, Any]], valid_date: Option
         )
         result = await session.execute(stmt)
         await session.commit()
-        return len(rows)
+    return len(rows)
+
+
+# ---------------------------------------------------------------------------
+# PostGIS Fast-Check Circuit Breaker & Health State (Ticket #76)
+# ---------------------------------------------------------------------------
+_db_degraded: bool = False
+_db_last_failure_time: float = 0.0
+_CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 30.0
+
+
+def is_db_degraded() -> bool:
+    """Return True if PostGIS database is currently in degraded state."""
+    global _db_degraded, _db_last_failure_time
+    if _db_degraded:
+        import time
+
+        if time.time() - _db_last_failure_time > _CIRCUIT_BREAKER_COOLDOWN_SECONDS:
+            _db_degraded = False
+            return False
+        return True
+    return False
+
+
+def set_db_degraded(degraded: bool = True) -> None:
+    """Set PostGIS database degraded state."""
+    global _db_degraded, _db_last_failure_time
+    _db_degraded = degraded
+    if degraded:
+        import time
+
+        _db_last_failure_time = time.time()
+    else:
+        _db_last_failure_time = 0.0
+
+
+def reset_circuit_breaker() -> None:
+    """Reset PostGIS circuit breaker to healthy state."""
+    set_db_degraded(False)
+
+
+async def ping_postgis(timeout: float = 0.5) -> bool:
+    """Fast health check for PostGIS database connection with timeout."""
+    import asyncio
+
+    try:
+        async def _check():
+            async with AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+                return True
+
+        res = await asyncio.wait_for(_check(), timeout=timeout)
+        set_db_degraded(False)
+        return bool(res)
+    except Exception as exc:
+        set_db_degraded(True)
+        logger.warning("ping_postgis: database unreachable or timed out (%s)", exc)
+        return False
 
 
 async def find_pfz_near(

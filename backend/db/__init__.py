@@ -20,6 +20,12 @@ from backend.db.session import (
     get_db,
     init_db,
 )
+from backend.db.postgis import (
+    ping_postgis,
+    is_db_degraded,
+    set_db_degraded,
+    reset_circuit_breaker,
+)
 
 __all__ = [
     "Base",
@@ -34,4 +40,8 @@ __all__ = [
     "AsyncSessionLocal",
     "get_db",
     "init_db",
+    "ping_postgis",
+    "is_db_degraded",
+    "set_db_degraded",
+    "reset_circuit_breaker",
 ]

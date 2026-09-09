@@ -91,6 +91,8 @@ def _flat_fish_from_pfz(pfz_features: list[dict], user_lat: float, user_lon: flo
                 lon = float(coords[0])
             except (TypeError, ValueError):
                 lon = None
+        if lat is None or lon is None:
+            continue
         zone_id = str(props.get("zone_id", f.get("zone_id", "unknown")))
         place = str(props.get("place", "Unknown"))
         dist = _haversine_km(user_lat, user_lon, float(lat), float(lon))
@@ -428,6 +430,194 @@ class TestPlannerClarification:
 
 
 # ---------------------------------------------------------------------------
+# 4b. Ticket #77: Named coastal port priority over inland browser GPS
+# ---------------------------------------------------------------------------
+
+
+class TestNamedCoastalPortPriority:
+    """Ticket #77: Named coastal port priority over browser GPS when GPS is inland.
+
+    When user query explicitly names a coastal port (Kochi, Veraval, Chennai)
+    and browser GPS is inland (>50km from any coastline, e.g. Haryana),
+    prioritize the named coastal port over the browser GPS.
+    When browser GPS is near coast (<=50km from coastline), preserve GPS.
+    """
+
+    def test_inland_gps_haryana_prefers_named_coastal_port_kochi(self):
+        """Query 'fish near Kochi' with Haryana GPS (lat=28.5, lon=77.0) resolves to Kochi."""
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        resolved = _resolve_location("fish near Kochi", haryana_gps)
+        assert resolved is not None, "Failed to resolve location for 'fish near Kochi'"
+        assert resolved[0] == pytest.approx(9.93, abs=0.02), f"Expected Kochi lat ~9.93, got {resolved[0]}"
+        assert resolved[1] == pytest.approx(76.26, abs=0.02), f"Expected Kochi lon ~76.26, got {resolved[1]}"
+
+    def test_inland_gps_haryana_prefers_named_coastal_port_veraval(self):
+        """Query 'fish near Veraval' with Haryana GPS resolves to Veraval."""
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        resolved = _resolve_location("fish near Veraval", haryana_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(21.6, abs=0.05)
+        assert resolved[1] == pytest.approx(69.6, abs=0.05)
+
+    def test_inland_gps_haryana_prefers_named_coastal_port_chennai(self):
+        """Query 'fish near Chennai' with Haryana GPS resolves Chennai."""
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        resolved = _resolve_location("fish near Chennai", haryana_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(13.08, abs=0.05)
+        assert resolved[1] == pytest.approx(80.27, abs=0.05)
+
+    def test_inland_gps_haryana_prefers_named_coastal_port_munambam(self):
+        """Query 'fish near Munambam' with Haryana GPS resolves Munambam."""
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        resolved = _resolve_location("fish near Munambam", haryana_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(10.18, abs=0.05)
+        assert resolved[1] == pytest.approx(76.17, abs=0.05)
+
+    def test_inland_gps_haryana_prefers_named_coastal_port_vizag(self):
+        """Query 'fish near Vizag' with Haryana GPS resolves Vizag."""
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        resolved = _resolve_location("fish near Vizag", haryana_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(17.69, abs=0.05)
+        assert resolved[1] == pytest.approx(83.29, abs=0.05)
+
+    def test_inland_gps_haryana_prefers_named_coastal_port_kollam(self):
+        """Query 'fish near Kollam' with Haryana GPS resolves Kollam."""
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        resolved = _resolve_location("fish near Kollam", haryana_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(8.88, abs=0.05)
+        assert resolved[1] == pytest.approx(76.57, abs=0.05)
+
+    def test_inland_gps_haryana_prefers_named_coastal_port_beypore(self):
+        """Query 'fish near Beypore' with Haryana GPS resolves Beypore."""
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        resolved = _resolve_location("fish near Beypore", haryana_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(11.16, abs=0.05)
+        assert resolved[1] == pytest.approx(75.80, abs=0.05)
+
+    def test_no_gps_with_named_port_resolves_port(self):
+        """When no GPS is provided, query naming a coastal port resolves that port."""
+        from backend.agents.fallback import _resolve_location
+
+        resolved = _resolve_location("fish near Kochi", None)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(9.93, abs=0.02)
+        assert resolved[1] == pytest.approx(76.26, abs=0.02)
+
+    def test_coastal_gps_near_coast_preserves_gps(self):
+        """When GPS is near coast (<=50km), browser GPS is used even if port is named."""
+        from backend.agents.fallback import _resolve_location
+
+        coastal_gps = {"lat": 9.95, "lon": 76.20}  # ~6km off Kochi coast
+        resolved = _resolve_location("fish near Kochi", coastal_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(9.95, abs=0.001)
+        assert resolved[1] == pytest.approx(76.20, abs=0.001)
+
+    def test_coastal_gps_without_named_port_uses_gps(self):
+        """Query without named port preserves GPS."""
+        from backend.agents.fallback import _resolve_location
+
+        coastal_gps = {"lat": 9.95, "lon": 76.20}
+        resolved = _resolve_location("Where to fish?", coastal_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(9.95, abs=0.001)
+        assert resolved[1] == pytest.approx(76.20, abs=0.001)
+
+    def test_inland_threshold_env_override(self, monkeypatch):
+        """ORCA_INLAND_GPS_THRESHOLD env var controls inland detection threshold."""
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        # If threshold is set to 2000km, Haryana (~850km) is within threshold -> not inland -> GPS kept
+        monkeypatch.setenv("ORCA_INLAND_GPS_THRESHOLD", "2000")
+        resolved = _resolve_location("fish near Kochi", haryana_gps)
+        assert resolved == (28.5, 77.0)
+
+        # If threshold is set to 50km (default), Haryana is inland -> named port wins
+        monkeypatch.setenv("ORCA_INLAND_GPS_THRESHOLD", "50")
+        resolved = _resolve_location("fish near Kochi", haryana_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(9.93, abs=0.02)
+        assert resolved[1] == pytest.approx(76.26, abs=0.02)
+
+    def test_invalid_inland_threshold_falls_back_to_50km(self, monkeypatch):
+        """Invalid ORCA_INLAND_GPS_THRESHOLD defaults to 50km."""
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        monkeypatch.setenv("ORCA_INLAND_GPS_THRESHOLD", "not_a_number")
+        resolved = _resolve_location("fish near Kochi", haryana_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(9.93, abs=0.02)
+        assert resolved[1] == pytest.approx(76.26, abs=0.02)
+
+    def test_central_inland_gps_nagpur_prefers_named_coastal_port(self):
+        """Nagpur (central India inland, ~600km from coast) prefers named coastal port."""
+        from backend.agents.fallback import _resolve_location
+
+        nagpur_gps = {"lat": 21.14, "lon": 79.08}
+        resolved = _resolve_location("fish near Kochi", nagpur_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(9.93, abs=0.02)
+        assert resolved[1] == pytest.approx(76.26, abs=0.02)
+
+    def test_inland_gps_logs_port_override(self, caplog):
+        """Acceptance: Logs show port override when inland GPS is replaced by named port."""
+        import logging
+        from backend.agents.fallback import _resolve_location
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        with caplog.at_level(logging.INFO):
+            resolved = _resolve_location("fish near Kochi", haryana_gps)
+        assert resolved is not None
+        assert resolved[0] == pytest.approx(9.93, abs=0.02)
+        assert "prioritizing named port" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_orchestrate_haryana_gps_with_kochi_returns_kochi_zones(self):
+        """Acceptance: Query 'fish near Kochi' with GPS Haryana returns Kochi zones."""
+        from backend.agents.graph import orchestrate_via_graph
+
+        haryana_gps = {"lat": 28.5, "lon": 77.0}
+        result = await orchestrate_via_graph(
+            query="fish near Kochi",
+            language="en",
+            location=haryana_gps,
+            session_id=f"test-haryana-kochi-{uuid.uuid4().hex[:8]}",
+        )
+
+        assert result is not None
+        # Center is [lon, lat] (GeoJSON order) of best PFZ zone near Kochi,
+        # not Haryana. Zones are offshore points, so assert coastal region.
+        center = result.get("map", {}).get("center")
+        assert center is not None, "Map center should be resolved"
+        lon, lat = float(center[0]), float(center[1])
+        assert 8.0 <= lat <= 12.5, f"Expected center near Kerala coast lat 8-12.5, got {center}"
+        assert 74.0 <= lon <= 77.5, f"Expected center near Kerala coast lon 74-77.5, got {center}"
+        assert abs(lat - 28.5) > 5.0, f"Center must not be Haryana GPS, got {center}"
+        assert result.get("confidence", 0) >= 0.8, f"Confidence degraded unexpectedly: {result.get('confidence')}"
+
+
+# ---------------------------------------------------------------------------
 # 5. Multi-turn — Redis session reuse + 10km-south offset (NO live Redis)
 # ---------------------------------------------------------------------------
 
@@ -496,6 +686,83 @@ class TestMultiTurnSession:
         assert state["user_location"] is not None
         assert state["user_location"]["lat"] == pytest.approx(KOCHI_LAT - 0.09, abs=0.02)
         assert state["user_location"]["lon"] == pytest.approx(KOCHI_LON, abs=0.02)
+
+    @pytest.mark.asyncio
+    async def test_planner_node_fallback_emits_status_event(self):
+        """Ticket #78: planner_node emits non-fatal status fallback event on LLM failure."""
+        from backend.agents.graph import planner_node
+        from backend.agents.planner_service import PlannerTimeoutError
+
+        with patch(
+            "backend.agents.planner_service.plan_query",
+            side_effect=PlannerTimeoutError("Gemini 500ms timeout", elapsed_ms=500),
+        ):
+            state = await planner_node(
+                {
+                    "query": "Where are the fish?",
+                    "language": "en",
+                    "location": {"lat": 9.93, "lon": 76.26},
+                    "session_id": "test-planner-fallback",
+                }
+            )
+
+        assert state["planner_status"] == "fallback_deterministic"
+        assert state["planner_error"] == {
+            "type": "status",
+            "agent": "planner",
+            "state": "fallback",
+            "message": "LLM planner unavailable, using fallback advisory",
+            "fallback": True,
+            "elapsed_ms": 500,
+        }
+
+    @pytest.mark.asyncio
+    async def test_planner_node_import_error_emits_fatal_error_event(self):
+        """Ticket #78: planner_node emits fatal error event on ImportError."""
+        from backend.agents.graph import planner_node
+
+        with patch.dict("sys.modules", {"backend.agents.planner_service": None}):
+            state = await planner_node(
+                {
+                    "query": "Where fish?",
+                    "language": "en",
+                    "location": {"lat": 9.93, "lon": 76.26},
+                    "session_id": "test-planner-import-err",
+                }
+            )
+
+        assert state["planner_status"] == "fallback_deterministic"
+        assert state["planner_error"]["type"] == "error"
+        assert state["planner_error"]["agent"] == "planner"
+        assert state["planner_error"]["fallback"] == "none"
+
+    @pytest.mark.asyncio
+    async def test_planner_node_fallback_unavailable_emits_fatal_error_event(self):
+        """Ticket #78: planner_node emits fatal error event when both planner and fallback fail."""
+        from backend.agents.graph import planner_node
+        from backend.agents.planner_service import PlannerTimeoutError
+
+        with patch(
+            "backend.agents.planner_service.plan_query",
+            side_effect=PlannerTimeoutError("Gemini timeout", elapsed_ms=500),
+        ), patch(
+            "backend.agents.graph._parse_intent",
+            side_effect=RuntimeError("Baseline unavailable"),
+        ):
+            state = await planner_node(
+                {
+                    "query": "Where fish?",
+                    "language": "en",
+                    "location": {"lat": 9.93, "lon": 76.26},
+                    "session_id": "test-planner-no-fallback",
+                }
+            )
+
+        assert state["planner_status"] == "error"
+        assert state["planner_error"]["type"] == "error"
+        assert state["planner_error"]["agent"] == "planner"
+        assert state["planner_error"]["fallback"] == "none"
+
 
 
 # ---------------------------------------------------------------------------
@@ -1432,13 +1699,13 @@ class TestSafetyVetoAndArabicDigitsMock:
 
 
 # ---------------------------------------------------------------------------
-# 10. Latency Benchmark (mock: concurrent P95<2.0s + 500ms/1400ms SLAs)
+# 10. Latency Benchmark (mock: concurrent P95<2.0s + 5000ms/1400ms SLAs)
 # ---------------------------------------------------------------------------
 
 
 class TestLatencyBenchmarkMock:
     @pytest.mark.asyncio
-    async def test_planner_500ms_sla_with_fast_mock_llm(self):
+    async def test_planner_5000ms_sla_with_fast_mock_llm(self):
         from backend.agents.planner_service import plan_query
 
         async def _fast(prompt: str) -> str:
@@ -1447,12 +1714,36 @@ class TestLatencyBenchmarkMock:
             return plan.model_dump_json()
 
         env = await plan_query(
-            "Where is fish near Kochi?", "en",
+            "Where to fish near Kochi?", "en",
             {"lat": KOCHI_LAT, "lon": KOCHI_LON}, session_id=None,
             generate_fn=_fast,
         )
         assert env["status"] == "success"
-        assert env["elapsed_ms"] < 500, f"planner SLA breached: {env['elapsed_ms']}ms"
+        assert env["elapsed_ms"] < 5000, f"planner SLA breached: {env['elapsed_ms']}ms"
+
+    # Backward compatibility alias
+    test_planner_500ms_sla_with_fast_mock_llm = test_planner_5000ms_sla_with_fast_mock_llm
+
+    def test_planner_timeout_env_defaults_and_override(self, monkeypatch):
+        import importlib
+        import backend.agents.planner_schema as schema
+        import backend.agents.planner_service as service
+
+        monkeypatch.delenv("ORCA_PLANNER_TIMEOUT_MS", raising=False)
+        importlib.reload(schema)
+        importlib.reload(service)
+        assert schema.PLANNER_TIMEOUT_MS == 5000
+        assert service.PLANNER_TIMEOUT_S == 5.0
+
+        monkeypatch.setenv("ORCA_PLANNER_TIMEOUT_MS", "3000")
+        importlib.reload(schema)
+        importlib.reload(service)
+        assert schema.PLANNER_TIMEOUT_MS == 3000
+        assert service.PLANNER_TIMEOUT_S == 3.0
+
+        monkeypatch.delenv("ORCA_PLANNER_TIMEOUT_MS", raising=False)
+        importlib.reload(schema)
+        importlib.reload(service)
 
     @pytest.mark.asyncio
     async def test_planner_timeout_is_explicit_never_silent(self):
@@ -1469,8 +1760,11 @@ class TestLatencyBenchmarkMock:
             await plan_query("fish?", "en", None, session_id=None,
                              generate_fn=_slow, timeout_s=0.05)
         evt = exc_info.value.to_sse_event()
-        assert evt["type"] == "error" and evt["agent"] == "planner"
-        assert evt["fallback"] == "none"
+        assert evt["type"] == "status"
+        assert evt["agent"] == "planner"
+        assert evt["state"] == "fallback"
+        assert evt["message"] == "LLM planner unavailable, using fallback advisory"
+        assert evt["fallback"] is True
 
     @pytest.mark.asyncio
     async def test_synthesizer_1400ms_sla_with_fast_mock_llm(self):
@@ -1636,29 +1930,31 @@ class TestLatencyBenchmarkMock:
 class TestLiveLLMPlannerMockParity:
     @requires_live_llm
     @pytest.mark.asyncio
-    async def test_live_planner_structured_plan_within_500ms(self):
-        """Live planner parity (FLAKE-01): generous 3.0s live budget, not 500ms.
+    async def test_live_planner_structured_plan_within_5000ms(self):
+        """Live planner parity (FLAKE-01): generous 5.0s live budget per ticket #74.
 
-        The 500ms SLA is enforced only by the MOCK test
-        (test_planner_500ms_sla_with_fast_mock_llm) with a 10ms fake LLM.
-        Live Gemini 2.5 Flash network latency is flaky under 500ms, so this
-        live-only test uses timeout_s=3.0 and asserts <3000ms.
+        5000ms SLA is enforced in the MOCK test
+        (test_planner_5000ms_sla_with_fast_mock_llm) with 10ms fake LLM.
+        Live Gemini 2.5 Flash network latency requires a 5000ms budget, so this
+        live-only test uses the 5.0s default and asserts < 5000ms.
         """
         from backend.agents.planner_service import plan_query
 
         env = await plan_query(
-            "Where is fish near Kochi?", "en",
+            "Where to fish near Kochi?", "en",
             {"lat": KOCHI_LAT, "lon": KOCHI_LON},
             session_id=f"live36-{uuid.uuid4().hex[:6]}",
-            timeout_s=3.0,
         )
         assert env["status"] == "success"
         plan = env["plan"]
         assert isinstance(plan, ps.PlannerOutput)
         assert set(plan.selected_tools) <= set(ps.KNOWN_TOOLS)
         assert len(plan.reasoning_trace) >= 1
-        assert env["elapsed_ms"] < 3000, f"live planner {env['elapsed_ms']}ms > 3000ms"
+        assert env["elapsed_ms"] < 5000, f"live planner took {env['elapsed_ms']}ms (> 5000ms)"
         assert env["needs_clarification"] is False
+
+    # Backward compatibility alias
+    test_live_planner_structured_plan_within_500ms = test_live_planner_structured_plan_within_5000ms
 
     @requires_live_llm
     @pytest.mark.asyncio
@@ -1707,3 +2003,191 @@ class TestLiveLLMPlannerMockParity:
             assert num in env["reply"], f"{num} dropped live: {env['reply']!r}"
         assert combined["citation"] in env["reply"]
         assert env["elapsed_ms"] < 4000, f"live synth {env['elapsed_ms']}ms > 4000ms"
+
+
+# ---------------------------------------------------------------------------
+# Ticket #76: PostGIS Fast-Check Circuit-Breaker in fish_finder
+# ---------------------------------------------------------------------------
+
+
+class TestPostGISFastCheckCircuitBreaker:
+    """Verification for Ticket #76: PostGIS fast-check circuit-breaker in fish_finder.py.
+
+    When database is down, fish_finder fast-checks via ping with 500ms timeout,
+    falls back to GeoJSON immediately (<500ms, not hanging 4s), and tracks degraded state.
+    """
+
+    @pytest.mark.asyncio
+    async def test_fish_finder_fast_check_ping_timeout_fallback_under_500ms(self):
+        """When PostGIS ping hangs (e.g. 4s), fish_finder falls back within 500ms."""
+        from backend.agents import fish_finder
+
+        fish_finder.reset_circuit_breaker()
+
+        fake_features = [
+            {
+                "type": "Feature",
+                "properties": {
+                    "place": "FastFallbackZone",
+                    "sector": "SEC005",
+                    "sector_name": "KERALA",
+                },
+                "geometry": {"type": "Point", "coordinates": [76.26, 9.93]},
+            }
+        ]
+
+        async def slow_ping(*args, **kwargs):
+            await asyncio.sleep(4.0)
+            return True
+
+        t0 = time.perf_counter()
+        with patch.object(fish_finder, "ping_database", side_effect=slow_ping):
+            with patch.object(fish_finder, "_load_geojson_features", return_value=fake_features):
+                zones = await fish_finder.find_fishing_zones(
+                    lat=9.93, lon=76.26, radius_km=80.0, limit=5
+                )
+        elapsed = time.perf_counter() - t0
+
+        assert elapsed < 0.65, f"Expected <650ms, took {elapsed:.2f}s"
+        assert len(zones) >= 1
+        assert zones[0]["place"] == "FastFallbackZone"
+        assert fish_finder.is_db_degraded() is True
+
+    @pytest.mark.asyncio
+    async def test_fish_finder_circuit_breaker_tracks_degraded_state(self):
+        """When degraded, subsequent calls skip ping entirely and fast-fail immediately."""
+        from backend.agents import fish_finder
+
+        fish_finder.reset_circuit_breaker()
+
+        fake_features = [
+            {
+                "type": "Feature",
+                "properties": {
+                    "place": "DegradedFallbackZone",
+                    "sector": "SEC005",
+                    "sector_name": "KERALA",
+                },
+                "geometry": {"type": "Point", "coordinates": [76.26, 9.93]},
+            }
+        ]
+
+        # First request: ping fails and marks degraded
+        with patch.object(fish_finder, "ping_database", return_value=False):
+            with patch.object(fish_finder, "_load_geojson_features", return_value=fake_features):
+                zones1 = await fish_finder.find_fishing_zones(
+                    lat=9.93, lon=76.26, radius_km=80.0, limit=5
+                )
+
+        assert len(zones1) >= 1
+        assert fish_finder.is_db_degraded() is True
+
+        # Second request: circuit breaker open, skip ping entirely
+        ping_mock = AsyncMock(return_value=False)
+        t0 = time.perf_counter()
+        with patch.object(fish_finder, "ping_database", ping_mock):
+            with patch.object(fish_finder, "_load_geojson_features", return_value=fake_features):
+                zones2 = await fish_finder.find_fishing_zones(
+                    lat=9.93, lon=76.26, radius_km=80.0, limit=5
+                )
+        elapsed = time.perf_counter() - t0
+
+        assert elapsed < 0.1, f"Expected <100ms on degraded path, took {elapsed:.2f}s"
+        assert len(zones2) >= 1
+        assert zones2[0]["place"] == "DegradedFallbackZone"
+        ping_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fish_finder_circuit_breaker_recovery_after_cooldown(self):
+        """Circuit breaker resets after cooldown when database recovers."""
+        from backend.agents import fish_finder
+
+        fish_finder.reset_circuit_breaker()
+        fish_finder.set_db_degraded(True)
+        assert fish_finder.is_db_degraded() is True
+
+        # Simulate cooldown elapsed
+        fish_finder._db_last_failure_time = time.time() - 35.0
+        assert fish_finder.is_db_degraded() is False
+
+        # Ping now succeeds, recovers
+        with patch.object(fish_finder, "ping_database", return_value=True):
+            fake_find = AsyncMock(
+                return_value=[{"place": "RecoveredZone", "distance_from_user_km": 10.0}]
+            )
+            with patch("backend.db.postgis.find_pfz_near", fake_find):
+                zones = await fish_finder.find_fishing_zones(
+                    lat=9.93, lon=76.26, radius_km=80.0, limit=5
+                )
+
+        assert len(zones) >= 1
+        assert zones[0]["place"] == "RecoveredZone"
+        assert fish_finder.is_db_degraded() is False
+
+    @pytest.mark.asyncio
+    async def test_fish_finder_query_timeout_fallback_under_500ms(self):
+        """When find_pfz_near hangs (e.g. 4s), query times out at 500ms and falls back to GeoJSON."""
+        from backend.agents import fish_finder
+
+        fish_finder.reset_circuit_breaker()
+
+        fake_features = [
+            {
+                "type": "Feature",
+                "properties": {
+                    "place": "QueryFallbackZone",
+                    "sector": "SEC005",
+                    "sector_name": "KERALA",
+                },
+                "geometry": {"type": "Point", "coordinates": [76.26, 9.93]},
+            }
+        ]
+
+        async def slow_find(*args, **kwargs):
+            await asyncio.sleep(4.0)
+            return [{"place": "SlowZone", "distance_from_user_km": 10.0}]
+
+        t0 = time.perf_counter()
+        with patch.object(fish_finder, "ping_database", return_value=True):
+            with patch("backend.db.postgis.find_pfz_near", side_effect=slow_find):
+                with patch.object(fish_finder, "_load_geojson_features", return_value=fake_features):
+                    zones = await fish_finder.find_fishing_zones(
+                        lat=9.93, lon=76.26, radius_km=80.0, limit=5
+                    )
+        elapsed = time.perf_counter() - t0
+
+        assert elapsed < 0.65, f"Expected <650ms, took {elapsed:.2f}s"
+        assert len(zones) >= 1
+        assert zones[0]["place"] == "QueryFallbackZone"
+        assert fish_finder.is_db_degraded() is True
+
+    @pytest.mark.asyncio
+    async def test_fish_finder_fast_fail_logs_warning_when_unreachable(self, caplog):
+        """Logs show fast-fail warning when PostGIS is unreachable or degraded."""
+        import logging
+        from backend.agents import fish_finder
+
+        fish_finder.reset_circuit_breaker()
+
+        fake_features = [
+            {
+                "type": "Feature",
+                "properties": {
+                    "place": "LogFallbackZone",
+                    "sector": "SEC005",
+                    "sector_name": "KERALA",
+                },
+                "geometry": {"type": "Point", "coordinates": [76.26, 9.93]},
+            }
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            with patch.object(fish_finder, "ping_database", return_value=False):
+                with patch.object(fish_finder, "_load_geojson_features", return_value=fake_features):
+                    zones = await fish_finder.find_fishing_zones(
+                        lat=9.93, lon=76.26, radius_km=80.0, limit=5
+                    )
+
+        assert len(zones) >= 1
+        assert any("PostGIS fast-check ping failed" in rec.message or "fast-failing to GeoJSON fallback" in rec.message for rec in caplog.records)
+

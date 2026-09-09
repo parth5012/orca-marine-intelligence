@@ -7,7 +7,7 @@ Ticket: M-A: Implement Gemini 2.5 Flash Structured Planner Service (#31)
 Map: #30 (Destination: full dynamic LLM reasoning — Planner + Synthesizer)
 
 Dynamic LLM query planner powered by Gemini 2.5 Flash (``gemini-2.5-flash``)
-under a strict <500ms SLA budget. Produces structured ``PlannerOutput``
+under a strict <5000ms SLA budget. Produces structured ``PlannerOutput``
 (pydantic, see ``backend/agents/planner_schema.py``): detected language,
 geocoded target location, decomposed intents, confidence, auditable
 reasoning trace, and the minimal selective tool subset.
@@ -21,7 +21,7 @@ Scope (ticket #31 — root node, standalone; wiring into graph.py is #32):
      check_weather, check_geofence] + line-by-line reasoning_trace.
   4. Clarification gating: confidence < 0.6 or coords unresolved ->
      needs_clarification + vernacular GPS prompt.
-  5. STRICT INVARIANT (No Silent Fallback): on LLM timeout (>500ms) or API
+  5. STRICT INVARIANT (No Silent Fallback): on LLM timeout (>5000ms) or API
      failure this module RAISES (PlannerTimeoutError / PlannerAPIError)
      with an explicit SSE error event payload. It NEVER calls legacy
       regex heuristics (fallback._parse_intent / _resolve_location)
@@ -90,7 +90,7 @@ __all__ = [
 # Constants
 # ---------------------------------------------------------------------------
 
-PLANNER_TIMEOUT_S: float = PLANNER_TIMEOUT_MS / 1000.0  # 0.5s SLA budget
+PLANNER_TIMEOUT_S: float = PLANNER_TIMEOUT_MS / 1000.0  # derived from validated constant
 
 _HISTORY_LIMIT = 3  # multi-turn context: last 3 turns from Redis session cache
 
@@ -157,7 +157,11 @@ _REDIS_BUDGET_S = 0.05
 # Transport timeout (ms) for the google-genai HTTP client. asyncio.wait_for
 # cancels the *waiter* but a to_thread worker may linger until the socket
 # itself times out — a short transport timeout bounds that linger.
-_TRANSPORT_TIMEOUT_MS = PLANNER_TIMEOUT_MS
+# Floor at 10000ms: the Gemini API rejects manually-set deadlines below 10s
+# (400 INVALID_ARGUMENT), so the socket deadline must stay >=10s even when
+# the logical SLA budget (ORCA_PLANNER_TIMEOUT_MS) is shorter. wait_for still
+# enforces the logical budget client-side.
+_TRANSPORT_TIMEOUT_MS = max(int(PLANNER_TIMEOUT_MS), 10000)
 
 # Module-level default client cache (finding 2.2): one Client per process,
 # reused across plan_query calls instead of per-invocation construction.
@@ -181,7 +185,7 @@ class PlannerError(Exception):
 
 
 class PlannerTimeoutError(PlannerError):
-    """LLM exceeded the 500ms SLA budget (or the underlying call timed out)."""
+    """LLM exceeded the planner SLA budget (or the underlying call timed out)."""
 
 
 class PlannerAPIError(PlannerError):
@@ -193,19 +197,14 @@ class PlannerConfigError(PlannerError):
 
 
 def planner_error_to_sse_event(exc: BaseException, *, elapsed_ms: int = 0) -> dict[str, Any]:
-    """Render an explicit SSE ``error`` event for a planner failure.
-
-    ``fallback`` is always ``"none"`` — legacy regex heuristics must NOT
-    mask this failure (ticket invariant 2). Callers stream this event
-    verbatim and stop the planning branch.
-    """
-    ms = int(getattr(exc, "elapsed_ms", elapsed_ms) or elapsed_ms or 0)
+    """Render explicit SSE `status` fallback event for planner failure."""
+    ms = int(getattr(exc, "elapsed_ms", elapsed_ms) or elapsed_ms or PLANNER_TIMEOUT_MS)
     return {
-        "type": "error",
+        "type": "status",
         "agent": "planner",
-        "message": f"planner failed: {exc}",
-        "fallback": "none",
-        "retry_hint": "retry plan_query once within 500ms budget; do NOT fall back to regex heuristics",
+        "state": "fallback",
+        "message": "LLM planner unavailable, using fallback advisory",
+        "fallback": True,
         "elapsed_ms": ms,
     }
 
@@ -672,7 +671,7 @@ async def plan_query(
         location: optional explicit GPS {"lat","lon"} (ground truth).
         session_id: optional session for last-3-turns Redis context.
         client: optional injected ``google-genai`` client (tests/di).
-        timeout_s: SLA budget, default 0.5s. Exceeding it RAISES
+        timeout_s: SLA budget, default 5.0s. Exceeding it RAISES
             PlannerTimeoutError — never degrades to regex heuristics.
         generate_fn: optional async ``(prompt) -> json_text`` override for
             tests (bypasses the SDK but keeps timeout + validation paths).
@@ -694,7 +693,7 @@ async def plan_query(
     recent_turns = await get_recent_turns(session_id)
     prompt = build_planner_prompt(query, language, location, recent_turns)
 
-    # Total SLA budget is timeout_s (default 0.5s) INCLUDING the Redis
+    # Total SLA budget is timeout_s (default 5.0s) INCLUDING the Redis
     # context fetch above. Whatever Redis consumed is subtracted so the
     # LLM call only gets the remainder (floored at 50ms), keeping the
     # end-to-end total within budget instead of 50ms + 500ms.

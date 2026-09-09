@@ -366,35 +366,56 @@ async def planner_node(state: ORCAState) -> dict:
             "planner_error": {
                 "type": "error",
                 "agent": "planner",
-                "message": f"planner failed: {exc}",
+                "message": f"planner_service unavailable ({exc})",
                 "fallback": "none",
-                "elapsed_ms": 0,
             },
-            "planner_elapsed_ms": 0,
+            "planner_elapsed_ms": 500,
             "planner_confidence": 0.0,
         }
 
     try:
         envelope = await plan_query(query, language, location, session_id)
     except Exception as exc:
-        # No Silent Fallback: keep deterministic result BUT surface the
-        # explicit SSE error event for #34 streaming (fallback:none).
-        try:
-            from backend.agents.planner_service import (  # type: ignore
-                planner_error_to_sse_event,
-            )
-
-            sse_err = planner_error_to_sse_event(exc)
-        except Exception:
-            sse_err = {
-                "type": "error",
-                "agent": "planner",
-                "message": f"planner failed: {exc}",
-                "fallback": "none",
-                "elapsed_ms": int(getattr(exc, "elapsed_ms", 0) or 0),
-            }
+        # Non-fatal planner fallback SSE event (type: status, state: fallback)
+        elapsed_ms = int(getattr(exc, "elapsed_ms", 0) or 500)
+        sse_fallback = {
+            "type": "status",
+            "agent": "planner",
+            "state": "fallback",
+            "message": "LLM planner unavailable, using fallback advisory",
+            "fallback": True,
+            "elapsed_ms": elapsed_ms,
+        }
         logger.warning("graph.planner: LLM planner failed, deterministic fallback (%s)", exc)
-        intent_det, user_location_det, cached_session, degraded = await _deterministic_baseline()
+        try:
+            intent_det, user_location_det, cached_session, degraded = await _deterministic_baseline()
+        except Exception as fb_exc:
+            logger.error("graph.planner: deterministic fallback failed (%s)", fb_exc)
+            return {
+                "intent": None,
+                "user_location": location,
+                "cached_session": None,
+                "session_id": session_id,
+                "degraded": True,
+                "query": query,
+                "language": language,
+                "selected_tools": None,
+                "reasoning_trace": [
+                    f"planner fatal: {exc}; fallback failed: {fb_exc}"
+                ],
+                "needs_clarification": False,
+                "clarification_text": None,
+                "planner_status": "error",
+                "planner_error": {
+                    "type": "error",
+                    "agent": "planner",
+                    "message": f"planner failed and fallback unavailable ({exc})",
+                    "fallback": "none",
+                    "elapsed_ms": elapsed_ms,
+                },
+                "planner_elapsed_ms": elapsed_ms,
+                "planner_confidence": 0.0,
+            }
         return {
             "intent": intent_det,
             "user_location": user_location_det,
@@ -405,13 +426,13 @@ async def planner_node(state: ORCAState) -> dict:
             "language": language,
             "selected_tools": None,
             "reasoning_trace": [
-                f"planner fallback: {exc} — using deterministic intent/location"
+                f"planner fallback: {exc} using deterministic intent/location"
             ],
             "needs_clarification": False,
             "clarification_text": None,
             "planner_status": "fallback_deterministic",
-            "planner_error": sse_err,
-            "planner_elapsed_ms": int(getattr(exc, "elapsed_ms", 0) or 0),
+            "planner_error": sse_fallback,
+            "planner_elapsed_ms": elapsed_ms,
             "planner_confidence": 0.0,
         }
 
@@ -1334,9 +1355,13 @@ async def orchestrate_stream_via_graph(
     # Graceful degrade: very old langgraph without astream_events — replay
     # the non-streaming result as ordered SSE (map/safety/tokens/evidence).
     if not hasattr(graph, "astream_events"):
-        logger.warning("graph.stream: astream_events unavailable — degrading to chunked replay")
+        logger.warning("graph.stream: astream_events unavailable, degrading to chunked replay")
         _fb = await orchestrate_via_graph(query, language, location, session_id)
-        yield {"type": "status", "agent": "planner", "state": "done", "elapsed_ms": 0}
+        _fb_perr = _fb.get("planner_error")
+        if isinstance(_fb_perr, dict) and (_fb_perr.get("state") == "fallback" or _fb_perr.get("type") == "error"):
+            yield dict(_fb_perr)
+        else:
+            yield {"type": "status", "agent": "planner", "state": "done", "elapsed_ms": 0}
         _fb_map = _fb.get("map") if isinstance(_fb.get("map"), dict) else {}
         yield {
             "type": "map",
@@ -1358,8 +1383,8 @@ async def orchestrate_stream_via_graph(
             _iter_tokens = None  # type: ignore
         _fb_reply = str(_fb.get("reply") or "")
         if _iter_tokens is not None:
-            # iter_reply_tokens is already delimiter-safe (fix 4: trailing
-            # space on all but last) — yield verbatim.
+            # iter_reply_tokens is delimiter-safe (fix 4: trailing
+            # space on all but last) -> yield verbatim.
             _fb_chunks = _iter_tokens(_fb_reply)
             for _ch in _fb_chunks:
                 yield {"type": "token", "text": _ch}
@@ -1370,9 +1395,6 @@ async def orchestrate_stream_via_graph(
                 _suf2 = " " if _i2 < len(_raw_fb2) - 1 else ""
                 yield {"type": "token", "text": _ch2 + _suf2}
                 await asyncio.sleep(0)
-        _fb_perr = _fb.get("planner_error")
-        if isinstance(_fb_perr, dict) and _fb_perr:
-            yield dict(_fb_perr)
         _fb_serr = _fb.get("synthesis_error") if "synthesis_error" in _fb else None
         if isinstance(_fb_serr, dict) and _fb_serr:
             yield dict(_fb_serr)
@@ -1637,9 +1659,8 @@ async def orchestrate_stream_via_graph(
                 }
 
             if name == "planner":
-                # CRIT-01: surface explicit planner_error (fallback:none) — never
-                # silent. Yield before done status; pipeline still continues
-                # (offline must still work — surfacing, not blocking).
+                # CRIT-01: surface explicit planner_error (fallback)
+                # Yield fallback status; pipeline continues
                 try:
                     _perr = output.get("planner_error") if isinstance(output, dict) else None
                 except Exception:
@@ -1652,8 +1673,9 @@ async def orchestrate_stream_via_graph(
                         user_location = {"lat": float(ul["lat"]), "lon": float(ul["lon"])}
                     except (TypeError, ValueError):
                         user_location = None
-                if not map_emitted:
-                    yield {"type": "status", "agent": name, "state": "done", "elapsed_ms": elapsed_ms}
+                    if not map_emitted:
+                        if not _perr:
+                            yield {"type": "status", "agent": name, "state": "done", "elapsed_ms": elapsed_ms}
 
             elif name == "fish_finder":
                 fr = output.get("fish_results") if isinstance(output, dict) else None
