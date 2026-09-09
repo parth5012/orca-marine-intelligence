@@ -34,3 +34,4 @@ groq>=0.9.0
 
 # Monitoring
 structlog==24.4.0
+python-multipart
