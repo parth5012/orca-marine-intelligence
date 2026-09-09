@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, field_validator
 # Planner contract constants (draft - human to confirm)
 # ---------------------------------------------------------------------------
 
-PLANNER_MODEL = "gemini-2.5-flash"  # primary; <5000ms budget per ticket #74
+PLANNER_MODEL = os.getenv("ORCA_PLANNER_MODEL", "llama-3.3-70b-versatile")  # Groq primary; <3000ms SLA budget
 
 
 def _parse_timeout_ms(raw: str | None, default: int = 5000) -> int:
@@ -64,7 +64,7 @@ COASTAL_PORTS_REGISTRY: dict[str, list[float]] = {
     "Chennai": [13.08, 80.27],
 }
 
-PLANNER_SYSTEM_PROMPT: str = """You are ORCA's dynamic query planner (model: gemini-2.5-flash, budget <5000ms).
+PLANNER_SYSTEM_PROMPT: str = """You are ORCA's dynamic query planner (model: Groq llama-3.3-70b-versatile, budget <5000ms).
 Pick the MINIMAL subset of specialist tools needed for the user query. Be deterministic and auditable.
 
 Available tools (exact names):

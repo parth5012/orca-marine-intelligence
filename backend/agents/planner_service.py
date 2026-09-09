@@ -538,37 +538,98 @@ def build_clarification_text(language: str = "en") -> str:
 
 
 def _resolve_api_key() -> str | None:
-    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    return os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+
+class _HttpxGroqClient:
+    """Lightweight Groq API client using httpx with OpenAI-compatible endpoint."""
+
+    def __init__(self, api_key: str, timeout_s: float = 5.0):
+        self.api_key = api_key
+        self.timeout_s = timeout_s
+
+    def generate_content(self, model: str, contents: str) -> Any:
+        import httpx
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        data = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        PLANNER_SYSTEM_PROMPT
+                        + "\nYou must return valid JSON strictly conforming to the PlannerOutput schema."
+                    ),
+                },
+                {"role": "user", "content": contents},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.0,
+            "max_tokens": 512,
+        }
+        with httpx.Client(timeout=self.timeout_s) as client:
+            resp = client.post(url, headers=headers, json=data)
+            resp.raise_for_status()
+            res_json = resp.json()
+            content_str = res_json["choices"][0]["message"]["content"]
+
+            class _Resp:
+                def __init__(self, text: str):
+                    self.text = text
+
+            return _Resp(content_str)
 
 
 def _get_or_create_client(explicit: Any | None = None) -> Any:
-    """Return the explicit client, else the cached module-level default.
+    """Return explicit client, else cached module-level default.
 
-    The default is created once per process with a short transport
-    timeout (``_TRANSPORT_TIMEOUT_MS``) so a thread blocked in a sync
-    SDK call aborts at the socket even if ``asyncio.wait_for`` has
-    already cancelled the waiter (thread itself may linger briefly).
+    Prefers Groq via groq SDK or httpx fallback.
+    Falls back to Gemini if only GEMINI_API_KEY/GOOGLE_API_KEY is configured.
     """
     global _DEFAULT_CLIENT
     if explicit is not None:
         return explicit
     if _DEFAULT_CLIENT is not None:
         return _DEFAULT_CLIENT
+
+    # 1. Try Groq if GROQ_API_KEY is set or default
+    groq_key = os.getenv("GROQ_API_KEY")
+    if groq_key:
+        try:
+            from groq import Groq
+            _DEFAULT_CLIENT = Groq(api_key=groq_key, timeout=_TRANSPORT_TIMEOUT_MS / 1000.0)
+            return _DEFAULT_CLIENT
+        except ImportError:
+            _DEFAULT_CLIENT = _HttpxGroqClient(api_key=groq_key, timeout_s=_TRANSPORT_TIMEOUT_MS / 1000.0)
+            return _DEFAULT_CLIENT
+
     api_key = _resolve_api_key()
     if not api_key:
         raise PlannerConfigError(
-            "no GEMINI_API_KEY/GOOGLE_API_KEY set and no client injected"
+            "no GROQ_API_KEY or GEMINI_API_KEY/GOOGLE_API_KEY set and no client injected"
         )
+    if api_key.startswith("gsk_"):
+        try:
+            from groq import Groq
+            _DEFAULT_CLIENT = Groq(api_key=api_key, timeout=_TRANSPORT_TIMEOUT_MS / 1000.0)
+            return _DEFAULT_CLIENT
+        except ImportError:
+            _DEFAULT_CLIENT = _HttpxGroqClient(api_key=api_key, timeout_s=_TRANSPORT_TIMEOUT_MS / 1000.0)
+            return _DEFAULT_CLIENT
+
     try:
-        from google import genai as _genai  # lazy: optional dep at runtime
+        from google import genai as _genai
     except ImportError as exc:
-        raise PlannerConfigError(f"google-genai SDK not installed: {exc}") from exc
+        raise PlannerConfigError(f"Neither groq nor google-genai SDK available: {exc}") from exc
     try:
         _DEFAULT_CLIENT = _genai.Client(
             api_key=api_key, http_options={"timeout": int(_TRANSPORT_TIMEOUT_MS)}
         )
     except TypeError:
-        # Older SDKs without http_options support.
         _DEFAULT_CLIENT = _genai.Client(api_key=api_key)
     return _DEFAULT_CLIENT
 
@@ -606,41 +667,73 @@ def _build_planner_config(max_output_tokens: int = 512) -> Any | None:
 
 def _generate_structured_json(
     prompt: str,
-    client: Any | None,
+    client: Any | None = None,
     *,
     max_output_tokens: int = 512,
 ) -> str:
-    """Synchronous Gemini structured-JSON call. Returns raw JSON text.
-
-    Uses the ``google-genai`` SDK (``response_schema=PlannerOutput`` +
-    ``response_mime_type="application/json"``) so the model itself is
-    constrained to the contract. Raises PlannerConfigError/PlannerAPIError.
-    Runs in a worker thread via the caller (see plan_query). The module-
-    level client cache is reused when ``client`` is None.
-
-    Thread-leak note: the caller wraps this in ``asyncio.wait_for``; on
-    timeout the waiter is cancelled but the worker thread may linger
-    until the socket times out — bounded by the short transport timeout
-    set at client creation (``_TRANSPORT_TIMEOUT_MS``).
-    """
+    """Synchronous structured-JSON call (Groq primary, Gemini fallback). Returns raw JSON text."""
     client = _get_or_create_client(client)
 
-    config = _build_planner_config(max_output_tokens=max_output_tokens)
-
-    try:
-        if config is not None:
-            response = client.models.generate_content(
-                model=PLANNER_MODEL, contents=prompt, config=config
+    # 1. Groq SDK client (has chat.completions)
+    if hasattr(client, "chat") and hasattr(client.chat, "completions"):
+        try:
+            completion = client.chat.completions.create(
+                model=PLANNER_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            PLANNER_SYSTEM_PROMPT
+                            + "\nYou must return pure, valid JSON strictly conforming to the PlannerOutput schema."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.0,
+                max_tokens=max_output_tokens,
             )
-        else:  # pragma: no cover — test-stub path
-            response = client.models.generate_content(model=PLANNER_MODEL, contents=prompt)
-    except Exception as exc:
-        raise PlannerAPIError(f"gemini {PLANNER_MODEL} call failed: {exc}") from exc
+            text = completion.choices[0].message.content
+            if not text or not str(text).strip():
+                raise PlannerAPIError(f"groq {PLANNER_MODEL} returned empty response")
+            return str(text)
+        except Exception as exc:
+            raise PlannerAPIError(f"groq {PLANNER_MODEL} call failed: {exc}") from exc
 
-    text = getattr(response, "text", None)
-    if not text or not str(text).strip():
-        raise PlannerAPIError(f"gemini {PLANNER_MODEL} returned empty response")
-    return str(text)
+    # 2. _HttpxGroqClient or custom mock with generate_content
+    if hasattr(client, "generate_content"):
+        try:
+            resp = client.generate_content(model=PLANNER_MODEL, contents=prompt)
+            text = getattr(resp, "text", str(resp))
+            if not text or not str(text).strip():
+                raise PlannerAPIError(f"planner {PLANNER_MODEL} returned empty response")
+            return str(text)
+        except Exception as exc:
+            raise PlannerAPIError(f"planner {PLANNER_MODEL} call failed: {exc}") from exc
+
+    # 3. Gemini SDK fallback (has models)
+    if hasattr(client, "models"):
+        config = _build_planner_config(max_output_tokens=max_output_tokens)
+        try:
+            if config is not None:
+                response = client.models.generate_content(
+                    model=PLANNER_MODEL, contents=prompt, config=config
+                )
+            else:
+                response = client.models.generate_content(model=PLANNER_MODEL, contents=prompt)
+        except Exception as exc:
+            raise PlannerAPIError(f"gemini {PLANNER_MODEL} call failed: {exc}") from exc
+
+        text = getattr(response, "text", None)
+        if not text or not str(text).strip():
+            raise PlannerAPIError(f"gemini {PLANNER_MODEL} returned empty response")
+        return str(text)
+
+    # 4. Injected callable or generic object in tests
+    if callable(client):
+        return client(prompt)
+
+    raise PlannerAPIError(f"Unsupported planner client type: {type(client)}")
 
 
 # ---------------------------------------------------------------------------
