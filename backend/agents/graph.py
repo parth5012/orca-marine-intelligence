@@ -125,6 +125,10 @@ TIMEOUT_S = 10.0
 # ---------------------------------------------------------------------------
 # Lazy imports — keep graph importable even if langgraph not installed
 # ---------------------------------------------------------------------------
+# Upstream warning: installed langgraph's cache base imports JsonPlusSerializer
+# without allowed_objects; ORCA instantiates no cache, so suppress it here.
+import warnings
+warnings.filterwarnings("ignore", message=".*allowed_objects.*")
 
 try:
     from langgraph.graph import StateGraph, START, END
