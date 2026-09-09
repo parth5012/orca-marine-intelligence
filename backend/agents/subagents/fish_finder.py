@@ -35,7 +35,11 @@ logger = logging.getLogger(__name__)
 _db_degraded: bool = False
 _db_last_failure_time: float = 0.0
 _CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 30.0
-_DB_PING_TIMEOUT_SECONDS: float = 0.5
+# Fast-check budget: 2s ping / 5s query. The old 500ms fired spuriously
+# under pool warmup/load (empty TimeoutError), forcing GeoJSON fallback
+# and PostGIS geofence misses even with a healthy database.
+_DB_PING_TIMEOUT_SECONDS: float = 2.0
+_DB_QUERY_TIMEOUT_SECONDS: float = 5.0
 
 
 def is_db_degraded() -> bool:
@@ -367,7 +371,8 @@ async def find_fishing_zones(
 
         if not db_alive:
             logger.warning(
-                "fish_finder: PostGIS fast-check ping failed within 500ms, fast-failing to GeoJSON fallback"
+                "fish_finder: PostGIS fast-check ping failed within %.0fs, fast-failing to GeoJSON fallback",
+                _DB_PING_TIMEOUT_SECONDS,
             )
             set_db_degraded(True)
             use_fallback = True
@@ -381,7 +386,7 @@ async def find_fishing_zones(
                 if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
                     zones: list[dict] = await asyncio.wait_for(
                         res,
-                        timeout=_DB_PING_TIMEOUT_SECONDS,
+                        timeout=_DB_QUERY_TIMEOUT_SECONDS,
                     )
                 else:
                     zones = res
@@ -400,7 +405,7 @@ async def find_fishing_zones(
                 use_fallback = True
                 set_db_degraded(True)
                 logger.warning(
-                    "fish_finder: PostGIS find_pfz_near failed at radius %.1fkm (%s), falling back to GeoJSON",
+                    "fish_finder: PostGIS find_pfz_near failed at radius %.1fkm (%r), falling back to GeoJSON",
                     radius,
                     exc,
                 )

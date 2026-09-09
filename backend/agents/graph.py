@@ -181,6 +181,7 @@ try:
         _degraded_sea,
         _degraded_weather,
         _degraded_danger,
+        _unknown_danger,
         _chunk_text,
         TIMEOUT_S as ORCH_TIMEOUT,
         DEFAULT_CONFIDENCE,
@@ -194,6 +195,7 @@ except ImportError:
         _degraded_sea,
         _degraded_weather,
         _degraded_danger,
+        _unknown_danger,
         _chunk_text,
         TIMEOUT_S as ORCH_TIMEOUT,
         DEFAULT_CONFIDENCE,
@@ -664,7 +666,7 @@ async def fish_finder(state: ORCAState) -> dict:
         logger.info("graph.fish_finder: %d zones for %.2f,%.2f", len(res), lat, lon)
         return {"fish_results": res}
     except asyncio.TimeoutError:
-        logger.warning("graph.fish_finder: timeout 10s")
+        logger.warning("graph.fish_finder: timeout %.0fs", TIMEOUT_S)
         return {"fish_results": [], "degraded": True}
     except Exception as exc:
         logger.warning("graph.fish_finder: %s", exc)
@@ -684,6 +686,14 @@ async def sea_checker(state: ORCAState) -> dict:
     if _needs_clarification_short_circuit(state):
         return {"sea_results": []}
     if not _is_tool_selected(state, TOOL_OCEAN):
+        # Deselected: shaped unknown (not []) so the combiner degrades to
+        # caution instead of misreading absence as data.
+        _fish = state.get("fish_results") or []
+        if _fish:
+            try:
+                return {"sea_results": _degraded_sea(_fish)}
+            except Exception:
+                pass
         return {"sea_results": []}
     fish = state.get("fish_results") or []
     if not fish:
@@ -694,7 +704,7 @@ async def sea_checker(state: ORCAState) -> dict:
         res = await asyncio.wait_for(sc.check_sea_conditions(fish), timeout=TIMEOUT_S)
         return {"sea_results": res if isinstance(res, list) else _degraded_sea(fish)}
     except asyncio.TimeoutError:
-        logger.warning("graph.sea_checker: timeout 10s")
+        logger.warning("graph.sea_checker: timeout %.0fs", TIMEOUT_S)
         return {"sea_results": _degraded_sea(fish), "degraded": True}
     except Exception as exc:
         logger.warning("graph.sea_checker: %s", exc)
@@ -714,6 +724,12 @@ async def weather_agent(state: ORCAState) -> dict:
     if _needs_clarification_short_circuit(state):
         return {"weather_results": []}
     if not _is_tool_selected(state, TOOL_WEATHER):
+        _fish = state.get("fish_results") or []
+        if _fish:
+            try:
+                return {"weather_results": _degraded_weather(_fish)}
+            except Exception:
+                pass
         return {"weather_results": []}
     fish = state.get("fish_results") or []
     if not fish:
@@ -724,7 +740,7 @@ async def weather_agent(state: ORCAState) -> dict:
         res = await asyncio.wait_for(wa.check_weather(fish), timeout=TIMEOUT_S)
         return {"weather_results": res if isinstance(res, list) else _degraded_weather(fish)}
     except asyncio.TimeoutError:
-        logger.warning("graph.weather_agent: timeout 10s")
+        logger.warning("graph.weather_agent: timeout %.0fs", TIMEOUT_S)
         return {"weather_results": _degraded_weather(fish), "degraded": True}
     except Exception as exc:
         logger.warning("graph.weather_agent: %s", exc)
@@ -746,6 +762,13 @@ async def danger_agent(state: ORCAState) -> dict:
     if _needs_clarification_short_circuit(state):
         return {"danger_results": []}
     if not _is_tool_selected(state, TOOL_GEOFENCE):
+        # Deselected geofence: unknown (inside_eez=None), never a ban.
+        _fish = state.get("fish_results") or []
+        if _fish:
+            try:
+                return {"danger_results": _unknown_danger(_fish)}
+            except Exception:
+                pass
         return {"danger_results": []}
     fish = state.get("fish_results") or []
     if not fish:
@@ -774,7 +797,7 @@ async def danger_agent(state: ORCAState) -> dict:
                 res.append(r)
         return {"danger_results": res if isinstance(res, list) else _degraded_danger(fish)}
     except asyncio.TimeoutError:
-        logger.warning("graph.danger_agent: timeout 10s")
+        logger.warning("graph.danger_agent: timeout %.0fs", TIMEOUT_S)
         return {"danger_results": _degraded_danger(fish), "degraded": True}
     except Exception as exc:
         logger.warning("graph.danger_agent: %s", exc)
@@ -871,11 +894,12 @@ async def decision_agent(state: ORCAState) -> dict:
         center = [float(user_location["lon"]), float(user_location["lat"])] if user_location else None
         route = []
 
-    # safety badge reasoning — autonomous decision per sub-agent outputs
+    # safety badge reasoning — autonomous decision per sub-agent outputs.
+    # Empty result lists mean "unknown" (skipped/failed checks), never safe.
     if best:
-        sea_s = "safe"
-        wind_s = "safe"
-        danger_s = "safe"
+        sea_s = "safe" if sea else "unknown"
+        wind_s = "safe" if weather else "unknown"
+        danger_s = "safe" if danger else "unknown"
         best_id = str(best.get("zone_id")) if best.get("zone_id") else None
         for r in sea:
             if str(r.get("zone_id")) == best_id:
@@ -1619,8 +1643,15 @@ async def orchestrate_stream_via_graph(
         if not isinstance(best, dict):
             return {"type": "safety", "waves_m": None, "wind_kts": None, "danger": "unknown", "badge": "amber", "provisional": True}
         # Mirror decision_agent badge reasoning (duplicated for earliness).
+        # Empty lists mean "unknown", never safe.
         best_id = str(best.get("zone_id")) if best.get("zone_id") else None
         sea_s = wind_s = danger_s = "safe"
+        if not sea_results:
+            sea_s = "unknown"
+        if not weather_results:
+            wind_s = "unknown"
+        if not danger_results:
+            danger_s = "unknown"
         for r in sea_results or []:
             if isinstance(r, dict) and str(r.get("zone_id")) == best_id:
                 sea_s = str(r.get("status") or r.get("wave_status") or "safe").lower()

@@ -323,7 +323,9 @@ def combine_and_rank(
             if len(danger_results) == len(fish_results):
                 danger_entry = danger_results[idx]
         if danger_entry is None:
-            inside_eez = False
+            # Unknown (skipped/failed check) is NOT a ban — fail-open to
+            # caution. A missing geofence must never read as "outside EEZ".
+            inside_eez = None
             inside_mpa = False
         else:
             # Defaults: inside_eez True, inside_mpa False if missing
@@ -337,7 +339,15 @@ def combine_and_rank(
             inside_eez = bool(inside_eez_raw) if inside_eez_raw is not None else False
             inside_mpa = bool(inside_mpa_raw) if inside_mpa_raw is not None else False
 
-        not_banned = 0.0 if (inside_mpa or not inside_eez) else 1.0
+        # Explicit ban (inside MPA / outside EEZ) scores 0. Unknown geofence
+        # scores 0.5 (uncertainty, never a ban) so skipped checks degrade to
+        # caution instead of a false "outside Indian EEZ" DO NOT SAIL.
+        if inside_mpa or inside_eez is False:
+            not_banned = 0.0
+        elif inside_eez is None:
+            not_banned = 0.5
+        else:
+            not_banned = 1.0
 
         score = closest * 0.4 + safe_sea * 0.3 + wind_ok * 0.2 + not_banned * 0.1
         score = round(float(score), 4)
@@ -424,7 +434,7 @@ def combine_and_rank(
         if bd.get("wind_exceeded") and best.get("wind_kt") is not None:
             reasons.append(f"wind {best['wind_kt']}kt exceeds safe limit 15kt")
         if bd.get("not_banned") == 0.0:
-            if not best.get("inside_eez"):
+            if best.get("inside_eez") is False:
                 reasons.append("outside Indian EEZ")
             if best.get("inside_mpa"):
                 reasons.append("inside Marine Protected Area (fishing banned)")
@@ -451,6 +461,10 @@ def combine_and_rank(
         # If best is banned or caution, add note
         if bd["not_banned"] == 0.0:
             explanation += " Note: best zone near restricted area, verify geofence."
+        elif bd["not_banned"] == 0.5:
+            explanation += " Note: geofence unverified (check skipped) — confirm legality before sailing."
+        if not bd.get("wave_available") or not bd.get("wind_available"):
+            explanation += " Sea/wind data unavailable — treat conditions with caution."
 
     # best dict shape: include place, lat, lon, score plus extra for map
     if best is not None:

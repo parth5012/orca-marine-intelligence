@@ -140,7 +140,7 @@ class TestFishFinder:
                 assert zones == []
 
     @pytest.mark.asyncio
-    async def test_postgis_fast_check_ping_timeout_fallback_under_500ms(self):
+    async def test_postgis_fast_check_ping_timeout_fallback_within_budget(self):
         from backend.agents import fish_finder
         import time
 
@@ -168,8 +168,8 @@ class TestFishFinder:
                 zones = await fish_finder.find_fishing_zones(lat=9.93, lon=76.26, radius_km=80.0, limit=5)
         elapsed = time.perf_counter() - t0
 
-        # Acceptance: returns GeoJSON zones within 500ms (far less than 4s hang)
-        assert elapsed < 0.65, f"Expected < 650ms but took {elapsed:.2f}s"
+        # Acceptance: returns GeoJSON zones within the 2s ping budget (far less than 4s hang)
+        assert elapsed < 2.5, f"Expected < 2.5s but took {elapsed:.2f}s"
         assert len(zones) == 1
         assert zones[0]["place"] == "FastFallbackZone"
         assert fish_finder.is_db_degraded() is True
@@ -713,6 +713,26 @@ class TestCombiner:
         assert "DO NOT SAIL" not in result["explanation"]
         assert "wave data unavailable" in result["explanation"]
 
+    def test_missing_danger_kept_unknown_not_banned(self):
+        """Skipped/failed geofence (no danger entry) must degrade to caution,
+        never a false 'outside Indian EEZ' ban."""
+        from backend.agents.combiner import combine_and_rank
+        fish = [
+            {"zone_id": "z1", "place": "Chillickal", "sector": "KERALA", "lat": 9.79, "lon": 75.81, "distance_from_user_km": 52.7}
+        ]
+        sea = [{"zone_id": "z1", "wave_height_m": 1.2}]
+        weather = [{"zone_id": "z1", "wind_kt": 8.2}]
+        result = combine_and_rank(fish, sea, weather, [], {"lat": 9.93, "lon": 76.26})
+
+        best = result["best"]
+        assert best is not None
+        assert best["inside_eez"] is None
+        assert best["score_breakdown"]["not_banned"] == 0.5
+        assert result["all_unsafe"] is False
+        assert "outside Indian EEZ" not in result["explanation"]
+        assert "DO NOT SAIL" not in result["explanation"]
+        assert "unverified" in result["explanation"]
+
 
 # ---------------------------------------------------------------------------
 # Orchestrator — parallel gather, 10s timeout resilience, Malayalam, all-unsafe
@@ -763,9 +783,13 @@ class TestOrchestrator:
         assert len(result["map"]["pfz_features"]) == 1
 
     @pytest.mark.asyncio
-    async def test_timeout_resilience_one_agent_fails(self):
+    async def test_timeout_resilience_one_agent_fails(self, monkeypatch):
         """If one agent times out, orchestrator degrades that agent to unknown but still returns."""
         from backend.agents import orchestrator
+        from backend.agents import graph as graph_mod
+
+        # Shrink the node budget so the test stays fast (prod default is 30s)
+        monkeypatch.setattr(graph_mod, "TIMEOUT_S", 1.0)
 
         shared = [
             {"zone_id": "z1", "place": "A", "lat": 10.0, "lon": 76.0, "distance_from_user_km": 5.0, "bearing": 90, "direction": "E", "depth_range": "20-30", "sector": "KERALA"},
@@ -775,7 +799,7 @@ class TestOrchestrator:
             return shared
 
         async def mock_sea_timeout(points):
-            await asyncio.sleep(11)  # will exceed 10s wait_for
+            await asyncio.sleep(2)  # exceeds the monkeypatched 1s wait_for
             return []
 
         async def mock_weather_ok(points):

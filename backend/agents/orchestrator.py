@@ -79,6 +79,34 @@ DEGRADED_CONFIDENCE = 0.62
 # Degraded fallbacks (status "unknown")
 # ---------------------------------------------------------------------------
 
+def _unknown_danger(points: list[dict]) -> list[dict]:
+    """Unknown-shaped geofence entries for a deselected check_geofence.
+
+    inside_eez=None (unknown, never a ban) so the combiner degrades to
+    caution instead of a false "outside Indian EEZ" DO NOT SAIL.
+    """
+    unknown = []
+    for idx, pt in enumerate(points):
+        zone_id = pt.get("zone_id") if isinstance(pt, dict) else None
+        zone_id = str(zone_id) if zone_id else f"unknown_{idx}"
+        place = pt.get("place", "") if isinstance(pt, dict) else ""
+        lat = pt.get("lat") if isinstance(pt, dict) else None
+        lon = pt.get("lon") if isinstance(pt, dict) else None
+        unknown.append({
+            "zone_id": zone_id,
+            "place": str(place),
+            "lat": lat,
+            "lon": lon,
+            "is_safe": None,
+            "status": "unknown",
+            "warnings": ["geofence check skipped by planner"],
+            "inside_eez": None,
+            "inside_mpa": False,
+            "mpa_name": None,
+        })
+    return unknown
+
+
 def _degraded_sea(points: list[dict]) -> list[dict]:
     degraded = []
     for idx, pt in enumerate(points):
