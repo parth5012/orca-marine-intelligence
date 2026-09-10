@@ -7,7 +7,8 @@ Ticket: M-A: Implement Masked LLM Advisory Synthesizer in Decision Agent (#33)
 Map: #30 (Destination: full dynamic LLM reasoning — Planner + Synthesizer)
 
 Dynamic LLM advisory synthesis powered by Gemini 2.5 Flash
-(``gemini-2.5-flash``) under a strict 1.4s sub-agent SLA budget.
+(``gemini-2.5-flash``) under a strict 12s sub-agent SLA budget (env-tunable
+via ``ORCA_SYNTHESIZER_TIMEOUT_MS``).
 Deterministic combiner scoring + hard safety veto stay upstream
 (combiner.py); this service only *synthesizes wording* from masked
 placeholders — Code Trumps LLM.
@@ -31,7 +32,7 @@ Flow (cheap regex, P95<2.0s):
      ``derive_safety_tier()`` + ``has_regional_digits()`` +
      ``verify_numbers_preserved()`` + citation check. Veto mismatch,
      placeholder leak, regional digits, or dropped metrics raise.
-  4. STRICT INVARIANT (No Silent Fallback): on LLM timeout (>1.4s) or API
+   4. STRICT INVARIANT (No Silent Fallback): on LLM timeout (>12s) or API
      failure or validation failure this module RAISES
      (SynthesizerTimeoutError / SynthesizerAPIError) with an explicit SSE
      error event payload. It NEVER returns a canned regex advisory on the
@@ -96,15 +97,20 @@ __all__ = [
 
 SYNTHESIZER_MODEL = "gemini-2.5-flash"
 
-# Sub-agent SLA budget: 1.4s (map decision #26 observed per-node budget).
-# Keeps full pipeline P95<2.0s when added after parallel_analysis.
-SYNTHESIZER_TIMEOUT_MS: int = int(os.getenv("ORCA_SYNTHESIZER_TIMEOUT_MS", "30000"))
+# Sub-agent SLA budget: 12s realistic budget (env-tunable via
+# ORCA_SYNTHESIZER_TIMEOUT_MS). Covers Gemini 2.5 Flash tail latency.
+# US-ORCA-014: default 12000ms (ORCA_SYNTHESIZER_TIMEOUT_MS override).
+SYNTHESIZER_TIMEOUT_MS: int = int(os.getenv("ORCA_SYNTHESIZER_TIMEOUT_MS", "12000"))
 SYNTHESIZER_TIMEOUT_S: float = SYNTHESIZER_TIMEOUT_MS / 1000.0
 
 # Transport timeout (ms) for the google-genai HTTP client. asyncio.wait_for
 # cancels the *waiter* but a to_thread worker may linger until the socket
 # itself times out — a short transport timeout bounds that linger.
-_TRANSPORT_TIMEOUT_MS = SYNTHESIZER_TIMEOUT_MS
+# Floor at 10000ms: Gemini API rejects manually-set deadlines below 10s
+# (400 INVALID_ARGUMENT), so socket deadline stays >=10s even when
+# logical SLA (ORCA_SYNTHESIZER_TIMEOUT_MS=12000) is shorter. wait_for still
+# enforces the 12s client-side budget.
+_TRANSPORT_TIMEOUT_MS = max(int(SYNTHESIZER_TIMEOUT_MS), 10000)
 
 # Module-level default client cache (planner_service pattern): one Client
 # per process, reused across synthesize_advisory calls.
@@ -167,7 +173,7 @@ class SynthesizerError(Exception):
 
 
 class SynthesizerTimeoutError(SynthesizerError):
-    """LLM exceeded the 1.4s SLA budget (or the underlying call timed out)."""
+    """LLM exceeded the 12s SLA budget (or the underlying call timed out)."""
 
 
 class SynthesizerAPIError(SynthesizerError):
@@ -195,7 +201,10 @@ def synthesizer_error_to_sse_event(
         "agent": "decision_agent",
         "message": safe_msg,
         "fallback": "none",
-        "retry_hint": "retry synthesize_advisory once within 1400ms budget; do NOT fall back to regex heuristics",
+        "retry_hint": (
+            f"retry synthesize_advisory once within {SYNTHESIZER_TIMEOUT_MS}ms "
+            "budget; do NOT fall back to regex heuristics"
+        ),
         "elapsed_ms": ms,
     }
 
@@ -439,7 +448,7 @@ def validate_synthesized_text(
 
 
 # ---------------------------------------------------------------------------
-# Gemini call (plain-text synthesis, hard 1.4s budget)
+# Gemini call (plain-text synthesis, hard 12s budget)
 # ---------------------------------------------------------------------------
 
 
@@ -509,8 +518,8 @@ def _build_synthesizer_config(max_output_tokens: int = 512) -> Any | None:
 def _generate_text_sync(prompt: str, client: Any | None, *, max_output_tokens: int = 512) -> str:
     """Synchronous Gemini plain-text call. Returns raw advisory text.
 
-    Runs in a worker thread via the caller (see synthesize_advisory).
-    Raises SynthesizerConfigError/SynthesizerAPIError.
+    Runs in a worker thread via the caller (see synthesize_advisory) under
+    the 12s SLA budget. Raises SynthesizerConfigError/SynthesizerAPIError.
     """
     client = _get_or_create_client(client)
     config = _build_synthesizer_config(max_output_tokens=max_output_tokens)
@@ -558,7 +567,7 @@ async def synthesize_advisory(
         language: reply language (en|ml|ta|te|hi; unknown → en).
         user_location: optional {"lat","lon"} (observability only).
         client: optional injected ``google-genai`` client (tests/di).
-        timeout_s: SLA budget, default 1.4s. Exceeding it RAISES
+        timeout_s: SLA budget, default 12s. Exceeding it RAISES
             SynthesizerTimeoutError — never degrades to regex heuristics.
         generate_fn: optional async ``(prompt) -> masked_text`` override for
             tests (bypasses the SDK but keeps mask → unmask → validate).

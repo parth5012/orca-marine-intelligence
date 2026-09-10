@@ -120,7 +120,17 @@ class ORCAState(TypedDict, total=False):
     planner_elapsed_ms: int
     planner_confidence: float
 
-TIMEOUT_S = 30.0
+TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "10.0"))
+
+# Per-agent tool budget (US-ORCA-014): individual Send branches get 6s via
+# asyncio.wait_for; the outer fan-out is bounded by TIMEOUT_S (10s).
+PER_AGENT_TIMEOUT_S = float(os.getenv("ORCA_PER_AGENT_TIMEOUT_S", "6.0"))
+
+# Planner LLM call budget (US-ORCA-014): plan_query wrapped in wait_for 5s;
+# on timeout the deterministic baseline runs, falling back to Kochi
+# {lat: 9.93, lon: 76.26} when no location resolves.
+PLANNER_CALL_TIMEOUT_S = float(os.getenv("ORCA_PLANNER_TIMEOUT_MS", "5000")) / 1000.0
+KOCHI_FALLBACK_LOCATION = {"lat": 9.93, "lon": 76.26}
 
 # ---------------------------------------------------------------------------
 # Lazy imports — keep graph importable even if langgraph not installed
@@ -388,9 +398,15 @@ async def planner_node(state: ORCAState) -> dict:
         }
 
     try:
-        envelope = await plan_query(query, language, location, session_id)
-    except Exception as exc:
+        envelope = await asyncio.wait_for(
+            plan_query(query, language, location, session_id),
+            timeout=PLANNER_CALL_TIMEOUT_S,
+        )
+    except (asyncio.TimeoutError, Exception) as exc:
         # Non-fatal planner fallback SSE event (type: status, state: fallback)
+        is_timeout = isinstance(exc, asyncio.TimeoutError)
+        if is_timeout:
+            logger.warning("graph.planner: plan_query timeout %.1fs — Kochi fallback armed", PLANNER_CALL_TIMEOUT_S)
         elapsed_ms = int(getattr(exc, "elapsed_ms", 0) or 500)
         sse_fallback = {
             "type": "status",
@@ -451,6 +467,14 @@ async def planner_node(state: ORCAState) -> dict:
                 )
         except Exception:
             pass
+        # US-ORCA-014: planner TIMEOUT with no resolvable location → Kochi
+        # fallback (default fishing port) instead of a dead no-location run.
+        # Non-timeout failures (e.g. missing API key offline) keep the
+        # existing None → clarification-prompt contract. Inland-GPS
+        # clarification above takes precedence (never masked).
+        if user_location_det is None and not _needs_clar and is_timeout:
+            user_location_det = dict(KOCHI_FALLBACK_LOCATION)
+            degraded = True
         return {
             "intent": intent_det,
             "user_location": user_location_det,
@@ -660,13 +684,13 @@ async def fish_finder(state: ORCAState) -> dict:
     try:
         from backend.agents.subagents import fish_finder as ff  # type: ignore
 
-        res = await asyncio.wait_for(ff.find_fishing_zones(lat=lat, lon=lon, radius_km=80.0), timeout=TIMEOUT_S)
+        res = await asyncio.wait_for(ff.find_fishing_zones(lat=lat, lon=lon, radius_km=80.0), timeout=PER_AGENT_TIMEOUT_S)
         if not isinstance(res, list):
             res = []
         logger.info("graph.fish_finder: %d zones for %.2f,%.2f", len(res), lat, lon)
         return {"fish_results": res}
     except asyncio.TimeoutError:
-        logger.warning("graph.fish_finder: timeout %.0fs", TIMEOUT_S)
+        logger.warning("graph.fish_finder: timeout %.0fs (agent_progress: timeout, degraded)", PER_AGENT_TIMEOUT_S)
         return {"fish_results": [], "degraded": True}
     except Exception as exc:
         logger.warning("graph.fish_finder: %s", exc)
@@ -701,11 +725,8 @@ async def sea_checker(state: ORCAState) -> dict:
     try:
         from backend.agents.subagents import sea_checker as sc  # type: ignore
 
-        res = await asyncio.wait_for(sc.check_sea_conditions(fish), timeout=TIMEOUT_S)
+        res = await sc.check_sea_conditions(fish)
         return {"sea_results": res if isinstance(res, list) else _degraded_sea(fish)}
-    except asyncio.TimeoutError:
-        logger.warning("graph.sea_checker: timeout %.0fs", TIMEOUT_S)
-        return {"sea_results": _degraded_sea(fish), "degraded": True}
     except Exception as exc:
         logger.warning("graph.sea_checker: %s", exc)
         return {"sea_results": _degraded_sea(fish), "degraded": True}
@@ -737,11 +758,8 @@ async def weather_agent(state: ORCAState) -> dict:
     try:
         from backend.agents.subagents import weather_agent as wa  # type: ignore
 
-        res = await asyncio.wait_for(wa.check_weather(fish), timeout=TIMEOUT_S)
+        res = await wa.check_weather(fish)
         return {"weather_results": res if isinstance(res, list) else _degraded_weather(fish)}
-    except asyncio.TimeoutError:
-        logger.warning("graph.weather_agent: timeout %.0fs", TIMEOUT_S)
-        return {"weather_results": _degraded_weather(fish), "degraded": True}
     except Exception as exc:
         logger.warning("graph.weather_agent: %s", exc)
         return {"weather_results": _degraded_weather(fish), "degraded": True}
@@ -778,11 +796,11 @@ async def danger_agent(state: ORCAState) -> dict:
 
         # Use batch helper if available (preserves order, respects shared points)
         if hasattr(da, "check_safety_batch"):
-            res = await asyncio.wait_for(da.check_safety_batch(fish), timeout=TIMEOUT_S)
+            res = await da.check_safety_batch(fish)
         else:
-            # per-point fallback
-            res = []
-            for pt in fish:
+            # per-point fallback: no per-agent wait_for — subagents have
+            # internal 3.5s single-try fetchers, gather runs parallel.
+            async def _one(pt: dict) -> dict:
                 lat = pt.get("lat")
                 lon = pt.get("lon")
                 if lat is None or lon is None:
@@ -790,15 +808,15 @@ async def danger_agent(state: ORCAState) -> dict:
                     coords = geom.get("coordinates") or []
                     if len(coords) >= 2:
                         lon, lat = coords[0], coords[1]
-                r = await da.check_safety(float(lat), float(lon)) if lat is not None else {
-                    "is_safe": False, "status": "unknown", "warnings": ["missing lat/lon"],
-                    "inside_eez": True, "inside_mpa": False, "mpa_name": None,
-                }
-                res.append(r)
+                if lat is None:
+                    return {
+                        "is_safe": False, "status": "unknown", "warnings": ["missing lat/lon"],
+                        "inside_eez": True, "inside_mpa": False, "mpa_name": None,
+                    }
+                return await da.check_safety(float(lat), float(lon))
+
+            res = list(await asyncio.gather(*(_one(pt) for pt in fish)))
         return {"danger_results": res if isinstance(res, list) else _degraded_danger(fish)}
-    except asyncio.TimeoutError:
-        logger.warning("graph.danger_agent: timeout %.0fs", TIMEOUT_S)
-        return {"danger_results": _degraded_danger(fish), "degraded": True}
     except Exception as exc:
         logger.warning("graph.danger_agent: %s", exc)
         return {"danger_results": _degraded_danger(fish), "degraded": True}
@@ -978,6 +996,7 @@ async def decision_agent(state: ORCAState) -> dict:
     # lexical_mask.py (bearings/knots/distances/coords -> __M*__).
     # Req 2-4: Gemini 2.5 Flash wording via synthesizer_service with
     # strict DO NOT SAIL veto + unmask/post-validate + explicit error.
+    # 12s SLA budget per call with a single bounded retry on timeout only.
     # Code Trumps LLM: deterministic `explanation` stays ground truth;
     # LLM output only becomes `reply` after validation. On LLM failure
     # reply falls back to the deterministic explanation BUT the failure
@@ -1003,10 +1022,22 @@ async def decision_agent(state: ORCAState) -> dict:
     if best is not None and explanation:
         try:
             from backend.agents import synthesizer_service as _synth
-
-            _envelope = await _synth.synthesize_advisory(
-                combined, language=language, user_location=user_location,
+            from backend.agents.synthesizer_service import (
+                SynthesizerTimeoutError as _SynthTimeout,
             )
+
+            try:
+                _envelope = await _synth.synthesize_advisory(
+                    combined, language=language, user_location=user_location,
+                )
+            except _SynthTimeout as _tmo:
+                # Single bounded retry on synthesizer timeout only (12s SLA
+                # budget per call): one immediate second call, same args —
+                # no loop, no sleep. APIError/ConfigError are NOT retried.
+                logger.warning("graph.decision: synthesis timed out, retrying once: %s", _tmo)
+                _envelope = await _synth.synthesize_advisory(
+                    combined, language=language, user_location=user_location,
+                )
             _llm_reply = str(_envelope.get("reply") or "").strip()
             if _llm_reply:
                 reply_text = _llm_reply
@@ -1026,10 +1057,12 @@ async def decision_agent(state: ORCAState) -> dict:
                 if isinstance(exc, SynthesizerError):
                     synthesis_elapsed_ms = int(getattr(exc, "elapsed_ms", 0) or 0)
             except Exception:
+                from backend.agents.synthesizer_service import _scrub_secrets as _scrub
+
                 synthesis_error = {
                     "type": "error",
                     "agent": "decision_agent",
-                    "message": f"synthesizer failed: {exc}",
+                    "message": _scrub(f"synthesizer failed: {exc}"),
                     "fallback": "none",
                 }
             logger.warning("graph.decision: synthesis failed, keeping deterministic reply: %s", exc)
@@ -1080,12 +1113,29 @@ async def parallel_analysis_node(state: ORCAState) -> dict:
     """
     if _needs_clarification_short_circuit(state):
         return {"sea_results": [], "weather_results": [], "danger_results": []}
-    # Run 3 agents concurrently — true parallel, not sequential Send
-    results = await asyncio.gather(
-        sea_checker(state),
-        weather_agent(state),
-        danger_agent(state),
-    )
+    # Run 3 agents concurrently — true parallel, not sequential Send.
+    # Outer 10s budget (US-ORCA-014); each branch already carries its own
+    # 6s per-agent wait_for (Send-level), surfacing degraded on timeout.
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                sea_checker(state),
+                weather_agent(state),
+                danger_agent(state),
+            ),
+            timeout=TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "graph.parallel_analysis: outer fan-out timeout %.0fs (agent_progress: timeout, degraded)",
+            TIMEOUT_S,
+        )
+        return {
+            "sea_results": _degraded_sea(state.get("fish_results") or []),
+            "weather_results": _degraded_weather(state.get("fish_results") or []),
+            "danger_results": _degraded_danger(state.get("fish_results") or []),
+            "degraded": True,
+        }
     merged: dict = {}
     for r in results:
         merged.update(r)
@@ -1533,7 +1583,7 @@ async def orchestrate_stream_via_graph(
         return
 
     # Budgets: configurable sub-agent budget (default 10.0s, 5-10s range)
-    NODE_TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "30.0"))
+    NODE_TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "10.0"))
     P95_BUDGET_S = float(os.getenv("ORCA_P95_BUDGET_S", "32.0"))
     # Current compiled topology: planner -> fish_finder ->
     # parallel_analysis -> decision_agent. Sub-agent names kept for
@@ -1794,6 +1844,18 @@ async def orchestrate_stream_via_graph(
             # Observed 1.4s sub-agent budget — emits error but does not
             # preempt the slow node (LangGraph stream has no per-node cancel).
             if elapsed_s > NODE_TIMEOUT_S:
+                # US-ORCA-014: explicit agent_progress timeout event so the
+                # client can render per-agent timeout progress (degraded).
+                # The legacy error event is kept for backward compatibility;
+                # ordering tests ignore error events per docs/API.md.
+                yield {
+                    "type": "agent_progress",
+                    "agent": name,
+                    "state": "timeout",
+                    "message": f"sub-agent budget exceeded {elapsed_s:.2f}s > {NODE_TIMEOUT_S}s budget",
+                    "elapsed_ms": elapsed_ms,
+                    "degraded": True,
+                }
                 yield {
                     "type": "error",
                     "agent": name,

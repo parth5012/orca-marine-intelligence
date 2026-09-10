@@ -5,7 +5,8 @@
  * Module: frontend/app/api/chat/route.ts
  *
  * Next.js API route that proxies chat requests to FastAPI backend.
- * Follows PFZ precedent (frontend/app/api/pfz/route.ts): 3s timeout,
+ * Follows PFZ precedent (frontend/app/api/pfz/route.ts): 35s chat budget
+ * (planner 5s + synth 12s + single retry 12s + overhead),
  * BACKEND_API_URL → NEXT_PUBLIC_API_URL → localhost:8000 fallback.
  *
  * Handles:
@@ -20,7 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const TIMEOUT_MS = 3000;
+const TIMEOUT_MS = 35000;
 
 function getBackendBase(): string {
   return (

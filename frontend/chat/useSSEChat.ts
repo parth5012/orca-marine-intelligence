@@ -29,6 +29,11 @@ export interface MarineZoneCard {
   sst_c?: number;
   chlorophyll?: number;
   safety_status?: 'safe' | 'caution' | 'danger' | 'unknown';
+  // US-ORCA-014 canonical fields (backend GeoJSON contract)
+  safety?: 'safe' | 'caution' | 'danger' | 'unknown';
+  wave_m?: number;
+  wind_kph?: number;
+  confidence?: number;
   coordinates?: [number, number]; // [lat, lon]
   feature?: any;
 }
@@ -63,6 +68,7 @@ export interface ChatMessage {
   latency_ms?: number;
   confidence?: number;
   error?: string;
+  warning?: string;
   fallback?: boolean;
   fallback_message?: string;
 }
@@ -103,6 +109,69 @@ function generateUUID(): string {
     return crypto.randomUUID();
   }
   return 'session-' + Math.random().toString(36).substring(2, 15);
+}
+
+// US-ORCA-014 canonical helpers: normalize legacy backend fields to the
+// canonical GeoJSON contract (safety, distance_km, depth_m, wave_m, wind_kph).
+const KT_TO_KPH = 1.852;
+
+function toKm(props: any): number | undefined {
+  const raw = props.distance_km ?? props.distance_from_user_km ?? props.distance;
+  if (raw == null || raw === '') return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Number(n.toFixed(1)) : undefined;
+}
+
+function toKph(props: any): number | undefined {
+  // Canonical wind_kph wins only when no knot source is present (mirrors backend).
+  if (
+    props.wind_kph != null &&
+    props.wind_kt == null &&
+    props.wind_speed_kt == null
+  ) {
+    const n = Number(props.wind_kph);
+    return Number.isFinite(n) ? Number(n.toFixed(1)) : undefined;
+  }
+  const kt = props.wind_kt ?? props.wind_speed_kt ?? props.wind_kts ?? props.wind;
+  if (kt == null || kt === '') return undefined;
+  const n = Number(kt);
+  return Number.isFinite(n) ? Number((n * KT_TO_KPH).toFixed(1)) : undefined;
+}
+
+function toWaveM(props: any): number | undefined {
+  const raw = props.wave_m ?? props.wave_height_m ?? props.wave ?? props.waves_m ?? props.waves;
+  if (raw == null || raw === '') return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Number(n.toFixed(2)) : undefined;
+}
+
+function toDepthM(props: any): number | undefined {
+  const raw = props.depth_m ?? props.depth ?? props.depth_range ?? props.bathymetry;
+  if (raw == null || raw === '') return undefined;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  // depth_range string like "20-30" -> midpoint (mirrors backend _parse_depth_m)
+  const nums = String(raw).match(/\d+(?:\.\d+)?/g);
+  if (!nums || nums.length === 0) return undefined;
+  const vals = nums.map(Number).filter(Number.isFinite);
+  if (vals.length === 0) return undefined;
+  if (vals.length >= 2) return Number(((vals[0] + vals[1]) / 2).toFixed(2));
+  return vals[0];
+}
+
+function toSafety(props: any): 'safe' | 'caution' | 'danger' | 'unknown' {
+  // Canonical `safety` first, then legacy danger/safety_status/danger_status.
+  const raw = props.safety ?? props.danger ?? props.danger_status ?? props.safety_status ?? '';
+  const v = String(raw).toLowerCase();
+  if (v.includes('danger') || v.includes('red') || v.includes('cyclone') || v.includes('violation') || v === 'eez' || v === 'mpa') {
+    return 'danger';
+  }
+  if (v.includes('caution') || v.includes('amber') || v.includes('warn')) {
+    return 'caution';
+  }
+  if (v.includes('safe') || v.includes('green') || v === 'none') {
+    return 'safe';
+  }
+  return 'unknown';
 }
 
 export function useSSEChat(options: UseSSEChatOptions = {}) {
@@ -202,29 +271,34 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
       const sst = props.sst ?? props.sst_c ?? (props.sea_surface_temp ? Number(props.sea_surface_temp) : undefined);
       const chlorophyll = props.chlorophyll ?? (props.chla ? Number(props.chla) : undefined);
-      const depth = props.depth ?? props.depth_m ?? (props.bathymetry ? Number(props.bathymetry) : undefined);
+      const depth = toDepthM(props);
       const bearing = props.bearing ?? (props.direction ? `${props.direction}` : undefined);
-      const dist = props.distance_km ?? props.distance ?? undefined;
+      const dist = toKm(props);
+      const waveM = toWaveM(props);
+      const windKph = toKph(props);
+      const confidenceRaw = props.confidence;
+      const confidence =
+        confidenceRaw != null && Number.isFinite(Number(confidenceRaw))
+          ? Number(Number(confidenceRaw).toFixed(2))
+          : undefined;
 
-      let safetyStatus: 'safe' | 'caution' | 'danger' | 'unknown' = 'unknown';
-      const dangerVal = String(props.danger || props.danger_status || props.safety || '').toLowerCase();
-      if (dangerVal.includes('danger') || dangerVal.includes('red') || dangerVal.includes('cyclone') || dangerVal.includes('violation')) {
-        safetyStatus = 'danger';
-      } else if (dangerVal.includes('caution') || dangerVal.includes('amber') || dangerVal.includes('warn')) {
-        safetyStatus = 'caution';
-      } else if (dangerVal.includes('safe') || dangerVal.includes('green')) {
-        safetyStatus = 'safe';
-      }
+      const safetyStatus = toSafety(props);
 
+      const cardId = props.zone_id ? String(props.zone_id) : `zone-${idx}-${Date.now()}`;
+      // Guard: backend occasionally sends the same zone twice — skip dupes.
+      if (cards.some((c) => c.id === cardId)) return;
       cards.push({
-        id: props.zone_id ? String(props.zone_id) : `zone-${idx}-${Date.now()}`,
-        name: zoneName,
+        id: cardId,        name: zoneName,
         bearing,
-        distance_km: typeof dist === 'number' ? Number(dist.toFixed(1)) : dist,
+        distance_km: dist,
         depth_m: depth,
         sst_c: typeof sst === 'number' ? Number(sst.toFixed(1)) : sst,
         chlorophyll: typeof chlorophyll === 'number' ? Number(chlorophyll.toFixed(2)) : chlorophyll,
         safety_status: safetyStatus,
+        safety: safetyStatus,
+        wave_m: waveM,
+        wind_kph: windKph,
+        confidence,
         coordinates: coords,
         feature: feat,
       });
@@ -267,6 +341,9 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
+
+      // No client-side stream timeout — backend owns budgets (if needed later).
+      // AbortController retained for manual cancel via stopStream only.
 
       const activeSession = sessionId || generateUUID();
       const baseUrl = getBackendBaseUrl();
@@ -320,6 +397,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
         let buffer = '';
+        let streamedContent = '';
 
         while (true) {
           const { done, value } = await reader.read();
@@ -358,7 +436,22 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
           // Don't abort 'status' events. Only abort fatal 'error'.
           if (type === 'error') {
-            setMessages((prevMsgs) => {
+            const agent = parsed.agent;
+            const fallback = parsed.fallback;
+            const isSynthError =
+              agent === 'decision_agent' || fallback === 'none' || agent === 'none';
+            if (streamedContent.trim() && isSynthError) {
+              const warnMsg = parsed.message || 'Stream error occurred';
+              setMessages((prevMsgs) =>
+                prevMsgs.map((m) =>
+                  m.id === assistantMessageId
+                    ? { ...m, isStreaming: false, warning: warnMsg }
+                    : m
+                )
+              );
+              continue;
+            }
+          setMessages((prevMsgs) => {
               const current = prevMsgs.find((m) => m.id === assistantMessageId);
               if (!current) return prevMsgs;
               return prevMsgs.map((m) =>
@@ -379,6 +472,12 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
             break;
           }
 
+          // Track streamed reply synchronously for non-fatal synth-error check above.
+          if (type === 'token') {
+            const tokenText = parsed.text ?? parsed.content ?? '';
+            if (typeof tokenText === 'string') streamedContent += tokenText;
+          }
+
           setMessages((prevMsgs) => {
               const current = prevMsgs.find((m) => m.id === assistantMessageId);
               if (!current) return prevMsgs;
@@ -393,6 +492,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                 }
 
           case 'status':
+          case 'agent_progress':
           case 'reasoning_step':
           case 'tool_call': {
             const agentKey = parsed.agent || parsed.name || 'orchestrator';
@@ -471,9 +571,21 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
                 case 'safety':
                 case 'safety_warning': {
-                  const waves = parsed.waves_m ?? parsed.waves ?? null;
-                  const wind = parsed.wind_kts ?? parsed.wind ?? null;
-                  const danger = parsed.danger || 'none';
+                  const waves =
+                    parsed.waves_m ?? parsed.wave_m ?? parsed.waves ?? null;
+                  const windRaw =
+                    parsed.wind_kts ??
+                    parsed.wind ??
+                    (parsed.wind_kph != null
+                      ? Number(parsed.wind_kph) / KT_TO_KPH
+                      : parsed.wind_kt != null
+                      ? Number(parsed.wind_kt)
+                      : null);
+                  const wind =
+                    typeof windRaw === 'number' && Number.isFinite(windRaw)
+                      ? Number(windRaw.toFixed(1))
+                      : windRaw;
+                  const danger = parsed.danger || parsed.safety || 'none';
                   const badge = parsed.badge || (danger === 'none' ? 'green' : 'amber');
 
                   let warningText = 'SAFE';
