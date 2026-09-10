@@ -178,6 +178,8 @@ async def find_pfz_near(
     """
     if valid_date is None:
         valid_date = date.today()
+    if limit is not None and int(limit) <= 0:
+        return []
     # Over-fetch: dupes may fill top-N, so fetch extra then dedup to limit.
     fetch_n = max(int(limit) * 4, int(limit) + 20)
     async with AsyncSessionLocal() as session:
