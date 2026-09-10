@@ -1754,7 +1754,11 @@ async def orchestrate_stream_via_graph(
 
                 _chunks = _iter_toks(str(_reply))
             except Exception:
-                _chunks = _chunk_text(str(_reply))
+                _raw_chunks = _chunk_text(str(_reply))
+                _chunks = [
+                    chunk + (" " if index < len(_raw_chunks) - 1 else "")
+                    for index, chunk in enumerate(_raw_chunks)
+                ]
             for _ch in _chunks:
                 yield {"type": "token", "text": _ch}
                 await asyncio.sleep(0)
