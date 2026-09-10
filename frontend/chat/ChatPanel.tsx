@@ -276,7 +276,7 @@ export default function ChatPanel({
               Welcome to ORCA Marine Intelligence
             </h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
-              Ask about potential fishing zones (PFZ), wave height, wind speeds, geofence safety, or weather conditions in your local vernacular.
+              Chat normally — say hello or ask for help. Ask about potential fishing zones (PFZ), wave height, wind speeds, geofence safety, or weather and ORCA runs its full multi-agent marine analysis.
             </p>
           </div>
         )}
