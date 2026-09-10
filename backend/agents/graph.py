@@ -120,10 +120,10 @@ class ORCAState(TypedDict, total=False):
     planner_elapsed_ms: int
     planner_confidence: float
 
-TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "10.0"))
+TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "15.0"))
 
 # Per-agent tool budget (US-ORCA-014): individual Send branches get 6s via
-# asyncio.wait_for; the outer fan-out is bounded by TIMEOUT_S (10s).
+# asyncio.wait_for; the outer fan-out is bounded by TIMEOUT_S (15s).
 PER_AGENT_TIMEOUT_S = float(os.getenv("ORCA_PER_AGENT_TIMEOUT_S", "6.0"))
 
 # Planner LLM call budget (US-ORCA-014): plan_query wrapped in wait_for 5s;
@@ -1031,17 +1031,33 @@ async def decision_agent(state: ORCAState) -> dict:
                 SynthesizerTimeoutError as _SynthTimeout,
             )
 
+            # Total synthesis budget envelope (initial + retry) so the
+            # decision_agent node never blows NODE_TIMEOUT_S.  The first
+            # call gets at most SYNTHESIZER_TIMEOUT_S; a retry gets only
+            # the remaining budget — never a fresh 12s clock.
+            _SYNTH_TOTAL_BUDGET_S = float(os.getenv(
+                "ORCA_SYNTH_TOTAL_BUDGET_S",
+                str(_synth.SYNTHESIZER_TIMEOUT_S),
+            ))
+            _synth_t0 = time.perf_counter()
+
             try:
                 _envelope = await _synth.synthesize_advisory(
                     combined, language=language, user_location=user_location,
+                    timeout_s=_SYNTH_TOTAL_BUDGET_S,
                 )
             except _SynthTimeout as _tmo:
-                # Single bounded retry on synthesizer timeout only (12s SLA
-                # budget per call): one immediate second call, same args —
-                # no loop, no sleep. APIError/ConfigError are NOT retried.
-                logger.warning("graph.decision: synthesis timed out, retrying once: %s", _tmo)
+                # Single bounded retry on synthesizer timeout only: one
+                # immediate second call, same args — no loop, no sleep.
+                # APIError/ConfigError are NOT retried.
+                # Budget: retry gets ONLY the remaining envelope time.
+                _retry_remaining = _SYNTH_TOTAL_BUDGET_S - (time.perf_counter() - _synth_t0)
+                if _retry_remaining < 1.0:
+                    raise  # no budget left for a meaningful retry
+                logger.warning("graph.decision: synthesis timed out (%.1fs left), retrying once: %s", _retry_remaining, _tmo)
                 _envelope = await _synth.synthesize_advisory(
                     combined, language=language, user_location=user_location,
+                    timeout_s=_retry_remaining,
                 )
             _llm_reply = str(_envelope.get("reply") or "").strip()
             if _llm_reply:
@@ -1587,8 +1603,9 @@ async def orchestrate_stream_via_graph(
         }
         return
 
-    # Budgets: configurable sub-agent budget (default 10.0s, 5-10s range)
-    NODE_TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "10.0"))
+    # Budgets: configurable sub-agent budget (default 15.0s, accommodates
+    # Gemini 2.5 Flash 12s SLA + combiner/mask overhead)
+    NODE_TIMEOUT_S = float(os.getenv("ORCA_NODE_TIMEOUT_S", "15.0"))
     P95_BUDGET_S = float(os.getenv("ORCA_P95_BUDGET_S", "32.0"))
     # Current compiled topology: planner -> fish_finder ->
     # parallel_analysis -> decision_agent. Sub-agent names kept for
