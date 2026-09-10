@@ -81,6 +81,9 @@ class ORCAState(TypedDict, total=False):
     language: str
     location: dict | None  # explicit GPS
     session_id: str
+    # conversational router (chitchat vs marine subgraph)
+    route: str | None  # chitchat | marine | None (None = not yet routed)
+    chitchat_reply: str | None
     # supervisor outputs
     intent: dict  # {wants_fish, wants_safety}
     user_location: dict | None  # {lat, lon} resolved
@@ -282,6 +285,75 @@ def _intent_from_planner_intents(intents: list[str] | None) -> dict | None:
     if not wants_fish and not wants_safety:
         return None
     return {"wants_fish": bool(wants_fish), "wants_safety": bool(wants_safety)}
+
+
+# ---------------------------------------------------------------------------
+# Conversational router — chitchat vs marine subgraph (normal chatbot mode)
+# ---------------------------------------------------------------------------
+
+async def conversational_router_node(state: ORCAState) -> dict:
+    """Fast deterministic gate (<1ms, no LLM): chitchat vs marine.
+
+    - chitchat (hi/thanks/bye/who-are-you/help with NO marine keywords):
+      route=chitchat + canned vernacular chitchat_reply. Downstream marine
+      nodes short-circuit; chitchat_responder answers directly.
+    - everything else: route=marine, existing planner pipeline runs unchanged.
+    Marine keywords always win (e.g. 'hi, fish near Kochi?' -> marine).
+    """
+    query = state.get("query", "") or ""
+    language = state.get("language", "en") or "en"
+    try:
+        try:
+            from backend.agents.conversational_router import (  # type: ignore
+                build_chitchat_reply,
+                classify_route,
+            )
+        except ImportError:
+            from agents.conversational_router import (  # type: ignore
+                build_chitchat_reply,
+                classify_route,
+            )
+        route = classify_route(query)
+        chitchat_reply = build_chitchat_reply(query, language) if route == "chitchat" else None
+    except Exception:
+        route = "marine"
+        chitchat_reply = None
+    return {"route": route, "chitchat_reply": chitchat_reply, "language": language}
+
+
+async def chitchat_responder_node(state: ORCAState) -> dict:
+    """Direct chatbot answer — no PostGIS/OSF/IMD tools, no combiner.
+
+    Returns POST /api/chat-shaped payload fragments: vernacular reply,
+    empty map, no safety banner (None -> frontend hides it), explicit
+    evidence that no marine data was used. Never invents coords/metrics.
+    """
+    reply = state.get("chitchat_reply") or "Hello! Ask me about fishing zones or sea safety."
+    language = state.get("language") or "en"
+    return {
+        "reply": str(reply),
+        "explanation": str(reply),
+        "map": {"center": None, "pfz_features": [], "route": []},
+        "safety": None,
+        "evidence": ["conversational reply — no marine data queried"],
+        "confidence": 0.99,
+        "language": language,
+        "combined": None,
+        "best": None,
+        "ranked_zones": [],
+        "citation": "none (chitchat)",
+        "synthesis_status": "skipped",
+        "synthesis_error": None,
+        "synthesis_elapsed_ms": 0,
+        "masked_spans": 0,
+    }
+
+
+def route_after_conversational_router(state: ORCAState) -> str:
+    """Conditional edge: chitchat -> chitchat_responder, else marine planner."""
+    if state.get("route") == "chitchat":
+        return "chitchat_responder"
+    return "planner"
 
 
 # ---------------------------------------------------------------------------
@@ -1248,6 +1320,8 @@ def build_orca_graph():
 
     graph = StateGraph(ORCAState)
 
+    graph.add_node("conversational_router", conversational_router_node)
+    graph.add_node("chitchat_responder", chitchat_responder_node)
     graph.add_node("planner", planner_node)
     graph.add_node("fish_finder", fish_finder)
     graph.add_node("sea_checker", sea_checker)
@@ -1255,7 +1329,9 @@ def build_orca_graph():
     graph.add_node("danger_agent", danger_agent)
     graph.add_node("decision_agent", decision_agent)
 
-    graph.add_edge(START, "planner")
+    graph.add_edge(START, "conversational_router")
+    graph.add_conditional_edges("conversational_router", route_after_conversational_router)
+    graph.add_edge("chitchat_responder", END)
     graph.add_edge("planner", "fish_finder")
     graph.add_conditional_edges("fish_finder", route_after_fish_finder)
     graph.add_edge("sea_checker", "decision_agent")
@@ -1331,6 +1407,27 @@ async def orchestrate_via_graph(
 
     # Handle no-location early (planner will set user_location=None)
     final = await graph.ainvoke(init_state, config=runnable_config)
+
+    # ---- Chitchat short-circuit (conversational router) ---------------
+    # Normal chatbot mode: direct vernacular reply, no marine tools ran.
+    # Empty map + safety None (frontend hides map highlight + banner).
+    if final.get("route") == "chitchat":
+        sid = final.get("session_id") or init_state["session_id"]
+        reply = str(final.get("chitchat_reply") or final.get("reply") or "")
+        return {
+            "reply": reply,
+            "map": {"center": None, "pfz_features": [], "route": []},
+            "safety": None,
+            "evidence": ["conversational reply — no marine data queried"],
+            "language": final.get("language") or language,
+            "confidence": 0.99,
+            "session_id": sid,
+            "route": "chitchat",
+            "intent": {"wants_fish": False, "wants_safety": False},
+            "needs_clarification": False,
+            "selected_tools": [],
+            "reasoning_trace": ["conversational_router: chitchat — marine subgraph skipped"],
+        }
 
     # ---- Clarification short-circuit (ticket #32) ---------------------
     # Planner gated needs_clarification → vernacular GPS prompt, no
@@ -1616,6 +1713,8 @@ async def orchestrate_stream_via_graph(
     # parallel_analysis -> decision_agent. Sub-agent names kept for
     # forward-compat (never emitted today — see parallel_analysis_node).
     KNOWN_NODES = (
+        "conversational_router",
+        "chitchat_responder",
         "planner",
         "fish_finder",
         "parallel_analysis",
@@ -1628,6 +1727,53 @@ async def orchestrate_stream_via_graph(
     sid = session_id or uuid.uuid4().hex
     t0 = time.perf_counter()
     node_start: dict[str, float] = {}
+
+    # ---- Chitchat fast-path (conversational chatbot mode) --------------
+    # Deterministic <1ms gate BEFORE the graph stream: pure chitchat gets
+    # status -> token(s) -> evidence -> done with NO map/safety events, so
+    # the frontend renders a normal chat bubble (no banner, no zone cards).
+    try:
+        try:
+            from backend.agents.conversational_router import (  # type: ignore
+                build_chitchat_reply as _chitchat_reply,
+                is_chitchat as _is_chitchat,
+            )
+        except ImportError:
+            from agents.conversational_router import (  # type: ignore
+                build_chitchat_reply as _chitchat_reply,
+                is_chitchat as _is_chitchat,
+            )
+        if _is_chitchat(query or ""):
+            _reply = _chitchat_reply(query or "", language or "en")
+            yield {"type": "status", "agent": "conversational_router", "state": "running"}
+            yield {"type": "status", "agent": "conversational_router", "state": "done", "elapsed_ms": 1}
+            try:
+                from backend.agents.synthesizer_service import (  # type: ignore
+                    iter_reply_tokens as _iter_toks,
+                )
+
+                _chunks = _iter_toks(str(_reply))
+            except Exception:
+                _chunks = _chunk_text(str(_reply))
+            for _ch in _chunks:
+                yield {"type": "token", "text": _ch}
+                await asyncio.sleep(0)
+            yield {"type": "evidence", "items": ["conversational reply — no marine data queried"]}
+            yield {"type": "done", "language": language or "en", "confidence": 0.99, "session_id": sid}
+            try:
+                from backend.db import redis as _redis_mod  # type: ignore
+
+                await asyncio.wait_for(
+                    _redis_mod.append_message(sid, "user", query or ""), timeout=1.0,
+                )
+                await asyncio.wait_for(
+                    _redis_mod.append_message(sid, "assistant", str(_reply)), timeout=1.0,
+                )
+            except Exception:
+                pass
+            return
+    except Exception:
+        pass
 
     user_location: dict | None = None
     fish_results: list[dict] | None = None

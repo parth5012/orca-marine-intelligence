@@ -82,6 +82,8 @@ export interface UseSSEChatOptions {
 }
 
 const AGENT_TITLE_MAP: Record<string, string> = {
+  conversational_router: 'Conversational router checked intent',
+  chitchat_responder: 'Direct chat reply (no marine tools)',
   planner: 'Planner decomposed intent',
   fish_finder: 'FishFinder queried PFZ zones',
   sea_checker: 'SeaChecker analyzed ocean conditions',
