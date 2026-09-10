@@ -127,7 +127,9 @@ function toKph(props: any): number | undefined {
   if (
     props.wind_kph != null &&
     props.wind_kt == null &&
-    props.wind_speed_kt == null
+    props.wind_speed_kt == null &&
+    props.wind_kts == null &&
+    props.wind == null
   ) {
     const n = Number(props.wind_kph);
     return Number.isFinite(n) ? Number(n.toFixed(1)) : undefined;
@@ -445,7 +447,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
               setMessages((prevMsgs) =>
                 prevMsgs.map((m) =>
                   m.id === assistantMessageId
-                    ? { ...m, isStreaming: false, warning: warnMsg }
+                    ? { ...m, warning: warnMsg }
                     : m
                 )
               );
