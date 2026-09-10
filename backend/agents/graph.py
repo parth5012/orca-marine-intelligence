@@ -404,7 +404,12 @@ async def planner_node(state: ORCAState) -> dict:
         )
     except (asyncio.TimeoutError, Exception) as exc:
         # Non-fatal planner fallback SSE event (type: status, state: fallback)
-        is_timeout = isinstance(exc, asyncio.TimeoutError)
+        try:
+            from backend.agents.planner_service import PlannerTimeoutError as _PTE
+
+            is_timeout = isinstance(exc, (asyncio.TimeoutError, _PTE))
+        except ImportError:
+            is_timeout = isinstance(exc, asyncio.TimeoutError)
         if is_timeout:
             logger.warning("graph.planner: plan_query timeout %.1fs — Kochi fallback armed", PLANNER_CALL_TIMEOUT_S)
         elapsed_ms = int(getattr(exc, "elapsed_ms", 0) or 500)
@@ -808,7 +813,7 @@ async def danger_agent(state: ORCAState) -> dict:
                     coords = geom.get("coordinates") or []
                     if len(coords) >= 2:
                         lon, lat = coords[0], coords[1]
-                if lat is None:
+                if lat is None or lon is None:
                     return {
                         "is_safe": False, "status": "unknown", "warnings": ["missing lat/lon"],
                         "inside_eez": True, "inside_mpa": False, "mpa_name": None,
