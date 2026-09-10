@@ -96,13 +96,22 @@ export async function GET(request: NextRequest) {
   let dataSource = 'local_file';
 
   if (!localData || !Array.isArray(localData.features) || localData.features.length === 0) {
+    const validUntil = new Date().toISOString();
     return NextResponse.json(
       {
         type: 'FeatureCollection',
         source: 'unavailable',
+        valid_until: validUntil,
+        sector_count: 0,
         count: 0,
-        timestamp: new Date().toISOString(),
+        timestamp: validUntil,
         fallback: true,
+        metadata: {
+          valid_until: validUntil,
+          source: 'unavailable',
+          sector_count: 0,
+          count: 0,
+        },
         error: 'PFZ data unavailable: backend offline and no local data file.',
         features: [],
       },
@@ -140,9 +149,17 @@ export async function GET(request: NextRequest) {
     {
       type: 'FeatureCollection',
       source: dataSource,
+      valid_until: localData.valid_until || new Date().toISOString(),
+      sector_count: features.length,
       count: features.length,
       timestamp: localData.timestamp || new Date().toISOString(),
       fallback: true,
+      metadata: {
+        valid_until: localData.valid_until || new Date().toISOString(),
+        source: dataSource,
+        sector_count: features.length,
+        count: features.length,
+      },
       features,
     },
     {

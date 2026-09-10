@@ -58,6 +58,10 @@ export default function SafetyBadge({
 
   return (
     <div
+      data-testid="safety-badge"
+      data-status={statusType}
+      role="status"
+      aria-label={`Sea status: ${statusType}`}
       className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-all shadow-sm ${
         statusType === 'danger'
           ? 'bg-red-950/90 border-red-500/80 text-red-200 animate-pulse'
