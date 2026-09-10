@@ -263,20 +263,35 @@ def combine_and_rank(
     # Filter to valid dict entries
     fish_results = [f for f in fish_results if isinstance(f, dict)]
 
-    # Dedup: same zone_id (or same place+coords when id missing) must not
-    # rank twice — duplicate rows in the data source would otherwise render
-    # as twin cards (e.g. Chillickal twice). Keep first occurrence.
-    _seen_ids: set[str] = set()
-    _deduped: list[dict] = []
-    for _f in fish_results:
-        _key = str(_f.get("zone_id") or _f.get("id") or "")
-        if not _key:
-            _key = f"{_f.get('place')}|{_f.get('lat')}|{_f.get('lon')}"
-        if _key in _seen_ids:
-            continue
-        _seen_ids.add(_key)
-        _deduped.append(_f)
-    fish_results = _deduped
+    # Dedup: same physical zone must not rank twice — duplicate rows in
+    # the data source (e.g. PostGIS yesterday+today rows with different
+    # zone_ids, or synthetic SEC005_Chillickal_123 vs dated variants)
+    # would otherwise render as twin cards. Canonical key is normalized
+    # place + rounded coords; keep first occurrence (nearest input order).
+    try:
+        from backend.agents.zone_dedup import dedup_zones as _dedup_zones
+
+        fish_results = _dedup_zones(fish_results)
+    except Exception:
+        _seen_ids: set[str] = set()
+        _deduped: list[dict] = []
+        for _f in fish_results:
+            try:
+                _place = str(_f.get("place") or "").strip().lower()
+                _lat_raw = _f.get("lat")
+                _lon_raw = _f.get("lon")
+                _lat = round(float(str(_lat_raw)), 4)
+                _lon = round(float(str(_lon_raw)), 4)
+                _key = f"{_place}|{_lat:.4f}|{_lon:.4f}"
+            except (TypeError, ValueError):
+                _key = str(_f.get("zone_id") or _f.get("id") or "")
+                if not _key:
+                    _key = f"{_f.get('place')}|{_f.get('lat')}|{_f.get('lon')}"
+            if _key in _seen_ids:
+                continue
+            _seen_ids.add(_key)
+            _deduped.append(_f)
+        fish_results = _deduped
 
     # Date for citation: DD-Mmm-YYYY, use IST-aware current date (UTC+5:30)
     try:

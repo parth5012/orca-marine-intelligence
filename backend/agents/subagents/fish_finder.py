@@ -291,8 +291,26 @@ def _geojson_fallback(
             "distance_from_user_km": round(float(dist_km), 1),
         })
 
-    # Sort by distance ascending (spherical) and apply limit
+    # Sort by distance ascending (spherical), dedup by place+rounded
+    # coords (same landing centre from overlapping sectors), apply limit
     candidates.sort(key=lambda z: z["distance_from_user_km"])
+    try:
+        from backend.agents.zone_dedup import dedup_zones as _dedup_zones
+
+        candidates = _dedup_zones(candidates)
+    except Exception:
+        _seen: set[str] = set()
+        _uniq: list[dict] = []
+        for _c in candidates:
+            try:
+                _k = f"{str(_c.get('place') or '').strip().lower()}|{round(float(str(_c.get('lat'))), 4):.4f}|{round(float(str(_c.get('lon'))), 4):.4f}"
+            except (TypeError, ValueError):
+                _k = f"id:{_c.get('zone_id')}"
+            if _k in _seen:
+                continue
+            _seen.add(_k)
+            _uniq.append(_c)
+        candidates = _uniq
     return candidates[:limit]
 
 
@@ -393,6 +411,13 @@ async def find_fishing_zones(
                 # PostGIS does not filter by sector — apply here
                 zones = _apply_sector_filter(zones)
                 # find_pfz_near already returns normalized objects sorted by distance
+                # Defense-in-depth: dedup again (sector filter + legacy rows)
+                try:
+                    from backend.agents.zone_dedup import dedup_zones as _dedup_zones2
+
+                    zones = _dedup_zones2(zones)
+                except Exception:
+                    pass
                 # If sector filter emptied results, treat as 0 and expand
                 if zones:
                     set_db_degraded(False)

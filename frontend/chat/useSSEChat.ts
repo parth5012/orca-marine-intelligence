@@ -287,8 +287,21 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       const safetyStatus = toSafety(props);
 
       const cardId = props.zone_id ? String(props.zone_id) : `zone-${idx}-${Date.now()}`;
-      // Guard: backend occasionally sends the same zone twice — skip dupes.
+      // Guard: backend occasionally sends the same zone twice with different
+      // zone_ids (PostGIS yesterday+today rows, synthetic vs dated ids).
+      // Canonical key = normalized name + rounded coords (~11m). Skip dupes.
+      const normName = String(zoneName || '').trim().toLowerCase();
+      const latR = coords ? Number(coords[0]).toFixed(4) : '';
+      const lonR = coords ? Number(coords[1]).toFixed(4) : '';
+      const canonKey = `${normName}|${latR}|${lonR}`;
       if (cards.some((c) => c.id === cardId)) return;
+      if (canonKey !== '|' && cards.some((c) => {
+        const cn = String((c as any).name || '').trim().toLowerCase();
+        const cc = (c as any).coordinates as [number, number] | undefined;
+        const clat = cc ? Number(cc[0]).toFixed(4) : '';
+        const clon = cc ? Number(cc[1]).toFixed(4) : '';
+        return `${cn}|${clat}|${clon}` === canonKey;
+      })) return;
       cards.push({
         id: cardId,        name: zoneName,
         bearing,
