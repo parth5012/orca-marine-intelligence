@@ -6,24 +6,8 @@
   "installCommand": "cd frontend && npm install",
   "rewrites": [
     {
-      "source": "/api/chat",
-      "destination": "/api/chat"
-    },
-    {
-      "source": "/api/chat/:path*",
-      "destination": "/api/chat/:path*"
-    },
-    {
-      "source": "/api/pfz",
-      "destination": "/api/pfz"
-    },
-    {
-      "source": "/api/pfz/:path*",
-      "destination": "/api/pfz/:path*"
-    },
-    {
-      "source": "/api/:path*",
-      "destination": "https://orca-marine-intelligence-api.onrender.com/api/:path*"
+      "source": "/api/((?!chat|pfz).*)",
+      "destination": "https://orca-marine-intelligence-api.onrender.com/api/$1"
     }
   ],
   "headers": [

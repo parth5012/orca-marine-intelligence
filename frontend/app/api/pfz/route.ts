@@ -145,17 +145,19 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const validUntil = localData.valid_until || new Date().toISOString();
+
   return NextResponse.json(
     {
       type: 'FeatureCollection',
       source: dataSource,
-      valid_until: localData.valid_until || new Date().toISOString(),
+      valid_until: validUntil,
       sector_count: features.length,
       count: features.length,
       timestamp: localData.timestamp || new Date().toISOString(),
       fallback: true,
       metadata: {
-        valid_until: localData.valid_until || new Date().toISOString(),
+        valid_until: validUntil,
         source: dataSource,
         sector_count: features.length,
         count: features.length,
