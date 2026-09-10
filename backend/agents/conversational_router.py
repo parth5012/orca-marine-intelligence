@@ -37,7 +37,7 @@ _MARINE_RE = re.compile(
 # Pure chitchat / help / identity / small-talk — only when NO marine keyword present.
 _CHITCHAT_RES = [
     re.compile(r"^(hi+|hello+|hey+|namaste|namaskaram|vanakkam)\b", re.IGNORECASE),
-    re.compile(r"\b(thank|thanks|nanni|nandri|dhanyavad)\b", re.IGNORECASE),
+    re.compile(r"\b(thank|thanks|nanni|nanri|nandri|dhanyavad)\b", re.IGNORECASE),
     re.compile(r"\b(bye|good\s?(morning|evening|night))\b", re.IGNORECASE),
     re.compile(r"\b(who are you|what are you|your name|about you)\b", re.IGNORECASE),
     re.compile(r"\b(what can you do|help|how (do|can) (you|i) (work|use)|commands)\b", re.IGNORECASE),
@@ -46,13 +46,18 @@ _CHITCHAT_RES = [
     re.compile(r"\bhow'?s (life|it going|things|you|your day)\b", re.IGNORECASE),
     re.compile(r"\bhow (are|r) (you|u|things)\b", re.IGNORECASE),
     re.compile(r"^(what'?s up|sup|howdy|yo)\b", re.IGNORECASE),
+    # native-script small-talk (ml/ta/te/hi) — Latin patterns above miss these
+    re.compile(r"(നമസ്കാരം|നന്ദി|വിട|സഹായം|നീ ആരാണ്)", re.IGNORECASE),
+    re.compile(r"(ଵணக்கம்|நன்றி|பிரியாவிடை|உதவி|நீ யார்)", re.IGNORECASE),
+    re.compile(r"(నమస్కారం|ధన్యవాదాలు|వీడ్కోలు|సహాయం|నీవు ఎవరు)", re.IGNORECASE),
+    re.compile(r"(नमस्ते|धन्यवाद|शुक्रिया|अलविदा|मदद|तुम कौन|आप कौन)", re.IGNORECASE),
 ]
 
 _CHITCHAT_REPLIES: dict[str, dict[str, str]] = {
     "greet": {
         "en": "Hello! I'm ORCA, your marine fishing assistant. Ask me where to find fish (e.g. 'Fish near Kochi today?'), or about waves, wind, cyclones and sailing safety.",
         "ml": "നമസ്കാരം! ഞാൻ ORCA ആണ്, നിങ്ങളുടെ കടൽ മീൻപിടിത്ത സഹായി. 'കൊച്ചിക്ക് സമീപം ഇന്ന് മീൻ എവിടെ?' എന്ന് ചോദിക്കൂ, അല്ലെങ്കിൽ തിരമാല, കാറ്റ്, ചുഴലിക്കാറ്റ്, സുരക്ഷ എന്നിവയെക്കുറിച്ച് ചോദിക്കൂ.",
-        "ta": "வணக்கம்! நான் ORCA, உங்கள் கடல் மீன்பிடி உதவியாளர். 'கொச்சி அருகே இன்று மீன் எங்கே?' என்று கேளுங்கள், அல்லது அலை, காற்று, புயல், பாதுகாப்பு பற்றி கேளுங்கள்.",
+        "ta": "ଵணக்கம்! நான் ORCA, உங்கள் கடல் மீன்பிடி உதவியாளர். 'கொச்சி அருகே இன்று மீன் எங்கே?' என்று கேளுங்கள், அல்லது அலை, காற்று, புயல், பாதுகாப்பு பற்றி கேளுங்கள்.",
         "te": "నమస్కారం! నేను ORCA, మీ సముద్ర చేపల సహాయకుడిని. 'కొచ్చి దగ్గర ఈరోజు చేపలు ఎక్కడ?' అని అడగండి, లేదా అలలు, గాలి, తుఫాను, భద్రత గురించి అడగండి.",
         "hi": "नमस्ते! मैं ORCA हूँ, आपका समुद्री मत्स्य सहायक। पूछें 'आज कोच्चि के पास मछली कहाँ है?', या लहरों, हवा, चक्रवात और नौकायन सुरक्षा के बारे में पूछें।",
     },
@@ -125,9 +130,9 @@ def build_chitchat_reply(query: str, language: str = "en") -> str:
     """Canned vernacular reply — never invents coords/metrics/zones."""
     lang = _norm_lang(language)
     q = query.lower()
-    if re.search(r"thank|nanni|nandri|dhanyavad", q):
+    if re.search(r"thank|nanni|nandri|dhanyavad|നന്ദി|நன்றி|ధన్యవాదాలు|धन्यवाद|शुक्रिया", q):
         kind = "thanks"
-    elif re.search(r"\bbye\b", q):
+    elif re.search(r"\bbye\b|വിട|பிரியாவிடை|వీడ్కోలు|अलविदा", q):
         kind = "bye"
     elif re.search(r"who are you|what are you|your name|about you", q):
         kind = "who"
