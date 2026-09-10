@@ -1037,14 +1037,19 @@ async def decision_agent(state: ORCAState) -> dict:
             # the remaining budget — never a fresh 12s clock.
             _SYNTH_TOTAL_BUDGET_S = float(os.getenv(
                 "ORCA_SYNTH_TOTAL_BUDGET_S",
-                str(_synth.SYNTHESIZER_TIMEOUT_S),
+                str(TIMEOUT_S),
             ))
+            _SYNTH_TOTAL_BUDGET_S = min(_SYNTH_TOTAL_BUDGET_S, TIMEOUT_S)
+            _initial_synth_budget = min(
+                _SYNTH_TOTAL_BUDGET_S,
+                _synth.SYNTHESIZER_TIMEOUT_S,
+            )
             _synth_t0 = time.perf_counter()
 
             try:
                 _envelope = await _synth.synthesize_advisory(
                     combined, language=language, user_location=user_location,
-                    timeout_s=_SYNTH_TOTAL_BUDGET_S,
+                    timeout_s=_initial_synth_budget,
                 )
             except _SynthTimeout as _tmo:
                 # Single bounded retry on synthesizer timeout only: one
@@ -1057,7 +1062,7 @@ async def decision_agent(state: ORCAState) -> dict:
                 logger.warning("graph.decision: synthesis timed out (%.1fs left), retrying once: %s", _retry_remaining, _tmo)
                 _envelope = await _synth.synthesize_advisory(
                     combined, language=language, user_location=user_location,
-                    timeout_s=_retry_remaining,
+                    timeout_s=min(_retry_remaining, _synth.SYNTHESIZER_TIMEOUT_S),
                 )
             _llm_reply = str(_envelope.get("reply") or "").strip()
             if _llm_reply:
