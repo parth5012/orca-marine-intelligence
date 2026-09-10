@@ -94,6 +94,94 @@ def _build_lookup(results: list[dict] | None) -> dict[str, dict]:
     return lookup
 
 
+# ---------------------------------------------------------------------------
+# US-ORCA-014 canonical safety contract (mirrors orchestrator._veto_safety)
+# ---------------------------------------------------------------------------
+
+SUCCESS_CONFIDENCE = 0.87
+DEGRADED_CONFIDENCE = 0.62
+CONFIDENCE_SUCCESS_FLOOR = 0.80
+_KT_TO_KPH = 1.852
+
+
+def apply_safety_veto(zone: dict) -> str:
+    """Apply the canonical safety veto to a ranked zone (US-ORCA-014).
+
+    danger: wave>2.5m or wind>40kph or cyclone alert or inside MPA or
+        explicitly outside EEZ. caution: wave>1.5m or wind>25kph, or any
+        missing measurement (nulls degrade to caution, never safe).
+        Otherwise safe. Additive annotation — never alters scoring.
+    """
+    if not isinstance(zone, dict):
+        return "caution"
+    wave = zone.get("wave_height_m", zone.get("wave_m", zone.get("wave")))
+    try:
+        wave_m = float(wave) if wave is not None else None
+    except (TypeError, ValueError):
+        wave_m = None
+    if zone.get("wind_kph") is not None and zone.get("wind_kt") is None and zone.get("wind_speed_kt") is None:
+        try:
+            wind_kph: float | None = float(zone.get("wind_kph"))
+        except (TypeError, ValueError):
+            wind_kph = None
+    else:
+        wind_raw = zone.get("wind_kt", zone.get("wind_speed_kt"))
+        try:
+            wind_kph = float(wind_raw) * _KT_TO_KPH if wind_raw is not None else None
+        except (TypeError, ValueError):
+            wind_kph = None
+    try:
+        banned = bool(zone.get("inside_mpa")) or (zone.get("inside_eez") is False)
+    except Exception:
+        banned = False
+    try:
+        cyclone = bool(zone.get("cyclone_alert", zone.get("cyclone")))
+    except Exception:
+        cyclone = False
+    if banned or cyclone:
+        return "danger"
+    if wave_m is None or wind_kph is None:
+        if (wave_m is not None and wave_m > 2.5) or (
+            wind_kph is not None and wind_kph > 40.0
+        ):
+            return "danger"
+        return "caution"
+    if wave_m > 2.5 or wind_kph > 40.0:
+        return "danger"
+    if wave_m > 1.5 or wind_kph > 25.0:
+        return "caution"
+    return "safe"
+
+
+def normalize_contract(
+    ranked_zones: list[dict],
+    all_unsafe: bool = False,
+    base_confidence: float = SUCCESS_CONFIDENCE,
+) -> dict:
+    """Normalize ranked zones to the canonical contract (US-ORCA-014).
+
+    Annotates each zone with ``safety`` (apply_safety_veto) and returns
+    ``{"status", "confidence", "ranked_zones"}`` where status is
+    "success" only when confidence >= 0.80 (else "degraded" at 0.62).
+    Any danger zone or all_unsafe forces degraded.
+    """
+    zones = [z for z in (ranked_zones or []) if isinstance(z, dict)]
+    for z in zones:
+        try:
+            z["safety"] = apply_safety_veto(z)
+        except Exception:
+            z["safety"] = "caution"
+    try:
+        conf = float(base_confidence)
+    except (TypeError, ValueError):
+        conf = SUCCESS_CONFIDENCE
+    if all_unsafe or any(z.get("safety") == "danger" for z in zones):
+        return {"status": "degraded", "confidence": DEGRADED_CONFIDENCE, "ranked_zones": zones}
+    if conf >= CONFIDENCE_SUCCESS_FLOOR:
+        return {"status": "success", "confidence": round(conf, 4), "ranked_zones": zones}
+    return {"status": "degraded", "confidence": DEGRADED_CONFIDENCE, "ranked_zones": zones}
+
+
 _SUPPORTED_LANGS = ("en", "ml", "ta", "te", "hi")
 
 # Offline canned "no zones" advisories (native script, Arabic digits n/a).
@@ -174,6 +262,21 @@ def combine_and_rank(
 
     # Filter to valid dict entries
     fish_results = [f for f in fish_results if isinstance(f, dict)]
+
+    # Dedup: same zone_id (or same place+coords when id missing) must not
+    # rank twice — duplicate rows in the data source would otherwise render
+    # as twin cards (e.g. Chillickal twice). Keep first occurrence.
+    _seen_ids: set[str] = set()
+    _deduped: list[dict] = []
+    for _f in fish_results:
+        _key = str(_f.get("zone_id") or _f.get("id") or "")
+        if not _key:
+            _key = f"{_f.get('place')}|{_f.get('lat')}|{_f.get('lon')}"
+        if _key in _seen_ids:
+            continue
+        _seen_ids.add(_key)
+        _deduped.append(_f)
+    fish_results = _deduped
 
     # Date for citation: DD-Mmm-YYYY, use IST-aware current date (UTC+5:30)
     try:
@@ -389,6 +492,13 @@ def combine_and_rank(
         }
         ranked.append(entry)
 
+    # US-ORCA-014: canonical safety annotation (additive — scoring untouched).
+    for z in ranked:
+        try:
+            z["safety"] = apply_safety_veto(z)
+        except Exception:
+            z["safety"] = "caution"
+
     # Tie-breaker: sort by descending score, then lower wave, then closer distance
     ranked.sort(key=lambda z: (-z["score"], z["wave_height_m"] if z["wave_height_m"] is not None else 999.0, z["distance_km"]))
 
@@ -485,6 +595,7 @@ def combine_and_rank(
             "inside_mpa": best["inside_mpa"],
             "score": best["score"],
             "score_breakdown": best["score_breakdown"],
+            "safety": best.get("safety", "caution"),
             "bearing": best.get("bearing"),
             "direction": best.get("direction"),
             "depth_range": best.get("depth_range"),

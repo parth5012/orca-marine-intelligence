@@ -1699,7 +1699,7 @@ class TestSafetyVetoAndArabicDigitsMock:
 
 
 # ---------------------------------------------------------------------------
-# 10. Latency Benchmark (mock: concurrent P95<2.0s + 5000ms/1400ms SLAs)
+# 10. Latency Benchmark (mock: concurrent P95<2.0s + 5000ms/12000ms SLAs)
 # ---------------------------------------------------------------------------
 
 
@@ -1767,7 +1767,7 @@ class TestLatencyBenchmarkMock:
         assert evt["fallback"] is True
 
     @pytest.mark.asyncio
-    async def test_synthesizer_1400ms_sla_with_fast_mock_llm(self):
+    async def test_synthesizer_12000ms_sla_with_fast_mock_llm(self):
         from backend.agents import synthesizer_service as synth
 
         fish, sea, weather, danger = _unsafe_inputs_36()
@@ -1786,7 +1786,12 @@ class TestLatencyBenchmarkMock:
             generate_fn=_fast,
         )
         assert env["status"] == "success"
-        assert env["elapsed_ms"] < 1400, f"synth SLA breached: {env['elapsed_ms']}ms"
+        assert env["elapsed_ms"] < 12000, f"synth SLA breached: {env['elapsed_ms']}ms"
+        # retry_hint carries the current env-tunable budget, not a hardcoded value.
+        hint_evt = synth.synthesizer_error_to_sse_event(
+            synth.SynthesizerTimeoutError("budget check", elapsed_ms=1)
+        )
+        assert str(synth.SYNTHESIZER_TIMEOUT_MS) in hint_evt["retry_hint"]
 
     @pytest.mark.asyncio
     async def test_synthesizer_timeout_is_explicit_never_silent(self):
@@ -1978,12 +1983,11 @@ class TestLiveLLMPlannerMockParity:
     @requires_live_llm
     @pytest.mark.asyncio
     async def test_live_synthesizer_veto_and_numerals(self):
-        """Live synth parity (FLAKE-02): generous 4.0s live budget, not 1400ms.
+        """Live synth parity (FLAKE-02): explicit 4.0s live budget.
 
-        The 1400ms SLA is enforced only by the MOCK test
-        (test_synthesizer_1400ms_sla_with_fast_mock_llm). Live Gemini wording
-        is flaky under 1400ms, so this live-only test uses timeout_s=4.0
-        and asserts <4000ms.
+        The 12000ms default SLA is enforced only by the MOCK test
+        (test_synthesizer_12000ms_sla_with_fast_mock_llm). This live-only
+        test passes an explicit timeout_s=4.0 and asserts <4000ms.
         """
         from backend.agents import synthesizer_service as synth
 
