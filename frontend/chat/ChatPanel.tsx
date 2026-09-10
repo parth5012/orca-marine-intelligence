@@ -148,7 +148,10 @@ export default function ChatPanel({
           depth_m: card.depth_m,
           sst: card.sst_c,
           chlorophyll: card.chlorophyll,
-          safety: card.safety_status,
+          safety: card.safety ?? card.safety_status,
+          wave_m: card.wave_m,
+          wind_kph: card.wind_kph,
+          confidence: card.confidence,
         },
       };
       onMapHighlight?.([pointFeature]);
@@ -467,10 +470,20 @@ export default function ChatPanel({
                     </div>
                   )}
 
-                  {/* Error Indicator */}
-                  {msg.error && (
+                  {/* Error Indicator — fatal only when no reply content exists */}
+                  {msg.error && !msg.content?.trim() && (
                     <div className="mt-2 text-xs text-red-400 bg-red-950/40 p-2 rounded-lg border border-red-800/50">
                       ⚠️ {msg.error}
+                    </div>
+                  )}
+
+                  {/* Synth warning — reply exists, LLM polish failed, verified advisory shown */}
+                  {msg.warning && (
+                    <div
+                      data-testid="synth-warning"
+                      className="mt-2 text-xs text-slate-400 bg-slate-800/60 p-2 rounded-lg border border-slate-700"
+                    >
+                      LLM polish unavailable — showing verified advisory.
                     </div>
                   )}
 
@@ -511,6 +524,12 @@ export default function ChatPanel({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {msg.zone_cards.map((zone) => {
                         const isSelected = selectedZoneId === zone.id;
+                        // US-ORCA-014: canonical `safety` wins; UNKNOWN only
+                        // for genuine fallback turns, never when safety present.
+                        const canonicalSafety =
+                          zone.safety ?? zone.safety_status ?? null;
+                        const displaySafety =
+                          canonicalSafety ?? (msg.fallback ? 'unknown' : null);
                         return (
                           <div
                             key={zone.id}
@@ -524,17 +543,31 @@ export default function ChatPanel({
                               <h5 className="font-bold text-white text-sm truncate">
                                 {zone.name}
                               </h5>
-                              <span
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                  zone.safety_status === 'safe'
-                                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
-                                    : zone.safety_status === 'caution'
-                                    ? 'bg-amber-950 text-amber-300 border border-amber-700'
-                                    : 'bg-red-950 text-red-300 border border-red-700'
-                                }`}
-                              >
-                                {zone.safety_status || 'Safe'}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {zone.confidence != null && (
+                                  <span
+                                    title={`Confidence ${zone.confidence}`}
+                                    className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-cyan-300 border border-slate-700"
+                                  >
+                                    {(Number(zone.confidence) * 100).toFixed(0)}%
+                                  </span>
+                                )}
+                                {displaySafety && (
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                      displaySafety === 'safe'
+                                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                                        : displaySafety === 'caution'
+                                        ? 'bg-amber-950 text-amber-300 border border-amber-700'
+                                        : displaySafety === 'danger'
+                                        ? 'bg-red-950 text-red-300 border border-red-700'
+                                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                                    }`}
+                                  >
+                                    {displaySafety}
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-2 text-[11px] text-slate-300">
@@ -567,6 +600,22 @@ export default function ChatPanel({
                                   <span className="text-slate-500">SST: </span>
                                   <span className="font-semibold text-amber-300">
                                     {zone.sst_c}°C
+                                  </span>
+                                </div>
+                              )}
+                              {(zone as MarineZoneCard).wave_m != null && (
+                                <div>
+                                  <span className="text-slate-500">Wave: </span>
+                                  <span className="font-semibold text-white">
+                                    {(zone as MarineZoneCard).wave_m}m
+                                  </span>
+                                </div>
+                              )}
+                              {(zone as MarineZoneCard).wind_kph != null && (
+                                <div>
+                                  <span className="text-slate-500">Wind: </span>
+                                  <span className="font-semibold text-white">
+                                    {(zone as MarineZoneCard).wind_kph} kph
                                   </span>
                                 </div>
                               )}

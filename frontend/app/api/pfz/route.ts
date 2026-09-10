@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
   const sector = searchParams.get('sector');
   const limitStr = searchParams.get('limit');
   const bbox = searchParams.get('bbox');
+  const place = searchParams.get('place') || 'Kochi';
 
   const backendBase =
     process.env.BACKEND_API_URL ||
@@ -51,17 +52,26 @@ export async function GET(request: NextRequest) {
   if (sector) backendUrl.searchParams.set('sector', sector);
   if (limitStr) backendUrl.searchParams.set('limit', limitStr);
   if (bbox) backendUrl.searchParams.set('bbox', bbox);
+  if (place) backendUrl.searchParams.set('place', place);
 
-  // 1. Attempt to fetch from live FastAPI backend with 3-second timeout
+  // 1. Attempt to fetch from live FastAPI backend with 6-second timeout
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    const forwardedHeaders: Record<string, string> = {
+      Accept: 'application/json',
+    };
+    const acceptLanguage = request.headers.get('accept-language');
+    if (acceptLanguage) forwardedHeaders['Accept-Language'] = acceptLanguage;
+    const userAgent = request.headers.get('user-agent');
+    if (userAgent) forwardedHeaders['User-Agent'] = userAgent;
+    const forwardedFor = request.headers.get('x-forwarded-for');
+    if (forwardedFor) forwardedHeaders['X-Forwarded-For'] = forwardedFor;
 
     const response = await fetch(backendUrl.toString(), {
       signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-      },
+      headers: forwardedHeaders,
       next: { revalidate: 3600 },
     });
 

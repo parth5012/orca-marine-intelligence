@@ -24,6 +24,7 @@ Extensible interface:
     - get_wave_current(...) — wrapper that tries OSF then falls back to heuristic
 """
 
+import asyncio
 import hashlib
 import logging
 from pathlib import Path
@@ -243,12 +244,14 @@ def _fetch_parquet_wave_current(lat: float, lon: float) -> tuple[float, float] |
 
 async def fetch_osf_wave_current(lat: float, lon: float) -> tuple[float, float]:
     """
-    Live real data fetcher: Open-Meteo Marine wave & current.
-    Returns (wave_height_m, current_kt).
+    Live real data fetcher: Open-Meteo Marine wave & current, single-try 3.5s.
+    Single try avoids _http_get_with_retry 3x6s (~14s) budget blow. Heuristic
+    fallback is deterministic safe fallback if this one try fails.
+    Offloaded via to_thread so 5-zone gather runs parallel, not sequential.
     """
     try:
         from backend.ingest.live_fetchers import fetch_open_meteo_wave_current
-        data = fetch_open_meteo_wave_current(lat, lon)
+        data = await asyncio.to_thread(fetch_open_meteo_wave_current, lat, lon, None, 3.5)
         return float(data["wave_height_m"]), float(data["current_speed_kt"])
     except Exception as exc:
         logger.debug("Live ocean wave/current fetch failed for (%s, %s): %s", lat, lon, exc)
@@ -326,11 +329,10 @@ async def check_sea_conditions(points: list[dict]) -> list[dict]:
     if not points:
         return []
 
-    results: list[dict] = []
-    for idx, pt in enumerate(points):
+    async def _one(idx: int, pt: dict) -> dict:
         if not isinstance(pt, dict):
             # Defensive: non-dict entry -> danger, never safe
-            results.append({
+            return {
                 "zone_id": f"unknown_{idx}",
                 "place": "",
                 "lat": None,
@@ -342,9 +344,7 @@ async def check_sea_conditions(points: list[dict]) -> list[dict]:
                 "status": "danger",
                 "reason": "invalid point — unknown location treated as danger",
                 "source": "mock_heuristic",
-            })
-            continue
-
+            }
         zone_id, lat, lon, place = _extract_point(pt, idx)
         wave_m, current_kt, source = await get_wave_current(lat, lon, zone_id, idx)
         wave_status = _classify_wave(wave_m)
@@ -368,7 +368,7 @@ async def check_sea_conditions(points: list[dict]) -> list[dict]:
         else:
             reason = f"wave {wave_m}m safe, current {current_kt}kt safe"
 
-        results.append({
+        return {
             "zone_id": zone_id,
             "place": place,
             "lat": lat,
@@ -380,6 +380,7 @@ async def check_sea_conditions(points: list[dict]) -> list[dict]:
             "status": status,
             "reason": reason,
             "source": source,
-        })
+        }
 
-    return results
+    # Parallel per-zone: gather preserves input order, ~6s total not 5x6s sequential.
+    return list(await asyncio.gather(*(_one(idx, pt) for idx, pt in enumerate(points))))

@@ -24,6 +24,7 @@ Extensible interface:
     - get_wind(...) / get_cyclone_alert(...) — wrappers with heuristic fallback
 """
 
+import asyncio
 import hashlib
 import math
 import logging
@@ -253,12 +254,15 @@ def _fetch_parquet_wind(lat: float, lon: float) -> tuple[float, str, int] | None
 
 async def fetch_imd_wind(lat: float, lon: float) -> tuple[float, str]:
     """
-    Live real wind fetcher via live_fetchers (OpenWeatherMap / Open-Meteo).
-    Returns (wind_speed_kt, wind_direction_compass).
+    Live real wind fetcher: single-try Open-Meteo 3.5s (fail-fast).
+    Avoids fetch_live_weather 6+3+6=15s double-retry chain that blew the 8/12s budget.
+    Offloaded via to_thread — sync httpx must not block event loop.
     """
     try:
-        from backend.ingest.live_fetchers import fetch_live_weather
-        data = fetch_live_weather(lat, lon)
+        from backend.ingest.live_fetchers import fetch_open_meteo_weather
+        data = await asyncio.to_thread(
+            fetch_open_meteo_weather, lat, lon, None, 3.5
+        )
         return float(data["wind_speed_kt"]), str(data["wind_direction"])
     except Exception as exc:
         logger.debug("Live wind fetch failed for (%s, %s): %s", lat, lon, exc)
@@ -440,10 +444,9 @@ async def check_weather(points: list[dict]) -> list[dict]:
         logger.debug("weather_agent: cyclone fetch failed: %s", exc)
         cyclones = []
 
-    results: list[dict] = []
-    for idx, pt in enumerate(points):
+    async def _one(idx: int, pt: dict) -> dict:
         if not isinstance(pt, dict):
-            results.append({
+            return {
                 "zone_id": f"unknown_{idx}",
                 "place": "",
                 "lat": None,
@@ -460,9 +463,7 @@ async def check_weather(points: list[dict]) -> list[dict]:
                 "status": "danger",
                 "reason": "invalid point — unknown location treated as danger",
                 "source": "mock_heuristic",
-            })
-            continue
-
+            }
         zone_id, lat, lon, place = _extract_point(pt, idx)
         wind_kt, wind_dir, wind_deg, source = await get_wind(lat, lon, zone_id, idx)
         wind_status = _classify_wind(wind_kt)
@@ -479,7 +480,7 @@ async def check_weather(points: list[dict]) -> list[dict]:
         else:
             reason = f"wind {wind_kt}kt safe dir {wind_dir}"
 
-        results.append({
+        return {
             "zone_id": zone_id,
             "place": place,
             "lat": lat,
@@ -496,6 +497,7 @@ async def check_weather(points: list[dict]) -> list[dict]:
             "status": status,
             "reason": reason,
             "source": source,
-        })
+        }
 
-    return results
+    # Parallel per-zone: gather preserves order, ~6s total not 5x6s sequential.
+    return list(await asyncio.gather(*(_one(idx, pt) for idx, pt in enumerate(points))))

@@ -64,3 +64,5 @@ reports/
 *.pptx
 commands.md
 generate_techstack_ppt.py
+
+.ruff_cache/

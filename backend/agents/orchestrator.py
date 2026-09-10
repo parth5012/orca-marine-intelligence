@@ -70,9 +70,16 @@ except ImportError:
         _resolve_location,
     )
 
-TIMEOUT_S = 30.0
+TIMEOUT_S = 10.0
 DEFAULT_CONFIDENCE = 0.87
 DEGRADED_CONFIDENCE = 0.62
+
+# US-ORCA-014 canonical GeoJSON contract thresholds (wind in kph).
+_WAVE_DANGER_M = 2.5
+_WAVE_CAUTION_M = 1.5
+_WIND_DANGER_KPH = 40.0
+_WIND_CAUTION_KPH = 25.0
+_KT_TO_KPH = 1.852
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +190,93 @@ def _degraded_danger(points: list[dict]) -> list[dict]:
     return degraded
 
 
+def _parse_depth_m(depth_range: Any) -> float | None:
+    """Parse a depth_range like "20-30" or "45-50" to a float metres value.
+
+    Returns the interval midpoint (None when unparseable). US-ORCA-014.
+    """
+    if depth_range is None:
+        return None
+    if isinstance(depth_range, (int, float)):
+        try:
+            return float(depth_range)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(depth_range, str):
+        return None
+    import re as _re
+
+    nums = _re.findall(r"\d+(?:\.\d+)?", depth_range)
+    if not nums:
+        return None
+    try:
+        vals = [float(n) for n in nums]
+    except (TypeError, ValueError):
+        return None
+    if len(vals) >= 2:
+        return round((vals[0] + vals[1]) / 2.0, 2)
+    return round(vals[0], 2)
+
+
+def _wind_kt_to_kph(wind_kt: Any) -> float | None:
+    """Convert wind knots to kph (US-ORCA-014 canonical contract)."""
+    if wind_kt is None:
+        return None
+    try:
+        return round(float(wind_kt) * _KT_TO_KPH, 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _veto_safety(
+    wave_m: float | None,
+    wind_kph: float | None,
+    inside_eez: Any,
+    inside_mpa: Any,
+    cyclone_alert: Any = False,
+) -> tuple[str, float]:
+    """Apply the US-ORCA-014 safety veto.
+
+    danger: wave>2.5 or wind>40kph or cyclone alert or inside MPA or
+        explicitly outside EEZ. caution: wave>1.5 or wind>25kph.
+    Missing measurements degrade to caution. Returns (safety, confidence)
+    where confidence is DEFAULT_CONFIDENCE only for safe, else degraded.
+    """
+    try:
+        banned = bool(inside_mpa) or (inside_eez is False)
+    except Exception:
+        banned = False
+    try:
+        cyclone = bool(cyclone_alert)
+    except Exception:
+        cyclone = False
+    if banned or cyclone:
+        return "danger", DEGRADED_CONFIDENCE
+    if wave_m is None or wind_kph is None:
+        # Nulls → caution + degraded confidence (never assumed safe).
+        if (wave_m is not None and wave_m > _WAVE_DANGER_M) or (
+            wind_kph is not None and wind_kph > _WIND_DANGER_KPH
+        ):
+            return "danger", DEGRADED_CONFIDENCE
+        return "caution", DEGRADED_CONFIDENCE
+    if wave_m > _WAVE_DANGER_M or wind_kph > _WIND_DANGER_KPH:
+        return "danger", DEGRADED_CONFIDENCE
+    if wave_m > _WAVE_CAUTION_M or wind_kph > _WIND_CAUTION_KPH:
+        return "caution", DEGRADED_CONFIDENCE
+    return "safe", DEFAULT_CONFIDENCE
+
+
 def _to_geojson_features(ranked_zones: list[dict]) -> list[dict]:
+    """Render ranked zones as GeoJSON Features (US-ORCA-014 canonical contract).
+
+    Canonical properties: safety, distance_km, depth_m, wave_m, wind_kph,
+    confidence — converted from combiner fields (distance_from_user_km →
+    distance_km, depth_range → depth_m float, wave_height_m → wave_m,
+    wind_kt × 1.852 → wind_kph) with the safety veto applied per zone.
+    Legacy properties (zone_id/place/sector/bearing/direction/depth_range/
+    wave_height_m/wind_kt/inside_eez/inside_mpa/score) are preserved for
+    backward compatibility.
+    """
     features = []
     for z in ranked_zones:
         lat = z.get("lat")
@@ -195,6 +288,32 @@ def _to_geojson_features(ranked_zones: list[dict]) -> list[dict]:
             lon_f = float(lon)
         except (TypeError, ValueError):
             continue
+        # distance_km with legacy fallbacks
+        dist_raw = z.get("distance_km")
+        if dist_raw is None:
+            dist_raw = z.get("distance_from_user_km", z.get("distance"))
+        try:
+            dist_km = round(float(dist_raw), 2) if dist_raw is not None else None
+        except (TypeError, ValueError):
+            dist_km = None
+        depth_m = _parse_depth_m(z.get("depth_range", z.get("depth")))
+        wave_raw = z.get("wave_height_m", z.get("wave_m", z.get("wave")))
+        try:
+            wave_m = round(float(wave_raw), 2) if wave_raw is not None else None
+        except (TypeError, ValueError):
+            wave_m = None
+        wind_raw = z.get("wind_kt", z.get("wind_speed_kt", z.get("wind_kph")))
+        if z.get("wind_kph") is not None and z.get("wind_kt") is None and z.get("wind_speed_kt") is None:
+            try:
+                wind_kph: float | None = round(float(z.get("wind_kph")), 2)
+            except (TypeError, ValueError):
+                wind_kph = None
+        else:
+            wind_kph = _wind_kt_to_kph(wind_raw)
+        cyclone_alert = z.get("cyclone_alert", z.get("cyclone"))
+        safety, confidence = _veto_safety(
+            wave_m, wind_kph, z.get("inside_eez"), z.get("inside_mpa"), cyclone_alert
+        )
         features.append({
             "type": "Feature",
             "properties": {
@@ -204,12 +323,18 @@ def _to_geojson_features(ranked_zones: list[dict]) -> list[dict]:
                 "bearing": z.get("bearing"),
                 "direction": z.get("direction"),
                 "depth_range": z.get("depth_range", ""),
-                "distance_km": z.get("distance_km"),
+                "distance_km": dist_km if dist_km is not None else z.get("distance_km"),
                 "score": z.get("score"),
                 "wave_height_m": z.get("wave_height_m"),
                 "wind_kt": z.get("wind_kt"),
                 "inside_eez": z.get("inside_eez"),
                 "inside_mpa": z.get("inside_mpa"),
+                # US-ORCA-014 canonical contract
+                "safety": safety,
+                "depth_m": depth_m,
+                "wave_m": wave_m,
+                "wind_kph": wind_kph,
+                "confidence": confidence,
             },
             "geometry": {"type": "Point", "coordinates": [lon_f, lat_f]},
         })

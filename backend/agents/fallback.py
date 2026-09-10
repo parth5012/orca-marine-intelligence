@@ -503,6 +503,94 @@ def _parse_intent(query: str) -> dict:
 # re-extracting history.
 
 
+# ---------------------------------------------------------------------------
+# US-ORCA-014: Kochi bbox fallback — offline GeoJSON haversine search
+# ---------------------------------------------------------------------------
+
+# Kochi is guaranteed present in _KNOWN_PORTS (default fishing port for the
+# planner timeout fallback in graph.py). Asserted here so a registry edit
+# can never silently drop it.
+assert "Kochi" in _KNOWN_PORTS, "fallback: Kochi missing from _KNOWN_PORTS"
+
+KOCHI_LAT = 9.93
+KOCHI_LON = 76.26
+
+
+def kochi_bbox_fallback(
+    lat: float | None = None,
+    lon: float | None = None,
+    radius_km: float = 80.0,
+    geojson_path: str | None = None,
+) -> list[dict]:
+    """Return flat PFZ points within ``radius_km`` of (lat, lon).
+
+    Defaults to Kochi (9.93, 76.26). Reads ``data/pfz-today.geojson``
+    offline and filters with haversine distance, sorted nearest-first.
+    Each point is a flat dict (zone_id/place/sector/lat/lon/
+    distance_from_user_km) matching the combiner fish_results shape.
+    Returns [] when the file is missing or unreadable (never raises).
+    """
+    import json
+
+    clat = KOCHI_LAT if lat is None else float(lat)
+    clon = KOCHI_LON if lon is None else float(lon)
+    if geojson_path is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        geojson_path = os.path.normpath(os.path.join(here, "..", "..", "data", "pfz-today.geojson"))
+    try:
+        with open(geojson_path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except Exception as exc:
+        logger.warning("fallback.kochi_bbox: unreadable %s (%s)", geojson_path, exc)
+        return []
+    feats = doc.get("features") if isinstance(doc, dict) else None
+    if not isinstance(feats, list):
+        return []
+    out: list[dict] = []
+    for f in feats:
+        if not isinstance(f, dict):
+            continue
+        raw_props = f.get("properties")
+        props: dict = raw_props if isinstance(raw_props, dict) else {}
+        raw_geom = f.get("geometry")
+        geom: dict = raw_geom if isinstance(raw_geom, dict) else {}
+        coords = geom.get("coordinates")
+        plat = props.get("lat", props.get("latitude"))
+        plon = props.get("lon", props.get("longitude", props.get("lng")))
+        if plat is None and isinstance(coords, (list, tuple)) and len(coords) >= 2:
+            try:
+                plat = float(coords[1])
+            except (TypeError, ValueError):
+                plat = None
+        if plon is None and isinstance(coords, (list, tuple)) and len(coords) >= 2:
+            try:
+                plon = float(coords[0])
+            except (TypeError, ValueError):
+                plon = None
+        if plat is None or plon is None:
+            continue
+        try:
+            dist = _haversine_km(clat, clon, float(plat), float(plon))
+        except (TypeError, ValueError):
+            continue
+        if dist <= float(radius_km):
+            out.append({
+                "zone_id": str(props.get("zone_id", f.get("zone_id", "unknown"))),
+                "place": str(props.get("place", "Unknown")),
+                "sector": str(props.get("sector", props.get("sector_name", "UNKNOWN"))),
+                "lat": float(plat),
+                "lon": float(plon),
+                "distance_from_user_km": round(dist, 2),
+                "distance_km": round(dist, 2),
+                "bearing": props.get("bearing"),
+                "direction": props.get("direction", props.get("dir")),
+                "depth_range": str(props.get("depth", props.get("depth_range", ""))),
+                "source": "kochi_bbox_fallback",
+            })
+    out.sort(key=lambda z: z["distance_from_user_km"])
+    return out
+
+
 async def fallback_orchestrate(*args: Any, **kwargs: Any) -> dict:
     """Placeholder for legacy gather reserved for future."""
     raise NotImplementedError(
