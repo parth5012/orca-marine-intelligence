@@ -163,12 +163,23 @@ async def find_pfz_near(
     lat: float,
     lon: float,
     radius_km: float = 80.0,
-    limit: int = 5
+    limit: int = 5,
+    valid_date: Optional[date] = None,
 ) -> List[Dict[str, Any]]:
     """
     Find nearest Potential Fishing Zones within radius_km using PostGIS spatial indexes.
     Calculates exact spherical distance on Earth ellipsoid.
+
+    Dedup: one row per (place, valid_date) exists because zone_id is
+    {base}_{date}. Without a date filter yesterday + today rows for the
+    same landing centre both enter top-N with different zone_ids and
+    render as twin cards. We filter to today's valid_date and dedup by
+    normalized place + rounded coords, keeping nearest first.
     """
+    if valid_date is None:
+        valid_date = date.today()
+    # Over-fetch: dupes may fill top-N, so fetch extra then dedup to limit.
+    fetch_n = max(int(limit) * 4, int(limit) + 20)
     async with AsyncSessionLocal() as session:
         # Create user reference point in WGS84
         user_point = func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326)
@@ -183,8 +194,9 @@ async def find_pfz_near(
                 func.ST_Distance(zone_geog, user_geog).label("distance_meters")
             )
             .where(func.ST_DWithin(zone_geog, user_geog, radius_meters))
+            .where(PFZZone.valid_date == valid_date)
             .order_by("distance_meters")
-            .limit(limit)
+            .limit(fetch_n)
         )
 
         result = await session.execute(query)
@@ -201,7 +213,25 @@ async def find_pfz_near(
                 "lon": zone.lon,
                 "distance_from_user_km": round(dist_m / 1000.0, 1),
             })
-        return spots
+        # Python-side dedup: same place (case/space-insensitive) +
+        # coords rounded to 4dp (~11m) = same physical zone. Keeps nearest.
+        seen: set[str] = set()
+        deduped: List[Dict[str, Any]] = []
+        for s in spots:
+            try:
+                place_norm = str(s.get("place") or "").strip().lower()
+                lat_r = round(float(s.get("lat")), 4)
+                lon_r = round(float(s.get("lon")), 4)
+                key = f"{place_norm}|{lat_r:.4f}|{lon_r:.4f}"
+            except (TypeError, ValueError):
+                key = f"id:{s.get('zone_id')}"
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(s)
+            if len(deduped) >= limit:
+                break
+        return deduped
 
 
 async def check_geofence(lat: float, lon: float) -> Dict[str, Any]:

@@ -276,7 +276,33 @@ def _to_geojson_features(ranked_zones: list[dict]) -> list[dict]:
     Legacy properties (zone_id/place/sector/bearing/direction/depth_range/
     wave_height_m/wind_kt/inside_eez/inside_mpa/score) are preserved for
     backward compatibility.
+
+    Dedup: provisional + final map events both flow through here, so twin
+    rows (same place, rounded coords) collapse to one Feature. Keeps first.
     """
+    # Normalize + dedup by place|rounded-coords before rendering.
+    try:
+        from backend.agents.zone_dedup import dedup_zones as _dedup_zones
+
+        ranked_zones = _dedup_zones(list(ranked_zones or []))
+    except Exception:
+        _seen: set[str] = set()
+        _uniq: list[dict] = []
+        for _z in ranked_zones or []:
+            if not isinstance(_z, dict):
+                continue
+            try:
+                _p = str(_z.get("place") or "").strip().lower()
+                _la = round(float(str(_z.get("lat"))), 4)
+                _lo = round(float(str(_z.get("lon"))), 4)
+                _k = f"{_p}|{_la:.4f}|{_lo:.4f}"
+            except (TypeError, ValueError):
+                _k = f"id:{_z.get('zone_id') or _z.get('id')}"
+            if _k in _seen:
+                continue
+            _seen.add(_k)
+            _uniq.append(_z)
+        ranked_zones = _uniq
     features = []
     for z in ranked_zones:
         lat = z.get("lat")
