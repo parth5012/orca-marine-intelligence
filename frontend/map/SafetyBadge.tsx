@@ -56,12 +56,25 @@ export default function SafetyBadge({
     ? 'caution'
     : 'safe';
 
+  const statusMessage =
+    statusType === 'danger'
+      ? dangerStr === 'cyclone'
+        ? 'CYCLONE ALERT'
+        : 'DO NOT SAIL'
+      : statusType === 'caution'
+      ? 'CAUTION'
+      : 'SEA SAFE';
+
+  const measurements = !compact
+    ? ` Waves: ${safeWaves}m, Wind: ${safeWind} kts`
+    : '';
+
   return (
     <div
       data-testid="safety-badge"
       data-status={statusType}
       role="status"
-      aria-label={`Sea status: ${statusType}`}
+      aria-label={`Sea status: ${statusMessage}.${measurements}`}
       className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-all shadow-sm ${
         statusType === 'danger'
           ? 'bg-red-950/90 border-red-500/80 text-red-200 animate-pulse'
