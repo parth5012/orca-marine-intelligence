@@ -388,7 +388,7 @@ export default function ChatPanel({
                     msg.safety.danger === 'danger' ||
                     msg.safety.danger === 'cyclone' ||
                     msg.safety.badge === 'red' ? (
-                      <div className="rounded-xl bg-red-950/80 border-2 border-red-600/90 p-3 shadow-lg shadow-red-950/40 animate-pulse">
+                      <div data-testid="safety-banner-danger" role="alert" className="rounded-xl bg-red-950/80 border-2 border-red-600/90 p-3 shadow-lg shadow-red-950/40 animate-pulse">
                         <div className="flex items-center gap-2.5">
                           <span className="text-xl" role="img" aria-label="Danger">
                             🚨
@@ -411,7 +411,7 @@ export default function ChatPanel({
                     ) : msg.safety.warning_text === 'CAUTION' ||
                       msg.safety.badge === 'amber' ||
                       msg.safety.danger === 'caution' ? (
-                      <div className="rounded-xl bg-amber-950/70 border border-amber-500/80 p-3 shadow-md">
+                      <div data-testid="safety-banner-caution" role="alert" className="rounded-xl bg-amber-950/70 border border-amber-500/80 p-3 shadow-md">
                         <div className="flex items-center gap-2.5">
                           <span className="text-xl">⚠️</span>
                           <div className="flex-1">
@@ -430,7 +430,7 @@ export default function ChatPanel({
                         </div>
                       </div>
                     ) : (
-                      <div className="rounded-xl bg-emerald-950/50 border border-emerald-500/50 px-3 py-2 flex items-center justify-between">
+                      <div data-testid="safety-banner-safe" className="rounded-xl bg-emerald-950/50 border border-emerald-500/50 px-3 py-2 flex items-center justify-between">
                         <div className="flex items-center gap-2 text-xs text-emerald-300">
                           <span>✅</span>
                           <span className="font-semibold">SAFE CONDITIONS</span>
@@ -488,7 +488,7 @@ export default function ChatPanel({
                   )}
 
                   {/* Evidence & Latency Footer */}
-                  <div className="mt-3 pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
+                  <div data-testid="evidence-footer" className="mt-3 pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
                     {msg.evidence && msg.evidence.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-slate-500 font-semibold">Evidence:</span>
@@ -533,6 +533,7 @@ export default function ChatPanel({
                         return (
                           <div
                             key={zone.id}
+                            data-testid={`zone-card-${zone.id}`}
                             className={`rounded-xl p-3 text-xs transition-all border ${
                               isSelected
                                 ? 'bg-cyan-950/80 border-cyan-400 shadow-md shadow-cyan-950/40'
@@ -632,6 +633,8 @@ export default function ChatPanel({
                             <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-end">
                               <button
                                 type="button"
+                                data-testid={`zone-show-on-map-${zone.id}`}
+                                aria-label={`Show ${zone.name} on map`}
                                 onClick={() => handleFlyToZone(zone)}
                                 className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors ${
                                   isSelected
