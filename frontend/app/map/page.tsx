@@ -39,7 +39,6 @@ const SECTORS = [
 ];
 
 export interface MapPageProps {
-  initialBasemapStyle?: BasemapStyle;
   searchParams?: {
     basemap?: string;
     style?: string;
@@ -48,15 +47,14 @@ export interface MapPageProps {
   };
 }
 
-export default function MapPage({ initialBasemapStyle, searchParams }: MapPageProps = {}) {
+export default function MapPage({ searchParams }: MapPageProps) {
   const resolvedBasemapStyle = useMemo<BasemapStyle | undefined>(() => {
-    if (initialBasemapStyle) return initialBasemapStyle;
     const candidate = searchParams?.basemap || searchParams?.style;
     if (candidate && typeof candidate === 'string') {
       return normalizeBasemapStyle(candidate);
     }
     return undefined;
-  }, [initialBasemapStyle, searchParams]);
+  }, [searchParams]);
   const [mapCenter, setMapCenter] = useState<[number, number]>([9.93, 76.27]);
   const [mapZoom, setMapZoom] = useState<number>(8);
   const [selectedSector, setSelectedSector] = useState<string>('ALL');
