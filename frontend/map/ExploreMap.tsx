@@ -110,6 +110,16 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
   const [nearestLoading, setNearestLoading] = useState<boolean>(false);
 
   // Sync controlled props (map tab drives center/zoom/highlight from chat).
+  // applyCenter is declared first: the sector sync below recenters the map
+  // on ?sector= (same as a user sector pick), not just the filter value.
+  const applyCenter = useCallback(
+    (c: [number, number], z?: number) => {
+      setMapCenter(c);
+      if (typeof z === 'number') setMapZoom(z);
+      onCenterChange?.(c);
+    },
+    [onCenterChange]
+  );
   useEffect(() => {
     if (controlledCenter) setMapCenter(controlledCenter);
   }, [controlledCenter]);
@@ -117,8 +127,12 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
     if (typeof controlledZoom === 'number') setMapZoom(controlledZoom);
   }, [controlledZoom]);
   useEffect(() => {
-    if (typeof controlledSector === 'string') setSelectedSector(controlledSector);
-  }, [controlledSector]);
+    if (typeof controlledSector === 'string') {
+      setSelectedSector(controlledSector);
+      const cfg = SECTORS.find((s) => s.value === controlledSector);
+      if (cfg) applyCenter(cfg.center, cfg.zoom);
+    }
+  }, [controlledSector, applyCenter]);
   useEffect(() => {
     if (controlledHighlight && controlledHighlight.length > 0) {
       setSelectedZone(controlledHighlight[0]);
@@ -144,15 +158,6 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
       { timeout: 8000, enableHighAccuracy: true }
     );
   }, [controlledUserLocation]);
-
-  const applyCenter = useCallback(
-    (c: [number, number], z?: number) => {
-      setMapCenter(c);
-      if (typeof z === 'number') setMapZoom(z);
-      onCenterChange?.(c);
-    },
-    [onCenterChange]
-  );
 
   const handleSectorChange = useCallback(
     (value: string) => {
@@ -242,6 +247,12 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
   );
 
   const engineLayers = useMemo(() => filterEngineLayers(ctxLayers as Record<string, boolean | undefined>), [ctxLayers]);
+  // Stable identity: MapInner re-applies `activeLayers` in an effect keyed on
+  // identity, so a fresh literal every render would reset user toggles.
+  const mapLayers = useMemo(
+    () => ({ ...engineLayers, ...(ctxLayers as object) }),
+    [engineLayers, ctxLayers]
+  );
   const showSst = isLayerOn(ctxLayers as Record<string, boolean | undefined>, 'sst');
   const showChl = isLayerOn(ctxLayers as Record<string, boolean | undefined>, 'chlorophyll');
   const showWaves = isLayerOn(ctxLayers as Record<string, boolean | undefined>, 'waves');
@@ -463,7 +474,7 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
           center={mapCenter}
           zoom={mapZoom}
           sector={selectedSector}
-          activeLayers={{ ...engineLayers, ...(ctxLayers as object) }}
+          activeLayers={mapLayers}
           highlightFeatures={highlightFeatures}
           userLocation={userLocation}
           initialBasemapStyle={initialBasemapStyle}

@@ -13,32 +13,27 @@
 
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { Suspense, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { AppProvider } from '@/context/AppContext';
 import { ExploreMap } from '@/map';
 import { normalizeBasemapStyle, BasemapStyle } from '@/map';
 
-export interface MapPageProps {
-  searchParams?: {
-    basemap?: string;
-    style?: string;
-    sector?: string;
-    [key: string]: string | string[] | undefined;
-  };
-}
-
-function MapPageInner({ searchParams }: MapPageProps) {
+function MapPageInner() {
+  // Client Component: read query params via hook (server page props are
+  // unavailable here), wrapped in Suspense for static rendering.
+  const searchParams = useSearchParams();
   const resolvedBasemapStyle = useMemo<BasemapStyle | undefined>(() => {
-    const candidate = searchParams?.basemap || searchParams?.style;
-    if (candidate && typeof candidate === 'string') {
+    const candidate = searchParams.get('basemap') || searchParams.get('style');
+    if (candidate) {
       return normalizeBasemapStyle(candidate);
     }
     return undefined;
   }, [searchParams]);
 
   const initialSector = useMemo(() => {
-    const raw = searchParams?.sector;
-    if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim().toUpperCase();
+    const raw = searchParams.get('sector');
+    if (raw && raw.trim().length > 0) return raw.trim().toUpperCase();
     return undefined;
   }, [searchParams]);
 
@@ -55,10 +50,12 @@ function MapPageInner({ searchParams }: MapPageProps) {
   );
 }
 
-export default function MapPage({ searchParams }: MapPageProps) {
+export default function MapPage() {
   return (
     <AppProvider>
-      <MapPageInner searchParams={searchParams} />
+      <Suspense fallback={<div className="flex-1 bg-slate-950" />}>
+        <MapPageInner />
+      </Suspense>
     </AppProvider>
   );
 }

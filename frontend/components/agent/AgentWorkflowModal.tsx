@@ -13,7 +13,7 @@
 
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   X,
   Sparkles,
@@ -53,6 +53,16 @@ export const AgentWorkflowModal: React.FC<AgentWorkflowModalProps> = ({
   const { themeMode } = useApp();
   const isLight = themeMode === 'light';
 
+  // Escape dismisses the modal (declared before the isOpen guard).
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const liveSteps = Array.isArray(steps) ? steps : [];
@@ -61,6 +71,7 @@ export const AgentWorkflowModal: React.FC<AgentWorkflowModalProps> = ({
     <div
       data-testid="workflow-modal"
       role="dialog"
+      aria-modal="true"
       aria-label="ORCA multi-agent workflow"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xl animate-fade-in overflow-y-auto"
     >

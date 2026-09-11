@@ -39,15 +39,17 @@ export const PayloadInspectorModal: React.FC<PayloadInspectorProps> = ({
   const currentPayload = activeTab === 'response' ? responsePayload : requestPayload;
 
   const handleCopy = () => {
-    if (currentPayload) {
-      try {
-        void navigator.clipboard.writeText(currentPayload);
-      } catch {
+    if (!currentPayload) return;
+    // Chain the clipboard promise: `copied` flips only after the write
+    // resolves (sync try/catch cannot catch the async rejection).
+    Promise.resolve(navigator.clipboard?.writeText(currentPayload))
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {
         /* clipboard unavailable — selection still visible */
-      }
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    }
+      });
   };
 
   return (

@@ -54,11 +54,8 @@ export const KM_TO_NM = 1.852;
 export const CRUISE_KMH = 25;
 
 export function getBackendBaseUrl(): string {
-  if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  }
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
-  if (envUrl && envUrl.trim().length > 0) return envUrl.replace(/\/$/, '');
+  if (envUrl && envUrl.trim().length > 0) return envUrl.trim().replace(/\/+$/, '');
   return 'http://localhost:8000';
 }
 

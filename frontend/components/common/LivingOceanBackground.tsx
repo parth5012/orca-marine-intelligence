@@ -1,9 +1,11 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, MotionConfig } from 'framer-motion';
 
 export const LivingOceanBackground: React.FC = () => {
+  // Honor the OS reduced-motion preference: MotionConfig disables the
+  // transform/layout loops below (static decorative elements instead).
   // Pre-configured floating bubble particle settings
   const bubbles = [
     { id: 1, left: '8%', size: 6, duration: 19, delay: 0 },
@@ -29,7 +31,8 @@ export const LivingOceanBackground: React.FC = () => {
   ];
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none">
+    <MotionConfig reducedMotion="user">
+    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none" aria-hidden="true">
       {/* Ambient Underwater Lighting Pools */}
       <div className="absolute top-10 left-1/4 w-[600px] h-[350px] bg-gradient-to-b from-cyan-400/10 via-sky-500/05 to-transparent rounded-full blur-3xl" />
       <div className="absolute bottom-20 right-10 w-[550px] h-[450px] bg-teal-500/08 rounded-full blur-3xl" />
@@ -332,5 +335,6 @@ export const LivingOceanBackground: React.FC = () => {
         </svg>
       </div>
     </div>
+    </MotionConfig>
   );
 };

@@ -98,8 +98,14 @@ export default function ChatPanel({
   // SSE sendMessage (never a simulator). Wait out any active stream so the
   // query is never dropped (consume only on send).
   const { pendingChatQuery, consumeChatQuery } = useApp();
+  // Idempotency guard keyed by nonce: React 18 StrictMode re-invokes this
+  // effect with the same pendingChatQuery snapshot, and consumeChatQuery's
+  // state update hasn't flushed when sendMessage starts.
+  const sentQueryRef = useRef<number | null>(null);
   useEffect(() => {
     if (!pendingChatQuery || isStreaming) return;
+    if (sentQueryRef.current === pendingChatQuery.nonce) return;
+    sentQueryRef.current = pendingChatQuery.nonce;
     const text = pendingChatQuery.text;
     consumeChatQuery();
     void sendMessage(text);
@@ -316,12 +322,14 @@ export default function ChatPanel({
                 {/* Collapsible Reasoning Accordion */}
                 {msg.reasoning_steps && msg.reasoning_steps.length > 0 && (
                   <div className="rounded-xl bg-slate-900/80 border border-slate-800 overflow-hidden shadow-sm">
-                    <button
-                      type="button"
-                      onClick={() => toggleAccordion(msg.id)}
-                      className="w-full px-3 py-2 flex items-center justify-between text-left text-xs bg-slate-900 hover:bg-slate-850 transition-colors border-b border-slate-800/60"
-                    >
-                      <div className="flex items-center gap-2">
+                    <div className="w-full px-3 py-2 flex items-center justify-between text-xs bg-slate-900 border-b border-slate-800/60">
+                      <button
+                        type="button"
+                        onClick={() => toggleAccordion(msg.id)}
+                        aria-expanded={!!expandedAccordions[msg.id]}
+                        aria-label="Toggle multi-agent reasoning"
+                        className="flex items-center gap-2 text-left hover:opacity-90 transition-opacity"
+                      >
                         {msg.isStreaming ? (
                           <span className="flex h-2 w-2 relative">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
@@ -333,11 +341,10 @@ export default function ChatPanel({
                         <span className="font-medium text-slate-300">
                           Multi-Agent Reasoning ({msg.reasoning_steps.length} {msg.reasoning_steps.length === 1 ? 'step' : 'steps'})
                         </span>
-                      </div>
+                      </button>
                       <div className="flex items-center gap-2">
-                        <span
-                          role="button"
-                          tabIndex={0}
+                        <button
+                          type="button"
                           data-testid={`workflow-open-${msg.id}`}
                           aria-label="View agent workflow"
                           title="View agent workflow"
@@ -345,33 +352,35 @@ export default function ChatPanel({
                             e.stopPropagation();
                             setWorkflowForMsgId(msg.id);
                           }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.stopPropagation();
-                              setWorkflowForMsgId(msg.id);
-                            }
-                          }}
-                          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono underline underline-offset-2 cursor-pointer"
+                          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono underline underline-offset-2 cursor-pointer bg-transparent border-0 p-0"
                         >
                           Workflow
-                        </span>
+                        </button>
                         {msg.isStreaming && (
                           <span className="text-[10px] text-cyan-400 animate-pulse font-mono">
                             Analyzing telemetry...
                           </span>
                         )}
-                        <svg
-                          className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
-                            expandedAccordions[msg.id] ? 'rotate-180' : ''
-                          }`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
+                        <button
+                          type="button"
+                          onClick={() => toggleAccordion(msg.id)}
+                          aria-expanded={!!expandedAccordions[msg.id]}
+                          aria-label={expandedAccordions[msg.id] ? 'Collapse reasoning' : 'Expand reasoning'}
+                          className="bg-transparent border-0 p-0 leading-none"
                         >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                        </svg>
+                          <svg
+                            className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
+                              expandedAccordions[msg.id] ? 'rotate-180' : ''
+                            }`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
                       </div>
-                    </button>
+                    </div>
 
                     {expandedAccordions[msg.id] && (
                       <div className="p-2.5 space-y-1.5 bg-slate-950/50">
