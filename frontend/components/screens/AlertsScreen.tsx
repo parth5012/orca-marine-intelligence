@@ -24,7 +24,7 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp, KOCHI_FALLBACK } from '@/context/AppContext';
 import { AlertCard, AlertItem } from '@/components/cards/AlertCard';
 import { ShieldAlert, ShieldCheck, Filter } from 'lucide-react';
@@ -108,8 +108,11 @@ export const AlertsScreen: React.FC = () => {
 
   const [loading, setLoading] = useState<boolean>(true);
   const [offline, setOffline] = useState<boolean>(false);
+  // Latest load run; refresh aborts the previous run so a slow earlier
+  // response can never overwrite newer results or setState after unmount.
+  const loadAbortRef = useRef<AbortController | null>(null);
 
-  const loadLiveAlerts = useCallback(async () => {
+  const loadLiveAlerts = useCallback(async (signal?: AbortSignal) => {
     const base = getBackendBase();
     const lat = userLocation?.lat ?? KOCHI_FALLBACK.lat;
     const lon = userLocation?.lon ?? KOCHI_FALLBACK.lon;
@@ -122,7 +125,8 @@ export const AlertsScreen: React.FC = () => {
     // 1. Cyclone feed (live).
     try {
       const res = await fetch(
-        `${base}/api/weather/cyclone?lat=${lat}&lon=${lon}`
+        `${base}/api/weather/cyclone?lat=${lat}&lon=${lon}`,
+        { signal }
       );
       if (res.ok) {
         const data = await res.json();
@@ -174,7 +178,8 @@ export const AlertsScreen: React.FC = () => {
     // 2. Current weather hazards (live): wave/wind → High Waves / Wind cards.
     try {
       const res = await fetch(
-        `${base}/api/weather/current?lat=${lat}&lon=${lon}`
+        `${base}/api/weather/current?lat=${lat}&lon=${lon}`,
+        { signal }
       );
       if (res.ok) {
         const data = await res.json();
@@ -235,7 +240,7 @@ export const AlertsScreen: React.FC = () => {
 
     // 3. Geofence monitoring copy (live counts when reachable).
     try {
-      const res = await fetch(`${base}/api/geofence/status`);
+      const res = await fetch(`${base}/api/geofence/status`, { signal });
       if (res.ok) {
         const data = await res.json();
         anyLive = true;
@@ -259,6 +264,9 @@ export const AlertsScreen: React.FC = () => {
       // Optional — geofence copy degrades silently.
     }
 
+    // A superseded/aborted run must not touch state (stale overwrite +
+    // post-unmount setState). Aborts surface as caught AbortErrors above.
+    if (signal?.aborted) return;
     if (!anyLive) {
       setOffline(true);
       setAlertsList(
@@ -288,7 +296,10 @@ export const AlertsScreen: React.FC = () => {
   }, [userLocation?.lat, userLocation?.lon]);
 
   useEffect(() => {
-    void loadLiveAlerts();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    void loadLiveAlerts(controller.signal);
+    return () => controller.abort();
   }, [loadLiveAlerts]);
 
   const displayAlerts: AlertItem[] = offline
@@ -352,7 +363,12 @@ export const AlertsScreen: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={() => void loadLiveAlerts()}
+            onClick={() => {
+              loadAbortRef.current?.abort();
+              const controller = new AbortController();
+              loadAbortRef.current = controller;
+              void loadLiveAlerts(controller.signal);
+            }}
             data-testid="alerts-refresh"
             className="px-4 py-2 rounded-xl border border-slate-600 text-slate-300 text-xs font-bold hover:bg-slate-800 transition-colors"
           >

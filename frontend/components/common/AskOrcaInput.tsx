@@ -46,10 +46,12 @@ export const AskOrcaInput: React.FC = () => {
   return (
     <div className="w-full max-w-4xl mx-auto my-4 space-y-3">
       {/* Prominent Text Query Banner */}
-      <div
+      <button
+        type="button"
         onClick={() => setActiveTab('chat')}
         data-testid="ask-orca-banner"
-        className={`p-3.5 rounded-2xl border flex items-center justify-between cursor-pointer transition-all hover:scale-[1.01] ${
+        aria-label="Open ORCA chat"
+        className={`w-full text-left p-3.5 rounded-2xl border flex items-center justify-between cursor-pointer transition-all hover:scale-[1.01] ${
           isLight
             ? 'bg-gradient-to-r from-sky-50 via-cyan-50 to-teal-50 border-cyan-300 text-slate-800 shadow-sm'
             : 'glass-panel bg-gradient-to-r from-cyan-950/80 via-slate-900 to-teal-950/60 border-cyan-500/40 text-white'
@@ -91,7 +93,7 @@ export const AskOrcaInput: React.FC = () => {
           <span>Start Reasoning</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </div>
-      </div>
+      </button>
 
       {/* Main Search Input Form */}
       <form

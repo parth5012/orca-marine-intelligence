@@ -22,6 +22,10 @@ interface EvidenceCardProps {
   sourceText?: string;
   confidenceScore?: number;
   lastUpdated?: string;
+  /** Sources that actually answered (unchecked sources render without ✓). Defaults to all. */
+  answeredSources?: string[];
+  /** Show the SAFETY VALIDATED footer badge only when the caller confirms live validation. */
+  validated?: boolean;
 }
 
 const DATA_SOURCES = [
@@ -47,8 +51,8 @@ const listItem = {
   show: { opacity: 1, x: 0 },
 };
 
-function toPercent(confidence?: number): number {
-  if (confidence == null || !Number.isFinite(Number(confidence))) return 87;
+function toPercent(confidence?: number): number | null {
+  if (confidence == null || !Number.isFinite(Number(confidence))) return null;
   const n = Number(confidence);
   if (n > 0 && n <= 1) return Math.round(n * 100);
   return Math.round(n);
@@ -58,11 +62,15 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
   evidence,
   title = 'WHY ORCA RECOMMENDS THIS',
   sourceText = 'Validated by INCOIS Marine Oceanography & IMD Weather Models',
-  confidenceScore = 87,
+  confidenceScore,
   lastUpdated = 'Live advisory stream',
+  answeredSources,
+  validated = true,
 }) => {
   const { themeMode } = useApp();
   const isLight = themeMode === 'light';
+  const answered = answeredSources ?? DATA_SOURCES;
+  const pct = toPercent(confidenceScore);
 
   if (!evidence || evidence.length === 0) return null;
 
@@ -85,11 +93,13 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
         </div>
 
         <div className="flex items-center gap-2 font-mono text-xs">
-          <span className={`px-2.5 py-0.5 rounded-full font-bold border ${
-            isLight ? 'bg-emerald-50 text-emerald-900 border-emerald-300' : 'bg-emerald-950 text-emerald-300 border-emerald-800'
-          }`}>
-            Confidence: {toPercent(confidenceScore)}%
-          </span>
+          {pct != null && (
+            <span className={`px-2.5 py-0.5 rounded-full font-bold border ${
+              isLight ? 'bg-emerald-50 text-emerald-900 border-emerald-300' : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+            }`}>
+              Confidence: {pct}%
+            </span>
+          )}
           <span className={`hidden sm:inline-block px-2 py-0.5 rounded border text-[10px] ${
             isLight ? 'bg-cyan-50 text-cyan-900 border-cyan-200' : 'bg-cyan-950 text-cyan-300 border-cyan-800'
           }`}>
@@ -116,7 +126,7 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
                   : 'bg-slate-900 text-cyan-300 border-slate-800'
               }`}
             >
-              • {ds} ✓
+              • {ds}{answered.includes(ds) ? ' ✓' : ''}
             </span>
           ))}
         </div>
@@ -145,10 +155,12 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
             <Info className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
             <span>Source: {sourceText}</span>
           </div>
-          <span className="font-mono text-[10px] text-emerald-500 font-bold flex items-center gap-1">
-            <ShieldCheck className="w-3 h-3 text-emerald-400" />
-            SAFETY VALIDATED ✓
-          </span>
+          {validated && (
+            <span className="font-mono text-[10px] text-emerald-500 font-bold flex items-center gap-1">
+              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+              SAFETY VALIDATED ✓
+            </span>
+          )}
         </div>
       )}
     </div>

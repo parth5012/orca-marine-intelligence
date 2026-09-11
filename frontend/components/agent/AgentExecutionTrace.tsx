@@ -23,6 +23,8 @@ import {
   ChevronDown,
   CheckCircle2,
   Clock,
+  AlertTriangle,
+  XCircle,
   Sparkles,
   Waves,
   CloudSun,
@@ -38,6 +40,14 @@ interface AgentExecutionTraceProps {
   onInspectPayload?: () => void;
 }
 
+function stateStyle(state: string) {
+  const s = String(state ?? '').toLowerCase();
+  if (s === 'running') return { dot: 'bg-cyan-400 animate-pulse', pillLight: 'bg-cyan-50 text-cyan-800 border-cyan-200', pillDark: 'bg-cyan-950 text-cyan-300 border-cyan-800', Icon: Clock };
+  if (s === 'timeout') return { dot: 'bg-amber-500', pillLight: 'bg-amber-50 text-amber-800 border-amber-200', pillDark: 'bg-amber-950 text-amber-300 border-amber-800', Icon: Clock };
+  if (s === 'error') return { dot: 'bg-rose-500', pillLight: 'bg-rose-50 text-rose-800 border-rose-200', pillDark: 'bg-rose-950 text-rose-300 border-rose-800', Icon: XCircle };
+  if (s === 'fallback') return { dot: 'bg-amber-400', pillLight: 'bg-amber-50 text-amber-800 border-amber-200', pillDark: 'bg-amber-950 text-amber-300 border-amber-800', Icon: AlertTriangle };
+  return { dot: 'bg-emerald-500', pillLight: 'bg-emerald-50 text-emerald-800 border-emerald-200', pillDark: 'bg-emerald-950 text-emerald-300 border-emerald-800', Icon: CheckCircle2 };
+}
 function iconForAgent(agent: string) {
   const key = agent.toLowerCase();
   if (key.includes('fish') || key.includes('pfz') || key.includes('ocean') || key.includes('marine')) return Waves;
@@ -52,7 +62,7 @@ function iconForAgent(agent: string) {
 
 export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
   traces,
-  confidenceScore = 87,
+  confidenceScore,
   onInspectPayload,
 }) => {
   const { themeMode } = useApp();
@@ -62,9 +72,13 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
   if (!traces || traces.length === 0) return null;
 
   const totalTimeMs = traces.reduce((acc, curr) => acc + (curr.elapsed_ms ?? 0), 0);
-  const pct = Math.round(Number(confidenceScore) <= 1 && Number(confidenceScore) > 0
-    ? Number(confidenceScore) * 100
-    : Number(confidenceScore));
+  // Confidence passthrough: undefined when the backend omits it (no invented 87%).
+  const pct =
+    confidenceScore == null || !Number.isFinite(Number(confidenceScore))
+      ? null
+      : Math.round(Number(confidenceScore) <= 1 && Number(confidenceScore) > 0
+        ? Number(confidenceScore) * 100
+        : Number(confidenceScore));
 
   return (
     <div
@@ -103,13 +117,15 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
               <span className={`font-extrabold text-xs sm:text-sm ${isLight ? 'text-slate-900' : 'text-white'}`}>
                 Agentic Pipeline Trace ({traces.length} Sub-Agents)
               </span>
-              <span
-                className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                  isLight ? 'bg-cyan-100 text-cyan-900 border-cyan-300' : 'bg-cyan-950 text-cyan-300 border-cyan-800'
-                }`}
-              >
-                {pct}% Confidence
-              </span>
+              {pct != null && (
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                    isLight ? 'bg-cyan-100 text-cyan-900 border-cyan-300' : 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                  }`}
+                >
+                  {pct}% Confidence
+                </span>
+              )}
             </div>
             <p className={`text-[11px] font-medium flex items-center gap-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
               <Clock className="w-3 h-3 text-cyan-600 inline" />
@@ -155,6 +171,8 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
             {traces.map((step, idx) => {
               const IconComp = iconForAgent(step.agent);
               const stateLabel = step.state;
+              const st = stateStyle(stateLabel);
+              const StateIcon = st.Icon;
               return (
                 <div
                   key={`${step.agent}-${idx}`}
@@ -164,7 +182,7 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
                       : 'bg-slate-900/90 border-slate-800'
                   }`}
                 >
-                  <div className={`absolute left-2.5 top-3.5 w-3 h-3 rounded-full border-2 bg-emerald-500 ${
+                  <div className={`absolute left-2.5 top-3.5 w-3 h-3 rounded-full border-2 ${st.dot} ${
                     isLight ? 'border-white' : 'border-slate-950'
                   }`} />
 
@@ -176,9 +194,9 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
 
                     <div className="flex items-center gap-1.5 font-mono text-[10px]">
                       <span className={`px-1.5 py-0.5 rounded border ${
-                        isLight ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                        isLight ? st.pillLight : st.pillDark
                       }`}>
-                        <CheckCircle2 className="w-2.5 h-2.5 inline mr-1" />
+                        <StateIcon className="w-2.5 h-2.5 inline mr-1" />
                         {stateLabel}
                       </span>
                       {step.elapsed_ms != null && (

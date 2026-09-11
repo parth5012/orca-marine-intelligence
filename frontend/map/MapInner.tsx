@@ -538,7 +538,7 @@ export default function MapInner({
 
             return (
               <CircleMarker
-                key={`pfz-${idx}-${lat}-${lon}`}
+                key={`pfz-${idx}-${lat}-${lon}-${glowClass ?? 'plain'}`}
                 center={[lat, lon]}
                 radius={7}
                 pathOptions={{

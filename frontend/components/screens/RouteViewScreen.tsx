@@ -25,7 +25,7 @@
 
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { MapView } from '@/map';
 import {
@@ -71,20 +71,33 @@ export const RouteViewScreen: React.FC = () => {
   const [feedOffline, setFeedOffline] = useState(false);
   const [recalcNote, setRecalcNote] = useState<string | null>(null);
 
+  // Navigation interval id (cleared on stop + unmount so restarts never stack).
+  const navTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Guards async safety loads against post-unmount setState.
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+    if (navTimer.current) {
+      clearInterval(navTimer.current);
+      navTimer.current = null;
+    }
+  }, []);
+
   // Live safety + hazards at the destination (direct backend calls).
-  useEffect(() => {
-    if (!dest) return;
-    let cancelled = false;
+  // Shared by the mount effect and the Recalculate handler so both paths
+  // update seaLevel, hazards, and feedOffline identically.
+  const loadSafety = useCallback(async (
+    bailOnCancel = true
+  ): Promise<'safe' | 'caution' | 'danger' | null> => {
+    if (!dest) return null;
     const base = getBackendBaseUrl();
     const [dLat, dLon] = dest.coordinates;
-
-    const load = async (bailOnCancel = true) => {
-      try {
-        const [wRes, gRes] = await Promise.all([
-          fetch(`${base}/api/weather/current?lat=${dLat}&lon=${dLon}`),
-          fetch(`${base}/api/geofence/status`),
-        ]);
-        if (cancelled && bailOnCancel) return;
+    try {
+      const [wRes, gRes] = await Promise.all([
+        fetch(`${base}/api/weather/current?lat=${dLat}&lon=${dLon}`),
+        fetch(`${base}/api/geofence/status`),
+      ]);
+      if (!mountedRef.current && bailOnCancel) return null;
         let level: 'safe' | 'caution' | 'danger' = 'safe';
         const hz: string[] = [];
         let weatherOk = false;
@@ -116,23 +129,24 @@ export const RouteViewScreen: React.FC = () => {
               : 'Route checked against monitored EEZ/MPA/IMBL boundaries'
           );
         }
-        if (cancelled && bailOnCancel) return;
+        if (!mountedRef.current && bailOnCancel) return null;
         setSeaLevel(level);
         setHazards(hz);
         setFeedOffline(!weatherOk && !geoOk);
+        return level;
       } catch {
-        if (cancelled && bailOnCancel) return;
+        if (!mountedRef.current && bailOnCancel) return null;
         setSeaLevel('safe');
         setHazards([]);
         setFeedOffline(true);
+        return null;
       }
-    };
-
-    load();
-    return () => {
-      cancelled = true;
-    };
   }, [dest?.coordinates?.[0], dest?.coordinates?.[1]]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Initial load at the destination.
+  useEffect(() => {
+    void loadSafety(true);
+  }, [loadSafety]);
 
   const route: LiveRouteInfo | null = useMemo(() => {
     if (!dest) return null;
@@ -162,10 +176,12 @@ export const RouteViewScreen: React.FC = () => {
     if (!isNavigating) {
       setIsNavigating(true);
       setNavProgress(15);
-      const interval = setInterval(() => {
+      if (navTimer.current) clearInterval(navTimer.current);
+      navTimer.current = setInterval(() => {
         setNavProgress((prev) => {
           if (prev >= 100) {
-            clearInterval(interval);
+            if (navTimer.current) clearInterval(navTimer.current);
+            navTimer.current = null;
             setIsNavigating(false);
             return 100;
           }
@@ -173,6 +189,8 @@ export const RouteViewScreen: React.FC = () => {
         });
       }, 1500);
     } else {
+      if (navTimer.current) clearInterval(navTimer.current);
+      navTimer.current = null;
       setIsNavigating(false);
       setNavProgress(0);
     }
@@ -418,33 +436,16 @@ export const RouteViewScreen: React.FC = () => {
               data-testid="route-recalc"
               onClick={() => {
                 setRecalcNote('Re-checking live weather + geofence…');
-                const base = getBackendBaseUrl();
-                const [dLat, dLon] = dest.coordinates;
-                Promise.all([
-                  fetch(`${base}/api/weather/current?lat=${dLat}&lon=${dLon}`).then((r) => {
-                    if (!r.ok) throw new Error('weather');
-                    return r.json();
-                  }),
-                  fetch(`${base}/api/geofence/status`).then((r) => {
-                    if (!r.ok) throw new Error('geofence');
-                    return r.json();
-                  }),
-                ])
-                  .then(([w]) => {
-                    const level = classifySea(
-                      num(w.wind_speed_kt ?? w.wind_speed_kts, 10),
-                      num(w.wave_height_m, 1.0),
-                      num(w.current_speed_kt, 1.0),
-                      num(w.pressure_hpa, 1012)
-                    );
-                    setSeaLevel(level);
-                    setRecalcNote(
-                      `Re-checked just now — sea ${level.toUpperCase()}, route holds.`
-                    );
-                  })
-                  .catch(() => {
+                void loadSafety(false).then((level) => {
+                  if (!mountedRef.current) return;
+                  if (level == null) {
                     setRecalcNote('Live feed unreachable — holding last known route.');
-                  });
+                  } else if (level === 'danger') {
+                    setRecalcNote('Re-checked just now — sea DANGER, avoid sailing.');
+                  } else {
+                    setRecalcNote(`Re-checked just now — sea ${level.toUpperCase()}, route holds.`);
+                  }
+                });
               }}
               className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-extrabold text-xs shadow-md hover:scale-105 transition-transform"
             >

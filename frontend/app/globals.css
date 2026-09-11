@@ -236,3 +236,15 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 .pulse-animation {
   animation: pulse-ring 2s infinite ease-in-out;
 }
+
+/* Honor the OS reduced-motion preference: disable the infinite decorative
+   animations (pulseGlow, soundWave, waveDrift, spin, pulse-ring, alertPulse). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

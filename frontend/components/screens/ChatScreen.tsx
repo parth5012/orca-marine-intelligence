@@ -173,6 +173,21 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
 
+  // Unmount cleanup: clear recording timer + stop active mic tracks.
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      try {
+        mediaRecorderRef.current?.stream?.getTracks().forEach((t) => t.stop());
+      } catch {
+        /* already released */
+      }
+    };
+  }, []);
+
   const effectiveLat = userLocation?.lat ?? location?.lat ?? null;
   const effectiveLon = userLocation?.lon ?? location?.lon ?? null;
 
@@ -478,7 +493,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                     {msg.reasoning_steps && msg.reasoning_steps.length > 0 && (
                       <AgentExecutionTrace
                         traces={msg.reasoning_steps}
-                        confidenceScore={msg.confidence ?? 87}
+                        confidenceScore={msg.confidence}
                         onInspectPayload={() => openInspectorFor(msg)}
                       />
                     )}
@@ -532,7 +547,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                                 <span>✅</span>
                                 <span className="font-semibold">SAFE CONDITIONS</span>
                                 <span className="text-slate-400">
-                                  • Waves: {msg.safety.waves_m ?? '0.8'}m | Wind: {msg.safety.wind_kts ?? '10'} kts
+                                  • Waves: {msg.safety.waves_m ?? '--'}m | Wind: {msg.safety.wind_kts ?? '--'} kts
                                 </span>
                               </div>
                               <span className="text-[10px] font-bold bg-emerald-800 px-1.5 py-0.5 rounded text-white">
@@ -579,7 +594,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
                       {/* Evidence from live frames */}
                       {msg.evidence && msg.evidence.length > 0 && (
-                        <EvidenceCard evidence={msg.evidence} confidenceScore={msg.confidence ?? 87} />
+                        <EvidenceCard evidence={msg.evidence} confidenceScore={msg.confidence} />
                       )}
 
                       {/* Active hazards from live safety frame */}
@@ -749,7 +764,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                                       <div>
                                         <span className="text-slate-500">Bearing: </span>
                                         <span className="font-semibold text-cyan-600 dark:text-cyan-300">
-                                          {zone.bearing}°
+                                          {typeof zone.bearing === 'number' ? `${zone.bearing}°` : zone.bearing}
                                         </span>
                                       </div>
                                     )}

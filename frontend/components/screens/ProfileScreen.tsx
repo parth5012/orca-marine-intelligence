@@ -41,6 +41,7 @@ interface StoredProfile {
   smsAlerts: boolean;
   audioAlarms: boolean;
   offlineCache: boolean;
+  ttsVoice: 'male' | 'female';
 }
 
 const DEFAULT_PROFILE: StoredProfile = {
@@ -52,6 +53,7 @@ const DEFAULT_PROFILE: StoredProfile = {
   smsAlerts: true,
   audioAlarms: true,
   offlineCache: true,
+  ttsVoice: 'male',
 };
 
 function readStoredProfile(): StoredProfile {
@@ -76,6 +78,7 @@ function readStoredProfile(): StoredProfile {
       smsAlerts: parsed.smsAlerts ?? true,
       audioAlarms: parsed.audioAlarms ?? true,
       offlineCache: parsed.offlineCache ?? true,
+      ttsVoice: parsed.ttsVoice === 'female' ? 'female' : 'male',
     };
   } catch {
     return DEFAULT_PROFILE;
@@ -87,6 +90,7 @@ export const ProfileScreen: React.FC = () => {
     selectedLanguage,
     setSelectedLanguage,
     userLocation,
+    gpsStatus,
     themeMode,
     toggleThemeMode,
     t,
@@ -112,11 +116,11 @@ export const ProfileScreen: React.FC = () => {
   const handleSave = () => {
     try {
       localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(stored));
+      setSavedMsg(true);
+      setTimeout(() => setSavedMsg(false), 3000);
     } catch {
-      /* storage unavailable — still confirm in-memory */
+      /* storage unavailable — no success confirmation */
     }
-    setSavedMsg(true);
-    setTimeout(() => setSavedMsg(false), 3000);
   };
 
   const handleSOS = () => {
@@ -266,6 +270,10 @@ export const ProfileScreen: React.FC = () => {
               Bhashini Speech Synthesis (TTS Voice Gender):
             </label>
             <select
+              value={hydrated ? stored.ttsVoice : DEFAULT_PROFILE.ttsVoice}
+              onChange={(e) =>
+                update({ ttsVoice: e.target.value === 'female' ? 'female' : 'male' })
+              }
               data-testid="profile-tts-voice"
               className={`w-full rounded-xl p-2.5 font-medium border focus:outline-none ${
                 isLight
@@ -320,7 +328,22 @@ export const ProfileScreen: React.FC = () => {
               <span data-testid="profile-gps-coords">
                 {userLocation.lat.toFixed(2)}, {userLocation.lon.toFixed(2)}
               </span>
-              <span className="text-emerald-400 font-bold">LOCKED</span>
+              <span
+                data-testid="profile-gps-status"
+                className={
+                  gpsStatus === 'locked'
+                    ? 'text-emerald-400 font-bold'
+                    : gpsStatus === 'acquiring'
+                      ? 'text-amber-400 font-bold'
+                      : 'text-slate-400 font-bold'
+                }
+              >
+                {gpsStatus === 'locked'
+                  ? 'LOCKED'
+                  : gpsStatus === 'acquiring'
+                    ? 'ACQUIRING…'
+                    : 'ESTIMATE'}
+              </span>
             </div>
           </div>
         </div>

@@ -65,17 +65,55 @@ export const VoiceModal: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Reset transient state each time the modal opens.
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const releaseMicrophone = () => {
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+    } catch {
+      /* recorder already stopped */
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    stopTimer();
+    setIsRecording(false);
+  };
+
+  const closeModal = () => {
+    releaseMicrophone();
+    setVoiceModalOpen(false);
+  };
+
+  // Reset transient state each time the modal opens; release the mic when it
+  // closes (the component stays mounted, so unmount cleanup alone never runs).
   useEffect(() => {
     if (voiceModalOpen) {
       setTranscriptText('');
       setVoiceError(null);
       setIsTranscribing(false);
       setRecordingSeconds(0);
+      return;
     }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+    releaseMicrophone();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceModalOpen]);
+
+  // Escape closes the modal (releasing the mic); unmount releases it too.
+  useEffect(() => {
+    if (!voiceModalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeModal();
     };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceModalOpen]);
 
   // Release the mic if the modal unmounts mid-recording.
@@ -90,13 +128,6 @@ export const VoiceModal: React.FC = () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
-
-  const stopTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  };
 
   const uploadAndTranscribe = async (audioBlob: Blob, mimeType: string) => {
     if (audioBlob.size > MAX_AUDIO_BYTES) {
@@ -122,14 +153,19 @@ export const VoiceModal: React.FC = () => {
       formData.append('language', selectedLanguage || 'en');
 
       let res: Response;
+      // Bound both uploads so a hung connection still reaches `finally`
+      // (which re-enables the mic). AbortController+setTimeout for compat.
+      const postWithTimeout = (url: string, ms = 60_000): Promise<Response> => {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), ms);
+        return fetch(url, { method: 'POST', body: formData, signal: controller.signal })
+          .finally(() => window.clearTimeout(timer));
+      };
       try {
-        res = await fetch(`${getBackendBase()}/api/chat/voice`, {
-          method: 'POST',
-          body: formData,
-        });
+        res = await postWithTimeout(`${getBackendBase()}/api/chat/voice`);
       } catch {
         // Direct backend unreachable — fall back to the Next.js proxy.
-        res = await fetch('/api/chat/voice', { method: 'POST', body: formData });
+        res = await postWithTimeout('/api/chat/voice');
       }
 
       if (res.status === 413) {
@@ -243,19 +279,21 @@ export const VoiceModal: React.FC = () => {
     setActiveTab('chat');
   };
 
-  if (!voiceModalOpen) return null;
-
   const formatTimer = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
+  // AnimatePresence stays mounted so the exit animation can run on close.
   return (
     <AnimatePresence>
+      {voiceModalOpen && (
       <div
+        key="voice-modal"
         data-testid="voice-modal"
         role="dialog"
+        aria-modal="true"
         aria-label="Voice input"
         className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xl animate-fade-in"
       >
@@ -275,7 +313,7 @@ export const VoiceModal: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setVoiceModalOpen(false)}
+            onClick={closeModal}
             aria-label="Close voice input"
             className={`absolute top-4 right-4 w-9 h-9 rounded-full border flex items-center justify-center transition-colors z-10 ${
               isLight
@@ -451,6 +489,7 @@ export const VoiceModal: React.FC = () => {
           </div>
         </motion.div>
       </div>
+      )}
     </AnimatePresence>
   );
 };

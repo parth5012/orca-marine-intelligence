@@ -65,6 +65,9 @@ interface ZoneLive {
   cycloneLevel: string | null;
   cycloneText: string | null;
   geofenceText: string | null;
+  geofenceOk: boolean;
+  weatherOk: boolean;
+  cycloneOk: boolean;
 }
 
 const INITIAL_LIVE: ZoneLive = {
@@ -78,6 +81,9 @@ const INITIAL_LIVE: ZoneLive = {
   cycloneLevel: null,
   cycloneText: null,
   geofenceText: null,
+  geofenceOk: false,
+  weatherOk: false,
+  cycloneOk: false,
 };
 
 export const PFZDetailScreen: React.FC = () => {
@@ -140,7 +146,7 @@ export const PFZDetailScreen: React.FC = () => {
 
     Promise.all([weatherP, cycloneP, geofenceP]).then(([w, c, g]) => {
       if (cancelled) return;
-      const windKt = w.ok ? num(w.d.temperature_c !== undefined ? (w.d.wind_speed_kt ?? w.d.wind_speed_kts) : null, NaN) : NaN;
+      const windKt = w.ok ? num(w.d.wind_speed_kt ?? w.d.wind_speed_kts, NaN) : NaN;
       const waveM = w.ok ? num(w.d.wave_height_m, NaN) : NaN;
       const currentKt = w.ok ? num(w.d.current_speed_kt, NaN) : NaN;
       const pressure = w.ok ? num(w.d.pressure_hpa, NaN) : NaN;
@@ -183,6 +189,9 @@ export const PFZDetailScreen: React.FC = () => {
             : g.ok
               ? 'EEZ/MPA/IMBL boundaries monitored'
               : null,
+        geofenceOk: g.ok,
+        weatherOk: w.ok,
+        cycloneOk: c.ok,
       });
     });
     return () => {
@@ -348,7 +357,7 @@ export const PFZDetailScreen: React.FC = () => {
             <div className="text-lg sm:text-xl font-extrabold text-amber-200 mt-1">
               ~{pfz.travelTimeMinutes} mins
             </div>
-            <div className="text-[11px] text-slate-400">At 12 knots speed</div>
+            <div className="text-[11px] text-slate-400">At 13.5 knots speed</div>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800">
@@ -492,9 +501,15 @@ export const PFZDetailScreen: React.FC = () => {
 
           <div
             data-testid="pfz-detail-check-geofence"
-            className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-200"
+            className={`p-3 rounded-xl border ${
+              live.geofenceOk
+                ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-200'
+                : 'bg-amber-950/30 border-amber-500/30 text-amber-200'
+            }`}
           >
-            <div className="font-bold flex items-center gap-1">✓ Geofence Clear</div>
+            <div className="font-bold flex items-center gap-1">
+              {live.geofenceOk ? '✓ Geofence Clear' : live.loading ? '◷ Geofence: CHECKING' : '⚠ Geofence: UNVERIFIED'}
+            </div>
             <p className="text-[11px] text-slate-300 mt-0.5">
               {live.geofenceText ?? 'EEZ/MPA/IMBL boundaries monitored.'}
             </p>
@@ -506,6 +521,13 @@ export const PFZDetailScreen: React.FC = () => {
         <EvidenceCard
           evidence={evidence}
           title="Why ORCA Recommends This Zone"
+          answeredSources={[
+            'PFZ Advisory',
+            ...(live.weatherOk ? ['Ocean Conditions', 'Weather Forecast'] : []),
+            ...(live.cycloneOk ? ['Hazard Alerts'] : []),
+            ...(live.geofenceOk ? ['Geospatial Constraints'] : []),
+          ]}
+          validated={!live.offline}
         />
       </div>
 

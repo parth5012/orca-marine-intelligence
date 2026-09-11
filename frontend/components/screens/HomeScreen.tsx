@@ -61,7 +61,7 @@ interface LiveConditions {
   wavePeriodS: number;
   currentKt: number;
   pressureHpa: number;
-  safety: 'safe' | 'caution' | 'danger';
+  safety: 'safe' | 'caution' | 'danger' | 'unknown';
   offline: boolean;
 }
 
@@ -113,7 +113,8 @@ export const HomeScreen: React.FC = () => {
       })
       .catch(() => {
         if (cancelled) return;
-        // Backend-down: synthetic coordinate-based estimate, never crash.
+        // Backend-down: no feed, so no safety verdict. Keep coordinate-based
+        // estimates out of the verdict — cards render placeholders (see below).
         const distToCoast = Math.abs(lon - 76.0) * 111;
         const estWave = Math.min(
           2.2,
@@ -133,7 +134,7 @@ export const HomeScreen: React.FC = () => {
           wavePeriodS: 7.0,
           currentKt: 1.0,
           pressureHpa: 1010,
-          safety: classifySea(windKt, waveM, 1.0, 1010),
+          safety: 'unknown',
           offline: true,
         });
       });
@@ -180,35 +181,41 @@ export const HomeScreen: React.FC = () => {
 
   const cards = useMemo(() => {
     if (!conditions) return null;
+    const offline = conditions.offline === true;
     const windKmh = Number((conditions.windKt * KT_TO_KMH).toFixed(1));
-    const seaLabel =
-      conditions.safety === 'danger'
+    const seaLabel = offline
+      ? 'Unknown — offline'
+      : conditions.safety === 'danger'
         ? 'Rough Seas'
         : conditions.safety === 'caution'
           ? 'Moderate Swell'
           : 'Calm & Favorable';
-    const seaState =
-      conditions.safety === 'danger'
+    const seaState = offline
+      ? '—'
+      : conditions.safety === 'danger'
         ? 'Rough'
         : conditions.safety === 'caution'
           ? 'Moderate'
           : 'Calm';
-    const weatherLabel =
-      conditions.safety === 'danger'
+    const weatherLabel = offline
+      ? 'Feed unavailable'
+      : conditions.safety === 'danger'
         ? 'Stormy • Avoid'
         : conditions.safety === 'caution'
           ? 'Partly Cloudy'
           : 'Clear & Favorable';
-    const seaBadge =
-      conditions.safety === 'danger'
+    const seaBadge = offline
+      ? 'UNKNOWN'
+      : conditions.safety === 'danger'
         ? 'AVOID'
         : conditions.safety === 'caution'
           ? 'CAUTION'
           : 'SAFE';
-    const warnCount =
-      (conditions.waveM > 1.5 ? 1 : 0) +
-      (conditions.windKt > 15 ? 1 : 0) +
-      (conditions.pressureHpa < 1005 ? 1 : 0);
+    const warnCount = offline
+      ? 0
+      : (conditions.waveM > 1.5 ? 1 : 0) +
+        (conditions.windKt > 15 ? 1 : 0) +
+        (conditions.pressureHpa < 1005 ? 1 : 0);
     const warnParts: string[] = [];
     if (conditions.waveM > 1.5) warnParts.push('High Wave');
     if (conditions.windKt > 15) warnParts.push('Wind');
@@ -220,7 +227,9 @@ export const HomeScreen: React.FC = () => {
       weatherLabel,
       seaBadge,
       warnCount,
-      warnSub: warnParts.length > 0 ? warnParts.join(' • ') : 'No active warnings',
+      warnSub: offline
+        ? 'Live feed unreachable'
+        : warnParts.length > 0 ? warnParts.join(' • ') : 'No active warnings',
     };
   }, [conditions]);
 
@@ -404,7 +413,7 @@ export const HomeScreen: React.FC = () => {
             <motion.div variants={itemVariants} whileHover={{ y: -3 }}>
               <ConditionCard
                 title={t('weather')}
-                value={`${conditions!.tempC}°C`}
+                value={conditions!.offline ? '—' : `${conditions!.tempC}°C`}
                 subtext={cards.weatherLabel}
                 icon={Sun}
                 color="text-amber-500"
@@ -415,8 +424,8 @@ export const HomeScreen: React.FC = () => {
             <motion.div variants={itemVariants} whileHover={{ y: -3 }}>
               <ConditionCard
                 title={t('windSpeed')}
-                value={`${cards.windKmh} km/h`}
-                subtext={`Dir: ${conditions!.windDir}`}
+                value={conditions!.offline ? '—' : `${cards.windKmh} km/h`}
+                subtext={conditions!.offline ? '—' : `Dir: ${conditions!.windDir}`}
                 icon={Wind}
                 color="text-sky-600"
                 testid="condition-card-wind"
@@ -426,8 +435,8 @@ export const HomeScreen: React.FC = () => {
             <motion.div variants={itemVariants} whileHover={{ y: -3 }}>
               <ConditionCard
                 title={t('waveHeight')}
-                value={`${conditions!.waveM} m`}
-                subtext={`Period: ${conditions!.wavePeriodS}s`}
+                value={conditions!.offline ? '—' : `${conditions!.waveM} m`}
+                subtext={conditions!.offline ? '—' : `Period: ${conditions!.wavePeriodS}s`}
                 icon={Waves}
                 color="text-blue-600"
                 testid="condition-card-wave"
@@ -437,11 +446,11 @@ export const HomeScreen: React.FC = () => {
             <motion.div variants={itemVariants} whileHover={{ y: -3 }}>
               <ConditionCard
                 title={t('activeWarnings')}
-                value={cards.warnCount}
+                value={conditions!.offline ? '—' : cards.warnCount}
                 subtext={cards.warnSub}
                 icon={ShieldAlert}
                 color="text-rose-500"
-                statusBadge={cards.warnCount > 0 ? 'CAUTION' : 'SAFE'}
+                statusBadge={conditions!.offline ? 'UNKNOWN' : cards.warnCount > 0 ? 'CAUTION' : 'SAFE'}
                 testid="condition-card-warnings"
               />
             </motion.div>
