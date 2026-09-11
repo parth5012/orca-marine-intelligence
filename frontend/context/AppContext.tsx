@@ -234,8 +234,8 @@ function readStored(key: string): string | null {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  // Default 'chat' preserves the current first paint (chat advisory + map split).
-  const [activeTab, setActiveTab] = useState<TabType>('chat');
+  // Reference UI lands on the home hero (greeting + live map preview).
+  const [activeTab, setActiveTab] = useState<TabType>('home');
   const [themeMode, setThemeModeState] = useState<ThemeMode>('light');
   const [workflowModalOpen, setWorkflowModalOpen] = useState<boolean>(false);
   const [voiceModalOpen, setVoiceModalOpen] = useState<boolean>(false);
