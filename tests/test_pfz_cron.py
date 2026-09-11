@@ -125,6 +125,7 @@ async def test_ingest_persists_final_artifacts(tmp_path, monkeypatch):
     """Persisted GeoJSON file must carry the completed artifact list, not []."""
     import json as _json
 
+    from backend.db import postgis, redis
     from backend.ingest import incois_textdata as _mod
 
     fake_features = [
@@ -136,10 +137,13 @@ async def test_ingest_persists_final_artifacts(tmp_path, monkeypatch):
     ]
     monkeypatch.setattr(_mod, "fetch_incois_sectors", AsyncMock(return_value=fake_features))
     monkeypatch.setattr(_mod, "_get_pfz_data_path", lambda: tmp_path / "pfz-today.geojson")
+    # Isolate persistence: never touch real PostGIS/Redis from unit tests
+    monkeypatch.setattr(postgis, "upsert_pfz_features", AsyncMock(return_value=1))
+    monkeypatch.setattr(redis, "set_json", AsyncMock())
 
     doc = await _mod.ingest_textdata()
 
     persisted = _json.loads((tmp_path / "pfz-today.geojson").read_text(encoding="utf-8"))
     assert persisted["artifacts"] == doc["artifacts"]
-    assert "data/pfz-today.geojson" in persisted["artifacts"]
+    assert doc["artifacts"] == ["data/pfz-today.geojson", "postgis:pfz_zones", "redis:pfz:today"]
     assert doc["count"] == 1
