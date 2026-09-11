@@ -34,6 +34,7 @@ import { AppProvider, useApp, KOCHI_FALLBACK } from '@/context/AppContext';
 import { Navbar } from '@/components/layout/Navbar';
 import { BottomNavigation } from '@/components/layout/BottomNavigation';
 import { AuthOnboardingOverlay } from '@/components/auth/AuthOnboardingOverlay';
+import { HomeScreen } from '@/components/screens/HomeScreen';
 
 function TabPlaceholderPanel({
   onAskOrca,
@@ -52,8 +53,6 @@ function TabPlaceholderPanel({
     selectedLanguage,
     toggleThemeMode,
     themeMode,
-    userLocation,
-    gpsStatus,
   } = useApp();
 
   const panelShell = (testid: string, children: React.ReactNode) => (
@@ -70,40 +69,12 @@ function TabPlaceholderPanel({
   );
 
   if (activeTab === 'home') {
-    return panelShell(
-      'tab-panel-home',
-      <div className="space-y-4">
-        <div>
-          <h2 className="text-xl font-extrabold tracking-tight">
-            ORCA Marine Intelligence
-          </h2>
-          <p className="text-sm opacity-70">
-            Autonomous ocean advisory, PFZ telemetry and safety for Indian
-            coastal waters.
-          </p>
-          <p className="text-xs mt-2 font-mono opacity-70" data-testid="gps-pill-home">
-            GPS:{' '}
-            {gpsStatus === 'acquiring'
-              ? 'Acquiring…'
-              : `${userLocation.lat.toFixed(2)}°N, ${userLocation.lon.toFixed(2)}°E (${userLocation.name})`}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={onAskOrca}
-            className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold transition-colors"
-          >
-            Ask ORCA
-          </button>
-          <button
-            type="button"
-            onClick={onExploreMap}
-            className="px-4 py-2 rounded-xl border border-cyan-500/40 text-cyan-700 dark:text-cyan-300 text-sm font-bold hover:bg-cyan-50 dark:hover:bg-slate-800 transition-colors"
-          >
-            Explore Map
-          </button>
-        </div>
+    // UI-MIG-T3: full HomeScreen (hero + AskOrcaInput + live map preview +
+    // live ConditionCards + featured live PFZ card). The tab-panel-home
+    // testid wrapper is preserved for existing smoke tests.
+    return (
+      <div data-testid="tab-panel-home">
+        <HomeScreen />
       </div>
     );
   }

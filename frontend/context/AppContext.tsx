@@ -27,8 +27,10 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from 'react';
+import { TRANSLATIONS } from '@/lib/translations';
 
 export type TabType =
   | 'home'
@@ -95,6 +97,12 @@ const EN_LABELS: Record<string, string> = {
   profile: 'Profile',
 };
 
+/** Pending home->chat query (UI-MIG-T3). HomeScreen writes, ChatPanel consumes. */
+export interface PendingChatQuery {
+  text: string;
+  nonce: number;
+}
+
 interface AppContextType {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
@@ -108,6 +116,10 @@ interface AppContextType {
   selectedLanguage: string;
   setSelectedLanguage: (lang: string) => void;
   t: (key: string) => string;
+  /** Pending home->chat query (UI-MIG-T3). HomeScreen writes, ChatPanel consumes. */
+  pendingChatQuery: PendingChatQuery | null;
+  submitChatQuery: (text: string) => void;
+  consumeChatQuery: () => void;
   /** Live GPS snapshot (page shell syncs geolocation here). */
   userLocation: LiveUserLocation;
   setUserLocation: (loc: LiveUserLocation) => void;
@@ -153,6 +165,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('acquiring');
   const [alertsList, setAlertsList] = useState<AlertRef[]>([]);
   const [selectedPFZ, setSelectedPFZ] = useState<SelectedPFZ>(null);
+  const [pendingChatQuery, setPendingChatQuery] =
+    useState<PendingChatQuery | null>(null);
 
   // Hydrate theme + language from localStorage (layout init script owns .dark pre-paint).
   useEffect(() => {
@@ -201,7 +215,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const t = useCallback((key: string): string => EN_LABELS[key] || key, []);
+  const t = useCallback(
+    (key: string): string => {
+      const lang = selectedLanguage;
+      const dict =
+        TRANSLATIONS[lang as keyof typeof TRANSLATIONS] ?? TRANSLATIONS.en;
+      return (
+        (dict as unknown as Record<string, string>)[key] ??
+        (TRANSLATIONS.en as unknown as Record<string, string>)[key] ??
+        EN_LABELS[key] ??
+        key
+      );
+    },
+    [selectedLanguage]
+  );
+
+  // Home -> chat handoff (UI-MIG-T3): queue the query, switch to chat tab.
+  // ChatPanel consumes via pendingChatQuery and calls the real SSE sendMessage.
+  const submitChatQuery = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setPendingChatQuery({ text: trimmed, nonce: Date.now() });
+    setActiveTab('chat');
+  }, []);
+
+  const consumeChatQuery = useCallback(() => {
+    setPendingChatQuery(null);
+  }, []);
 
   const openPFZDetail = useCallback((pfz: Exclude<SelectedPFZ, null>) => {
     setSelectedPFZ(pfz);
@@ -269,6 +309,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         selectedLanguage,
         setSelectedLanguage,
         t,
+        pendingChatQuery,
+        submitChatQuery,
+        consumeChatQuery,
         userLocation,
         setUserLocation,
         gpsStatus,
