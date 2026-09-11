@@ -42,46 +42,52 @@ html.dark body {
   color: #f1f5f9;
 }
 
-/* Custom Glassmorphism Cards for Light Maritime UI */
-.glass-panel {
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(2, 132, 199, 0.18);
-  box-shadow: 0 10px 30px -5px rgba(2, 132, 199, 0.08);
-}
+/* Custom Glassmorphism Cards for Light Maritime UI.
+   Wrapped in @layer components so Tailwind utilities (bg-slate-950/80,
+   bg-gradient-to-r, borders) in the utilities layer always win over these
+   base backgrounds. Without this, unlayered `background:` shorthand beats
+   layered utilities and dark-mode cards render white. */
+@layer components {
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(2, 132, 199, 0.18);
+    box-shadow: 0 10px 30px -5px rgba(2, 132, 199, 0.08);
+  }
 
-.glass-panel-dark {
-  background: rgba(7, 13, 24, 0.92);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(8, 145, 178, 0.25);
-  box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.5);
-}
+  .glass-panel-dark {
+    background: rgba(7, 13, 24, 0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(8, 145, 178, 0.25);
+    box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.5);
+  }
 
-.glass-panel-light {
-  background: rgba(240, 249, 255, 0.85);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(2, 132, 199, 0.15);
-}
+  .glass-panel-light {
+    background: rgba(240, 249, 255, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(2, 132, 199, 0.15);
+  }
 
-.glass-card-interactive {
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.glass-card-interactive:hover {
-  border-color: rgba(2, 132, 199, 0.5);
-  transform: translateY(-3px);
-  box-shadow: 0 14px 32px -4px rgba(2, 132, 199, 0.2);
-}
+  .glass-card-interactive {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .glass-card-interactive:hover {
+    border-color: rgba(2, 132, 199, 0.5);
+    transform: translateY(-3px);
+    box-shadow: 0 14px 32px -4px rgba(2, 132, 199, 0.2);
+  }
 
-/* Glowing accent effects */
-.glow-cyan {
-  box-shadow: 0 0 20px -2px rgba(2, 132, 199, 0.35);
-}
+  /* Glowing accent effects */
+  .glow-cyan {
+    box-shadow: 0 0 20px -2px rgba(2, 132, 199, 0.35);
+  }
 
-.glow-mic {
-  box-shadow: 0 0 30px 4px rgba(2, 132, 199, 0.4);
-  animation: pulseGlow 2s infinite ease-in-out;
+  .glow-mic {
+    box-shadow: 0 0 30px 4px rgba(2, 132, 199, 0.4);
+    animation: pulseGlow 2s infinite ease-in-out;
+  }
 }
 
 @keyframes pulseGlow {
