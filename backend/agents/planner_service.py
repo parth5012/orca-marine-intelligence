@@ -351,7 +351,11 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _registry_lookup(port_name: str | None) -> tuple[str | None, list[float] | None]:
-    """Canonical (name, [lat, lon]) for a registry port or alias; (None, None) if unknown."""
+    """Canonical (name, [lat, lon]) for a registry port or alias; (None, None) if unknown.
+
+    Exact match first; then difflib fuzzy (>=0.8) so LLM typos like
+    "mulambam" resolve to Munambam instead of dropping the port.
+    """
     if not port_name or not isinstance(port_name, str):
         return None, None
     key = port_name.strip().lower()
@@ -360,6 +364,18 @@ def _registry_lookup(port_name: str | None) -> tuple[str | None, list[float] | N
     for name, coords in COASTAL_PORTS_REGISTRY.items():
         if name.lower() == key.lower() or (isinstance(key, str) and name.lower() == key):
             return name, coords
+    # Fuzzy: compare single port token (LLM echoes one name, not a sentence).
+    import difflib as _difflib
+
+    best: str | None = None
+    best_score = 0.0
+    for name in COASTAL_PORTS_REGISTRY:
+        s = _difflib.SequenceMatcher(None, key.lower(), name.lower()).ratio()
+        if s > best_score:
+            best_score = s
+            best = name
+    if best is not None and best_score >= 0.8:
+        return best, COASTAL_PORTS_REGISTRY[best]
     return None, None
 
 
@@ -376,10 +392,25 @@ def _verify_geocoding(plan: PlannerOutput) -> PlannerOutput:
     loc = plan.target_location
     if not loc.port_name:
         return plan
+    raw_name = str(loc.port_name)
     canon, coords = _registry_lookup(loc.port_name)
     if coords is None:
         loc.port_name = None
         return plan
+    # Fuzzy correction (e.g. mulambam -> Munambam): keep auditable note and
+    # cap confidence so UI can show "did you mean?" while still dispatching.
+    is_fuzzy = raw_name.strip().lower() != (canon or "").lower()
+    if is_fuzzy:
+        try:
+            plan.reasoning_trace = list(plan.reasoning_trace or []) + [
+                f"fuzzy port match: '{raw_name}' ~ {canon} — auto-resolved; please confirm (did you mean {canon}?)"
+            ]
+        except Exception:
+            pass
+        try:
+            loc.confidence = min(float(loc.confidence or 0.75), 0.75)
+        except (TypeError, ValueError):
+            loc.confidence = 0.75
     loc.port_name = canon
     reg_lat, reg_lon = float(coords[0]), float(coords[1])
     if loc.lat is None or loc.lon is None:
@@ -387,9 +418,13 @@ def _verify_geocoding(plan: PlannerOutput) -> PlannerOutput:
         # Snapped from registry: LLM named the port but gave no coords.
         # Floor to 0.85 (not min(): a 0.0 LLM confidence must not survive
         # the snap and cause a false clarification); keep higher values
-        # capped at 0.95.
+        # capped at 0.95. Fuzzy corrections skip the floor so a weak
+        # typo never auto-dispatches past the clarification gate.
         cur = float(loc.confidence)
-        loc.confidence = 0.85 if cur < 0.6 else min(cur, 0.95)
+        if is_fuzzy:
+            loc.confidence = min(cur, 0.75)
+        else:
+            loc.confidence = 0.85 if cur < 0.6 else min(cur, 0.95)
         return plan
     try:
         drift = _haversine_km(float(loc.lat), float(loc.lon), reg_lat, reg_lon)
