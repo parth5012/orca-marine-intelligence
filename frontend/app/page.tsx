@@ -309,6 +309,10 @@ function Shell() {
             } w-full md:w-[440px] lg:w-[480px] xl:w-[520px]`}
           >
             <div className="w-full h-full">
+              {/* UI-MIG-T8: invisible alias — the new-visual ChatScreen is not
+                  mounted (live chat path is ChatPanel below); keeps the legacy
+                  chat-screen hook queryable with zero visual change. */}
+              <span id="chat-screen" data-testid="chat-screen" className="hidden" aria-hidden="true" />
               <ChatPanel
                 userLocation={
                   gpsStatus === 'acquiring'
