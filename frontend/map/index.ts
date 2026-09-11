@@ -15,6 +15,13 @@ export type { MapViewProps, MapLayerToggles } from './MapView';
 export { default as SafetyBadge } from './SafetyBadge';
 export type { SafetyBadgeProps } from './SafetyBadge';
 
+export { default as LayerControl } from './LayerControl';
+export { default as MarineMap } from './MarineMap';
+export type { MarineMapProps } from './MarineMap';
+export { default as ExploreMap } from './ExploreMap';
+export type { ExploreMapProps } from './ExploreMap';
+
 export * from './geo';
 export * from './boundaries';
 export * from './carto';
+export * from './layers';

@@ -29,7 +29,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChatPanel, SafetyData } from '@/chat';
-import { MapView } from '@/map';
+import { ExploreMap } from '@/map';
 import { AppProvider, useApp, KOCHI_FALLBACK } from '@/context/AppContext';
 import { Navbar } from '@/components/layout/Navbar';
 import { BottomNavigation } from '@/components/layout/BottomNavigation';
@@ -477,11 +477,17 @@ function Shell() {
               </div>
             </div>
 
-            <div className="w-full h-full">
-              <MapView
+            <div className="w-full h-full p-2 sm:p-3">
+              {/* UI-MIG-T5: shared ExploreMap (same live engine as /map) — sector/
+                  search/GPS/drawer/layers all inside, legacy testids preserved. */}
+              <ExploreMap
                 center={mapCenter}
                 zoom={mapZoom}
                 highlightFeatures={highlightFeatures}
+                userLocation={{ lat: userLocation.lat, lon: userLocation.lon }}
+                onSelectZone={(feature) => handleMapHighlight([feature])}
+                onCenterChange={(c) => setMapCenter(c)}
+                showNavLinks
               />
             </div>
           </section>

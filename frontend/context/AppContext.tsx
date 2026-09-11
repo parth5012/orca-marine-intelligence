@@ -103,6 +103,49 @@ export interface PendingChatQuery {
   nonce: number;
 }
 
+/**
+ * Map layer keys (UI-MIG-T5).
+ *
+ * Union of the 5 live engine keys (pfz/eez/mpa/imbl/weather, owned by
+ * `frontend/map/MapInner`) and the 8 design-system pills from the source
+ * `LayerControl` (sst/chlorophyll/waves/wind/currents/cyclone/lightning/
+ * restricted). The 8 extra keys are VISUAL-ONLY filters over the same
+ * live PFZ/weather/boundary sources — see `frontend/map/layers.ts`
+ * LAYER_SOURCE_MAPPING. No new backend, no mock data.
+ */
+export type MapLayerKey =
+  | 'pfz'
+  | 'eez'
+  | 'mpa'
+  | 'imbl'
+  | 'weather'
+  | 'sst'
+  | 'chlorophyll'
+  | 'waves'
+  | 'wind'
+  | 'currents'
+  | 'cyclone'
+  | 'lightning'
+  | 'restricted';
+
+export type ActiveLayers = Record<MapLayerKey, boolean>;
+
+export const DEFAULT_ACTIVE_LAYERS: ActiveLayers = {
+  pfz: true,
+  eez: true,
+  mpa: true,
+  imbl: true,
+  weather: true,
+  sst: true,
+  chlorophyll: true,
+  waves: true,
+  wind: true,
+  currents: false,
+  cyclone: false,
+  lightning: false,
+  restricted: false,
+};
+
 interface AppContextType {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
@@ -132,6 +175,10 @@ interface AppContextType {
   setSelectedPFZ: (pfz: SelectedPFZ) => void;
   openPFZDetail: (pfz: Exclude<SelectedPFZ, null>) => void;
   startRouteNavigation: (pfz: Exclude<SelectedPFZ, null>) => void;
+  /** Shared map layers (UI-MIG-T5). toggleLayer stays AppContext-compatible. */
+  activeLayers: ActiveLayers;
+  setActiveLayers: (layers: ActiveLayers) => void;
+  toggleLayer: (key: MapLayerKey) => void;
   // Auth passthrough — always authenticated (overlay forced authenticated).
   authStep: AuthStep;
   setAuthStep: (step: AuthStep) => void;
@@ -167,6 +214,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selectedPFZ, setSelectedPFZ] = useState<SelectedPFZ>(null);
   const [pendingChatQuery, setPendingChatQuery] =
     useState<PendingChatQuery | null>(null);
+  const [activeLayers, setActiveLayers] =
+    useState<ActiveLayers>(DEFAULT_ACTIVE_LAYERS);
 
   // Hydrate theme + language from localStorage (layout init script owns .dark pre-paint).
   useEffect(() => {
@@ -256,6 +305,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const toggleLayer = useCallback((key: MapLayerKey) => {
+    setActiveLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
   // Auth passthrough: everything resolves to authenticated.
   const [authStep, setAuthStepState] = useState<AuthStep>('authenticated');
   const [userRole] = useState<UserRole>('official');
@@ -322,6 +375,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setSelectedPFZ,
         openPFZDetail,
         startRouteNavigation,
+        activeLayers,
+        setActiveLayers,
+        toggleLayer,
         authStep,
         setAuthStep,
         userRole,
