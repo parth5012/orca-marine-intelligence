@@ -24,6 +24,7 @@ import {
   SafetyData,
 } from './useSSEChat';
 import { useApp } from '@/context/AppContext';
+import { AgentWorkflowModal } from '@/components/agent/AgentWorkflowModal';
 
 export interface ChatPanelProps {
   onLocationUpdate?: (lat: number, lon: number) => void;
@@ -55,6 +56,8 @@ export default function ChatPanel({
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [expandedAccordions, setExpandedAccordions] = useState<Record<string, boolean>>({});
+  // UI-MIG-T7: read-only workflow viewer over a message's live reasoning_steps.
+  const [workflowForMsgId, setWorkflowForMsgId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -332,6 +335,26 @@ export default function ChatPanel({
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          data-testid={`workflow-open-${msg.id}`}
+                          aria-label="View agent workflow"
+                          title="View agent workflow"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setWorkflowForMsgId(msg.id);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.stopPropagation();
+                              setWorkflowForMsgId(msg.id);
+                            }
+                          }}
+                          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono underline underline-offset-2 cursor-pointer"
+                        >
+                          Workflow
+                        </span>
                         {msg.isStreaming && (
                           <span className="text-[10px] text-cyan-400 animate-pulse font-mono">
                             Analyzing telemetry...
@@ -829,6 +852,18 @@ export default function ChatPanel({
           </button>
         )}
       </form>
+
+      {/* UI-MIG-T7: read-only workflow modal over live reasoning_steps. */}
+      {(() => {
+        const wfMsg = messages.find((m) => m.id === workflowForMsgId);
+        return (
+          <AgentWorkflowModal
+            steps={wfMsg?.reasoning_steps ?? []}
+            isOpen={workflowForMsgId !== null}
+            onClose={() => setWorkflowForMsgId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

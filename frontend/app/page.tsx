@@ -19,8 +19,8 @@
  *   SSE conversation + Leaflet instance survive tab switches)
  * - SafetyBadge + LanguageSwitch fed from LIVE chat state, never mocks
  *
- * NOTE: tab panels for home/alerts/pfz-detail/route/profile are minimal
- * live-data placeholders; full screens land in later tickets.
+ * NOTE: home/alerts/profile render their full screens (T3/T7); only
+ * pfz-detail/route remain minimal live-data placeholders for later tickets.
  */
 
 'use client';
@@ -35,6 +35,9 @@ import { Navbar } from '@/components/layout/Navbar';
 import { BottomNavigation } from '@/components/layout/BottomNavigation';
 import { AuthOnboardingOverlay } from '@/components/auth/AuthOnboardingOverlay';
 import { HomeScreen } from '@/components/screens/HomeScreen';
+import { AlertsScreen } from '@/components/screens/AlertsScreen';
+import { ProfileScreen } from '@/components/screens/ProfileScreen';
+import { VoiceModal } from '@/components/voice/VoiceModal';
 
 function TabPlaceholderPanel({
   onAskOrca,
@@ -45,13 +48,8 @@ function TabPlaceholderPanel({
 }) {
   const {
     activeTab,
-    setActiveTab,
-    alertsList,
     selectedPFZ,
     startRouteNavigation,
-    userProfile,
-    selectedLanguage,
-    toggleThemeMode,
     themeMode,
   } = useApp();
 
@@ -80,27 +78,9 @@ function TabPlaceholderPanel({
   }
 
   if (activeTab === 'alerts') {
-    const redCount = alertsList.filter(
-      (a) => String(a.severity).toUpperCase() === 'RED'
-    ).length;
-    return panelShell(
-      'tab-panel-alerts',
-      <div className="space-y-2">
-        <h2 className="text-xl font-extrabold tracking-tight">Alerts</h2>
-        <p className="text-sm opacity-70">
-          {alertsList.length === 0
-            ? 'No alerts in the live feed right now. Full alert wiring lands with the alerts screen.'
-            : `${alertsList.length} alert(s), ${redCount} red.`}
-        </p>
-        <button
-          type="button"
-          onClick={onExploreMap}
-          className="px-4 py-2 rounded-xl border border-cyan-500/40 text-sm font-bold hover:bg-cyan-50 dark:hover:bg-slate-800 transition-colors"
-        >
-          View on map
-        </button>
-      </div>
-    );
+    // UI-MIG-T7: full AlertsScreen (live cyclone/weather hazards + geofence
+    // copy, offline skeleton + warning). Owns the tab-panel-alerts testid.
+    return <AlertsScreen />;
   }
 
   if (activeTab === 'pfz-detail') {
@@ -176,26 +156,10 @@ function TabPlaceholderPanel({
   }
 
   if (activeTab === 'profile') {
-    return panelShell(
-      'tab-panel-profile',
-      <div className="space-y-2">
-        <h2 className="text-xl font-extrabold tracking-tight">Profile</h2>
-        <p className="text-sm font-bold">{userProfile.name}</p>
-        <p className="text-xs opacity-70">{userProfile.roleTitle}</p>
-        {userProfile.org && (
-          <p className="text-xs opacity-70">{userProfile.org}</p>
-        )}
-        <p className="text-xs opacity-70">Language: {selectedLanguage}</p>
-        <button
-          type="button"
-          onClick={toggleThemeMode}
-          data-testid="theme-toggle-profile"
-          className="px-4 py-2 rounded-xl border border-cyan-500/40 text-sm font-bold hover:bg-cyan-50 dark:hover:bg-slate-800 transition-colors"
-        >
-          Toggle theme
-        </button>
-      </div>
-    );
+    // UI-MIG-T7: full ProfileScreen (static identity + localStorage prefs,
+    // 10-lang selector, SOS, passthrough role switch). Owns tab-panel-profile
+    // + theme-toggle-profile testids.
+    return <ProfileScreen />;
   }
 
   return null;
@@ -212,8 +176,6 @@ function Shell() {
     setUserLocation,
     gpsStatus,
     setGpsStatus,
-    voiceModalOpen,
-    setVoiceModalOpen,
   } = useApp();
 
   const [mapCenter, setMapCenter] = useState<[number, number]>([
@@ -496,50 +458,9 @@ function Shell() {
 
       <BottomNavigation />
 
-      {/* Minimal voice-modal shell (full voice UI lands with its ticket) */}
-      {voiceModalOpen && (
-        <div
-          data-testid="voice-modal"
-          role="dialog"
-          aria-label="Voice input"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm"
-          onClick={() => setVoiceModalOpen(false)}
-        >
-          <div
-            className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${
-              isLight
-                ? 'bg-white border-cyan-100 text-slate-800'
-                : 'bg-slate-950 border-cyan-900/40 text-slate-100'
-            }`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-base font-extrabold">Voice input</h3>
-            <p className="text-sm opacity-70 mt-1">
-              Vernacular voice input lives in the chat panel (Bhashini). The
-              full voice modal lands with its ticket.
-            </p>
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setVoiceModalOpen(false);
-                  setActiveTab('chat');
-                }}
-                className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold transition-colors"
-              >
-                Open chat
-              </button>
-              <button
-                type="button"
-                onClick={() => setVoiceModalOpen(false)}
-                className="px-4 py-2 rounded-xl border border-cyan-500/40 text-sm font-bold transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* UI-MIG-T7: full VoiceModal (ported UI + live MediaRecorder ->
+          POST /api/chat/voice -> auto-send). Owns the voice-modal testid. */}
+      <VoiceModal />
 
       <AuthOnboardingOverlay />
     </div>

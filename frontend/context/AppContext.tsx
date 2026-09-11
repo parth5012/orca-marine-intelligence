@@ -68,11 +68,31 @@ export interface LiveUserLocation {
 
 export type GpsStatus = 'acquiring' | 'locked' | 'default';
 
-/** Minimal live alert ref (full alert wiring lands with the alerts screen). */
+/**
+ * Live alert ref (UI-MIG-T7).
+ *
+ * Shape mirrors the source design `AlertItem` (title/location/category/
+ * severity/validity/description/coordinates) so AlertsScreen/AlertCard port
+ * verbatim; all fields except id/severity stay optional for older writers.
+ */
+export type AlertCategory =
+  | 'Critical'
+  | 'Marine Warnings'
+  | 'Weather'
+  | 'Cyclone'
+  | 'Lightning'
+  | 'High Waves'
+  | 'Wind';
 export interface AlertRef {
   id: string;
   severity: string;
   title?: string;
+  location?: string;
+  category?: AlertCategory | string;
+  validity?: string;
+  description?: string;
+  coordinates?: [number, number];
+  radiusKm?: number;
 }
 
 /** Opaque selected-zone pointer (GeoJSON feature-ish, untyped on purpose). */
@@ -168,9 +188,12 @@ interface AppContextType {
   setUserLocation: (loc: LiveUserLocation) => void;
   gpsStatus: GpsStatus;
   setGpsStatus: (status: GpsStatus) => void;
-  /** Live alerts (empty until alerts screen wires the live feed). */
+  /** Live alerts (UI-MIG-T7: wired to GET /api/weather/cyclone + current). */
   alertsList: AlertRef[];
   setAlertsList: (alerts: AlertRef[]) => void;
+  /** Alert category filter (UI-MIG-T7, ported from source AlertsScreen). */
+  selectedAlertFilter: string;
+  setSelectedAlertFilter: (filter: string) => void;
   selectedPFZ: SelectedPFZ;
   setSelectedPFZ: (pfz: SelectedPFZ) => void;
   openPFZDetail: (pfz: Exclude<SelectedPFZ, null>) => void;
@@ -211,6 +234,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     useState<LiveUserLocation>(KOCHI_FALLBACK);
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('acquiring');
   const [alertsList, setAlertsList] = useState<AlertRef[]>([]);
+  const [selectedAlertFilter, setSelectedAlertFilter] = useState<string>('All');
   const [selectedPFZ, setSelectedPFZ] = useState<SelectedPFZ>(null);
   const [pendingChatQuery, setPendingChatQuery] =
     useState<PendingChatQuery | null>(null);
@@ -371,6 +395,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setGpsStatus,
         alertsList,
         setAlertsList,
+        selectedAlertFilter,
+        setSelectedAlertFilter,
         selectedPFZ,
         setSelectedPFZ,
         openPFZDetail,
