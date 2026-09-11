@@ -23,6 +23,7 @@ import {
   MarineZoneCard,
   SafetyData,
 } from './useSSEChat';
+import { useApp } from '@/context/AppContext';
 
 export interface ChatPanelProps {
   onLocationUpdate?: (lat: number, lon: number) => void;
@@ -88,6 +89,19 @@ export default function ChatPanel({
       updateLanguage(currentLanguage);
     }
   }, [currentLanguage, language, updateLanguage]);
+
+  // UI-MIG-T3 home -> chat handoff: HomeScreen's AskOrcaInput queues a
+  // pending query via AppContext.submitChatQuery; send it through the real
+  // SSE sendMessage (never a simulator). Wait out any active stream so the
+  // query is never dropped (consume only on send).
+  const { pendingChatQuery, consumeChatQuery } = useApp();
+  useEffect(() => {
+    if (!pendingChatQuery || isStreaming) return;
+    const text = pendingChatQuery.text;
+    consumeChatQuery();
+    void sendMessage(text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingChatQuery, isStreaming]);
 
   // Auto-scroll on new messages or token stream
   useEffect(() => {
