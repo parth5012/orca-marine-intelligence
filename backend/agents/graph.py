@@ -637,6 +637,25 @@ async def planner_node(state: ORCAState) -> dict:
                             f"planner cross-check: LLM coords drifted {_drift:.0f}km from "
                             f"registry port; snapped to deterministic fix (auditable)"
                         )
+                    # Fuzzy did-you-mean note when deterministic fix came from
+                    # a typo correction (e.g. mulambam -> Munambam).
+                    try:
+                        from backend.agents.fallback import match_port_name as _match_port
+                    except ImportError:
+                        try:
+                            from agents.fallback import match_port_name as _match_port  # type: ignore
+                        except ImportError:
+                            _match_port = None  # type: ignore
+                    if _match_port is not None:
+                        try:
+                            _fname, _fscore, _ffuzzy = _match_port(query)
+                            if _fname and _ffuzzy and _fscore >= 0.8:
+                                _xcheck_notes.append(
+                                    f"fuzzy port match: did you mean {_fname}? "
+                                    f"(score {_fscore:.2f}) — auto-resolved; please confirm"
+                                )
+                        except Exception:
+                            pass
                 # Inland LLM fix with no coastal grounding → clarify instead
                 # of searching mid-land (0 zones + false DO NOT SAIL).
                 try:
@@ -934,6 +953,25 @@ async def decision_agent(state: ORCAState) -> dict:
             "coastal place like Kochi, Munambam, Beypore, Kollam, Vizag, Veraval, or "
             "Chennai so I can find safe fishing zones near you."
         )
+        # Did-you-mean: ambiguous typo (score 0.6-0.8) gets a targeted ask-back
+        # instead of the generic GPS prompt.
+        try:
+            from backend.agents.fallback import suggest_port as _suggest
+        except ImportError:
+            try:
+                from agents.fallback import suggest_port as _suggest  # type: ignore
+            except ImportError:
+                _suggest = None  # type: ignore
+        if _suggest is not None:
+            try:
+                _q = state.get("query", "") or ""
+                _sname, _sscore = _suggest(_q)
+                if _sname and 0.6 <= float(_sscore) < 0.8:
+                    clarification_text = (
+                        f"Did you mean {_sname}? {clarification_text}"
+                    )
+            except Exception:
+                pass
         reasoning_trace = list(state.get("reasoning_trace") or [])
         evidence_clar: list[str] = ["Clarification requested — GPS/location required for PFZ search"]
         for line in reasoning_trace:
@@ -1164,6 +1202,31 @@ async def decision_agent(state: ORCAState) -> dict:
                     "fallback": "none",
                 }
             logger.warning("graph.decision: synthesis failed, keeping deterministic reply: %s", exc)
+
+    # Did-you-mean confirmation on auto-resolved typos: surface in the reply
+    # so the fisher can confirm (trace line already rides in evidence).
+    try:
+        _trace_all = list(state.get("reasoning_trace") or [])
+        _fuzzy_canon: str | None = None
+        for _ln in _trace_all:
+            if isinstance(_ln, str) and _ln.startswith("fuzzy port match:"):
+                import re as _re2
+
+                _m = _re2.search(r"did you mean ([A-Za-z]+)", _ln)
+                if _m:
+                    _fuzzy_canon = _m.group(1)
+                    break
+                _m2 = _re2.search(r"~\s*([A-Za-z]+)", _ln)
+                if _m2:
+                    _fuzzy_canon = _m2.group(1)
+                    break
+        if _fuzzy_canon and best is not None:
+            _prefix = f"Did you mean {_fuzzy_canon}? Showing zones for {_fuzzy_canon} - please confirm. "
+            if _prefix.strip().lower() not in str(reply_text).lower():
+                reply_text = _prefix + str(reply_text)
+                explanation = _prefix + str(explanation)
+    except Exception:
+        pass
 
     return {
         "combined": combined,
