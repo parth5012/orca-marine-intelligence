@@ -397,9 +397,12 @@ def _verify_geocoding(plan: PlannerOutput) -> PlannerOutput:
     if coords is None:
         loc.port_name = None
         return plan
+    # Normalize aliases (visakhapatnam -> Vizag) before fuzzy classification
+    # so exact aliases never take the fuzzy path (CodeRabbit PR #115).
+    raw_norm = _PORT_ALIASES.get(raw_name.strip().lower(), raw_name.strip())
     # Fuzzy correction (e.g. mulambam -> Munambam): keep auditable note and
     # cap confidence so UI can show "did you mean?" while still dispatching.
-    is_fuzzy = raw_name.strip().lower() != (canon or "").lower()
+    is_fuzzy = raw_norm.lower() != (canon or "").lower()
     if is_fuzzy:
         try:
             plan.reasoning_trace = list(plan.reasoning_trace or []) + [
