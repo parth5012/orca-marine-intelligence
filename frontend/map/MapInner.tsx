@@ -56,6 +56,20 @@ export interface MapLayerToggles {
   mpa?: boolean;
   imbl?: boolean;
   weather?: boolean;
+  /**
+   * Visual-only design pills (UI-MIG-T5, see frontend/map/layers.ts).
+   * All optional; missing keys default to true (legacy 5-key callers keep
+   * full visuals). cyclone/lightning are reserved no-ops until a live
+   * source exists — accepted, never mocked.
+   */
+  sst?: boolean;
+  chlorophyll?: boolean;
+  waves?: boolean;
+  wind?: boolean;
+  currents?: boolean;
+  cyclone?: boolean;
+  lightning?: boolean;
+  restricted?: boolean;
 }
 
 export interface MapInnerProps {
@@ -169,6 +183,17 @@ export default function MapInner({
       setLayers((prev) => ({ ...prev, ...initialLayers }));
     }
   }, [initialLayers]);
+
+  // UI-MIG-T5 visual-only flags (missing => true so legacy 5-key bags are unchanged).
+  const ext = layers as Record<string, boolean | undefined>;
+  const sstOn = ext.sst !== false;
+  const chlorophyllOn = ext.chlorophyll !== false;
+  const wavesOn = ext.waves !== false;
+  const windOn = ext.wind !== false;
+  const currentsOn = ext.currents !== false;
+  // cyclone/lightning are reserved no-ops (accepted, never mocked) — no overlay yet.
+  const restrictedOn = ext.restricted !== false;
+  const mpaEmphasis = layers.mpa ? (restrictedOn ? 1 : 0.45) : 0;
 
   // PFZ GeoJSON points fetched from proxy
   const [pfzFeatures, setPfzFeatures] = useState<any[]>([]);
@@ -332,13 +357,24 @@ export default function MapInner({
     return { distKm, bearingDeg, compass };
   }, [navOrigin, highlightedPoint]);
 
-  // Color helper for PFZ points
+  // Color helper for PFZ points (UI-MIG-T5: sst OFF renders neutral so the
+  // pill is a non-destructive visual filter over the same live PFZ source).
   const getSuitabilityColor = (suitability?: string) => {
+    if (!sstOn) return '#38bdf8'; // neutral marine blue when SST tint off
     const s = String(suitability || '').toLowerCase();
     if (s === 'high' || s === 'excellent') return '#22c55e'; // green
     if (s === 'medium' || s === 'moderate') return '#f59e0b'; // amber
     if (s === 'low') return '#eab308'; // yellow
     return '#38bdf8'; // sky blue fallback
+  };
+
+  // Glow ring class for the new pill look (suppressed when chlorophyll OFF).
+  const getGlowClass = (suitability?: string) => {
+    if (!chlorophyllOn) return undefined;
+    const s = String(suitability || '').toLowerCase();
+    if (s === 'high' || s === 'excellent') return 'pfz-glow-suitable';
+    if (s === 'medium' || s === 'moderate') return 'pfz-glow-moderate';
+    return 'pfz-glow-caution';
   };
 
   // Custom User Location Icon
@@ -437,7 +473,10 @@ export default function MapInner({
                   color: '#ef4444',
                   weight: 2.5,
                   fillColor: '#dc2626',
-                  fillOpacity: 0.35,
+                  // UI-MIG-T5: `restricted` is emphasis-only — dim, never hide,
+                  // while the legacy mpa toggle stays on.
+                  fillOpacity: 0.35 * mpaEmphasis,
+                  opacity: 0.4 + 0.6 * mpaEmphasis,
                 }}
               >
                 <Popup>
@@ -465,6 +504,8 @@ export default function MapInner({
               color: '#ea580c',
               weight: 3.5,
               dashArray: '8 6',
+              // UI-MIG-T5: restricted emphasis-only, never hides the legacy imbl line.
+              opacity: restrictedOn ? 1 : 0.45,
             }}
           >
             <Tooltip permanent={false} direction="top">
@@ -485,7 +526,7 @@ export default function MapInner({
           </Polyline>
         )}
 
-        {/* 4. PFZ Circle Markers */}
+        {/* 4. PFZ Circle Markers (live /api/pfz, new glow-pill look) */}
         {layers.pfz &&
           pfzFeatures.map((feat, idx) => {
             const coords = feat.geometry?.coordinates;
@@ -493,6 +534,7 @@ export default function MapInner({
             const [lon, lat] = coords;
             const props = feat.properties || {};
             const color = getSuitabilityColor(props.suitability);
+            const glowClass = getGlowClass(props.suitability);
 
             return (
               <CircleMarker
@@ -504,8 +546,17 @@ export default function MapInner({
                   weight: 1.5,
                   fillColor: color,
                   fillOpacity: 0.85,
+                  className: glowClass,
                 }}
               >
+                <Tooltip direction="top" offset={[0, -10]} opacity={0.95}>
+                  <div className="text-xs font-bold px-1.5 py-0.5">
+                    {props.place || 'Fishing Zone'}
+                    {props.distance || props.distance_km
+                      ? ` (${props.distance || props.distance_km} km away)`
+                      : ''}
+                  </div>
+                </Tooltip>
                 <Popup>
                   <div className="text-xs text-slate-100 min-w-[200px] p-1 font-sans">
                     <div className="flex items-center justify-between border-b border-slate-700 pb-1 mb-2">
@@ -604,7 +655,9 @@ export default function MapInner({
               </Tooltip>
             </CircleMarker>
 
-            {/* Navigation Line connecting origin (userLocation/center) to target */}
+            {/* Navigation Line connecting origin (userLocation/center) to target.
+                UI-MIG-T5: `currents` OFF hides the line only (pulse stays). */}
+            {currentsOn && (
             <Polyline
               positions={[navOrigin, highlightedPoint]}
               pathOptions={{
@@ -621,6 +674,7 @@ export default function MapInner({
                 </Tooltip>
               )}
             </Polyline>
+            )}
           </>
         )}
 
@@ -780,18 +834,22 @@ export default function MapInner({
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-[11px]">
+            {wavesOn && (
             <div className="bg-slate-950/60 p-1.5 rounded border border-slate-800">
               <span className="text-slate-400 block text-[10px]">Wave Height</span>
               <span className="text-cyan-300 font-bold text-sm">
                 {weatherState.wave_height_m} m
               </span>
             </div>
+            )}
+            {windOn && (
             <div className="bg-slate-950/60 p-1.5 rounded border border-slate-800">
               <span className="text-slate-400 block text-[10px]">Wind Speed</span>
               <span className="text-cyan-300 font-bold text-sm">
                 {weatherState.wind_speed_kt} kts
               </span>
             </div>
+            )}
           </div>
 
           <div className="mt-2 text-[10px] text-slate-400 flex items-center justify-between font-mono">
