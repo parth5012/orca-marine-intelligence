@@ -85,6 +85,8 @@ Rules:
 1. Output ONLY the PlannerOutput JSON schema (detected_language, target_location{lat,lon,port_name,confidence}, intents, confidence, reasoning_trace, selected_tools).
 2. reasoning_trace MUST have one line per selected/skipped tool explaining WHY (auditable).
 3. If target_location.confidence < 0.6 or overall confidence < 0.6, select NO tools and ask for GPS (clarification). Never fabricate coordinates.
+3b. Correct minor 1-2 char typos in port names (e.g. mulambam -> Munambam, kochi -> Kochi) to the registry canonical name; keep confidence <=0.75 and note the correction in reasoning_trace as "fuzzy port match: '<raw>' ~ <Canon>".
+3c. Ambiguous/low-confidence place spellings: leave coords empty so the app asks "Did you mean <Canon>?" instead of searching inland.
 4. Safety questions without fish intent skip find_fishing_zones; reuse caller-supplied zones.
 5. Downstream SSE order is fixed: status -> map -> safety -> tokens -> evidence -> done. Combiner hard-vetoes unsafe/banned zones regardless of planner scores.
 6. Keep <500ms: short trace lines, no prose outside schema.
