@@ -400,7 +400,12 @@ async def ingest_textdata(
         "count": len(features),
         "sector_count": len(sector_set),
         "features": features,
+        "artifacts": [],
     }
+
+    # Track per-sink artifacts: only sinks that actually succeed are reported,
+    # so cron/API envelopes never claim persistence that did not happen.
+    artifacts: List[str] = []
 
     # 1. Write data/pfz-today.geojson (only if features non-empty)
     if features:
@@ -410,6 +415,7 @@ async def ingest_textdata(
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(geojson_doc, f, indent=2)
             logger.info("Saved %d PFZ features to %s", len(features), out_path)
+            artifacts.append("data/pfz-today.geojson")
         except Exception as io_err:
             logger.warning("Could not write %s: %s", out_path, io_err)
 
@@ -419,6 +425,7 @@ async def ingest_textdata(
 
             upserted = await upsert_pfz_features(features, valid_date=valid_date)
             logger.info("Upserted %d PFZ zones to PostGIS database", upserted)
+            artifacts.append("postgis:pfz_zones")
         except Exception as db_err:
             logger.debug("PostGIS upsert skipped (offline/disconnected): %s", db_err)
 
@@ -427,7 +434,29 @@ async def ingest_textdata(
         from backend.db.redis import set_json
 
         await set_json("pfz:today", geojson_doc, ttl_seconds=21600)
+        artifacts.append("redis:pfz:today")
     except Exception as redis_err:
         logger.debug("Redis cache set skipped: %s", redis_err)
+
+    geojson_doc["artifacts"] = artifacts
+
+    # Re-persist the final document so stored payloads carry the completed
+    # artifact list (both were serialized above while it was still empty).
+    # Best-effort: never fail the run on rewrite. The file rewrite stays
+    # gated on features (never persist an empty file over yesterday's data);
+    # Redis refreshes whenever it persisted, even for empty feature sets.
+    if artifacts:
+        if features:
+            try:
+                with open(_get_pfz_data_path(), "w", encoding="utf-8") as f:
+                    json.dump(geojson_doc, f, indent=2)
+            except Exception as rewrite_err:
+                logger.debug("Final GeoJSON rewrite skipped: %s", rewrite_err)
+        try:
+            from backend.db.redis import set_json as _refresh_json
+
+            await _refresh_json("pfz:today", geojson_doc, ttl_seconds=21600)
+        except Exception as refresh_err:
+            logger.debug("Final Redis refresh skipped: %s", refresh_err)
 
     return geojson_doc

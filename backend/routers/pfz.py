@@ -12,10 +12,11 @@ decision (post-MVP slider deferred) — today endpoint only.
 """
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 
 from backend.db.redis import get_json, set_json
 from backend.ingest.copernicus_fallback import fetch_copernicus_fallback
@@ -121,4 +122,68 @@ async def get_today_pfz(
             "count": len(limited_features),
         },
         "features": limited_features,
+    }
+
+
+@router.post("/pfz/refresh")
+async def refresh_pfz(
+    authorization: Optional[str] = Header(None, description="Bearer <CRON_SECRET>"),
+) -> Dict[str, Any]:
+    """
+    Cron-triggered PFZ refresh.
+
+    Called by: Vercel Cron (frontend/app/api/cron/pfz), Render Cron Job,
+    or OS cron via `curl -X POST .../api/pfz/refresh -H "Authorization: Bearer $CRON_SECRET"`.
+
+    Runs backend.ingest.incois_textdata.ingest_textdata() which rewrites
+    data/pfz-today.geojson, upserts PostGIS, and refreshes Redis (6h TTL).
+    Returns AGENTS.md §3.2 observable envelope.
+
+    Auth fails closed: CRON_SECRET must be set in every environment except
+    explicit local dev (ALLOW_UNAUTHENTICATED_REFRESH=true). Without either,
+    the endpoint refuses with 503 instead of exposing an unauthenticated
+    scrape-and-write trigger.
+    """
+    expected = os.getenv("CRON_SECRET", "").strip()
+    allow_local = os.getenv("ALLOW_UNAUTHENTICATED_REFRESH", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    if expected:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing Bearer CRON_SECRET")
+        if authorization[len("Bearer "):].strip() != expected:
+            raise HTTPException(status_code=403, detail="Invalid CRON_SECRET")
+    elif not allow_local:
+        raise HTTPException(
+            status_code=503,
+            detail="PFZ refresh not configured: set CRON_SECRET "
+            "(or ALLOW_UNAUTHENTICATED_REFRESH=true for local dev only)",
+        )
+
+    try:
+        doc = await ingest_textdata()
+    except Exception as exc:
+        logger.exception("PFZ cron refresh failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"PFZ refresh failed: {exc}") from exc
+
+    features = doc.get("features", [])
+    source = doc.get("source", "incois_textdata")
+    status = "success" if features else "warning"
+    summary = (
+        f"PFZ refresh {status}: {len(features)} features via {source}"
+        if features
+        else "PFZ refresh warning: 0 features; yesterday file retained"
+    )
+    return {
+        "status": status,
+        "summary": summary,
+        "next_actions": ["serve /api/pfz/today", "verify map renders"],
+        # Only sinks ingest_textdata actually persisted (file/PostGIS/Redis).
+        "artifacts": doc.get("artifacts", []),
+        "count": len(features),
+        "source": source,
+        "sector_count": doc.get("sector_count", 0),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
