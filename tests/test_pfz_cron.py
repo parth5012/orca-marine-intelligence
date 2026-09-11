@@ -40,6 +40,7 @@ async def test_run_fetch_success_envelope():
         "type": "FeatureCollection",
         "source": "incois_textdata",
         "sector_count": 2,
+        "artifacts": ["data/pfz-today.geojson", "redis:pfz:today"],
         "features": [
             {"type": "Feature", "properties": {"sector": "SEC005", "sector_name": "KERALA"}},
             {"type": "Feature", "properties": {"sector": "SEC002", "sector_name": "MAHARASHTRA"}},
@@ -50,7 +51,9 @@ async def test_run_fetch_success_envelope():
     assert result["status"] == "success"
     assert result["count"] == 2
     assert result["source"] == "incois_textdata"
-    assert "data/pfz-today.geojson" in result["artifacts"]
+    # Artifacts must be passed through from ingest (per-sink), not hard-coded
+    assert result["artifacts"] == ["data/pfz-today.geojson", "redis:pfz:today"]
+    assert result["sector_count"] == 2
     assert isinstance(result["next_actions"], list) and result["next_actions"]
 
 
@@ -68,6 +71,8 @@ async def test_run_fetch_sector_filter():
     with patch("backend.ingest.incois_textdata.ingest_textdata", new=AsyncMock(return_value=fake_doc)):
         result = await run_fetch(sectors=["SEC005"])
     assert result["count"] == 1
+    # sector_count must reflect the filtered set, not the unfiltered document
+    assert result["sector_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -81,18 +86,29 @@ async def test_run_fetch_empty_is_warning_not_crash():
 
 def test_refresh_requires_secret_when_configured(client, monkeypatch):
     monkeypatch.setenv("CRON_SECRET", "s3cr3t")
+    monkeypatch.delenv("ALLOW_UNAUTHENTICATED_REFRESH", raising=False)
     resp = client.post("/api/pfz/refresh")
     assert resp.status_code == 401
     resp_bad = client.post("/api/pfz/refresh", headers={"Authorization": "Bearer wrong"})
     assert resp_bad.status_code == 403
 
 
+def test_refresh_fails_closed_without_secret(client, monkeypatch):
+    """No CRON_SECRET + no local-dev flag → 503, never an open trigger."""
+    monkeypatch.delenv("CRON_SECRET", raising=False)
+    monkeypatch.delenv("ALLOW_UNAUTHENTICATED_REFRESH", raising=False)
+    resp = client.post("/api/pfz/refresh")
+    assert resp.status_code == 503
+
+
 def test_refresh_success_open_in_dev(client, monkeypatch):
     monkeypatch.delenv("CRON_SECRET", raising=False)
+    monkeypatch.setenv("ALLOW_UNAUTHENTICATED_REFRESH", "true")
     fake_doc = {
         "type": "FeatureCollection",
         "source": "copernicus_fallback",
         "sector_count": 1,
+        "artifacts": ["redis:pfz:today"],
         "features": [{"type": "Feature", "properties": {"sector": "SEC005"}}],
     }
     with patch("backend.routers.pfz.ingest_textdata", new=AsyncMock(return_value=fake_doc)):
@@ -102,4 +118,4 @@ def test_refresh_success_open_in_dev(client, monkeypatch):
     assert data["status"] == "success"
     assert data["count"] == 1
     assert data["source"] == "copernicus_fallback"
-    assert "artifacts" in data
+    assert data["artifacts"] == ["redis:pfz:today"]

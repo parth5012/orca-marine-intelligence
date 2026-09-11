@@ -138,14 +138,29 @@ async def refresh_pfz(
     Runs backend.ingest.incois_textdata.ingest_textdata() which rewrites
     data/pfz-today.geojson, upserts PostGIS, and refreshes Redis (6h TTL).
     Returns AGENTS.md §3.2 observable envelope.
+
+    Auth fails closed: CRON_SECRET must be set in every environment except
+    explicit local dev (ALLOW_UNAUTHENTICATED_REFRESH=true). Without either,
+    the endpoint refuses with 503 instead of exposing an unauthenticated
+    scrape-and-write trigger.
     """
     expected = os.getenv("CRON_SECRET", "").strip()
-    # Enforce secret only when configured (prod); allow open refresh in local dev
+    allow_local = os.getenv("ALLOW_UNAUTHENTICATED_REFRESH", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     if expected:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Missing Bearer CRON_SECRET")
         if authorization[len("Bearer "):].strip() != expected:
             raise HTTPException(status_code=403, detail="Invalid CRON_SECRET")
+    elif not allow_local:
+        raise HTTPException(
+            status_code=503,
+            detail="PFZ refresh not configured: set CRON_SECRET "
+            "(or ALLOW_UNAUTHENTICATED_REFRESH=true for local dev only)",
+        )
 
     try:
         doc = await ingest_textdata()
@@ -165,7 +180,8 @@ async def refresh_pfz(
         "status": status,
         "summary": summary,
         "next_actions": ["serve /api/pfz/today", "verify map renders"],
-        "artifacts": ["data/pfz-today.geojson", "redis:pfz:today", "postgis:pfz_zones"],
+        # Only sinks ingest_textdata actually persisted (file/PostGIS/Redis).
+        "artifacts": doc.get("artifacts", []),
         "count": len(features),
         "source": source,
         "sector_count": doc.get("sector_count", 0),

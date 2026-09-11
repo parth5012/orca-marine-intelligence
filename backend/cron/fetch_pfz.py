@@ -67,6 +67,15 @@ async def run_fetch(sectors: Optional[List[str]] = None) -> Dict[str, Any]:
         source = doc.get("source", "incois_textdata")
         elapsed = round(time.time() - t0, 2)
         status = "success" if count > 0 else "warning"
+        # sector_count must reflect the post-filter feature set, not the
+        # unfiltered document (they diverge when --sectors narrows features).
+        sector_count = len(
+            {
+                f.get("properties", {}).get("sector")
+                for f in features
+                if f.get("properties", {}).get("sector")
+            }
+        )
 
         # Distinguish live vs fallback for operators
         if source == "copernicus_fallback":
@@ -83,10 +92,11 @@ async def run_fetch(sectors: Optional[List[str]] = None) -> Dict[str, Any]:
             "status": status,
             "summary": summary,
             "next_actions": next_actions,
-            "artifacts": ["data/pfz-today.geojson", "redis:pfz:today", "postgis:pfz_zones"],
+            # Only sinks ingest_textdata actually persisted (file/PostGIS/Redis).
+            "artifacts": doc.get("artifacts", []),
             "count": count,
             "source": source,
-            "sector_count": doc.get("sector_count", 0),
+            "sector_count": sector_count,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "elapsed_s": elapsed,
         }
@@ -96,7 +106,7 @@ async def run_fetch(sectors: Optional[List[str]] = None) -> Dict[str, Any]:
             "status": "error",
             "summary": f"PFZ cron error: {exc}",
             "next_actions": ["check logs", "verify DATABASE_URL/REDIS_URL", "retry manually"],
-            "artifacts": ["data/pfz-today.geojson"],
+            "artifacts": [],
             "count": 0,
             "source": "error",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -131,7 +141,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "status": "error",
             "summary": f"PFZ cron timed out after {args.timeout}s",
             "next_actions": ["retry with --timeout 180", "check INCOIS latency"],
-            "artifacts": ["data/pfz-today.geojson"],
+            "artifacts": [],
             "count": 0,
             "source": "timeout",
             "timestamp": datetime.now(timezone.utc).isoformat(),
