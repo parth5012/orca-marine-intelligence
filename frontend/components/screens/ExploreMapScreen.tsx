@@ -46,7 +46,12 @@ export const ExploreMapScreen: React.FC = () => {
   );
 
   return (
-    <div data-testid="explore-map-screen">
+    // Reference sizing: the inner ExploreMap engine is h-full, so this
+    // wrapper must own a real height or the Leaflet canvas collapses to 0px.
+    <div
+      data-testid="explore-map-screen"
+      className="relative w-full h-[calc(100vh-100px)] min-h-[580px]"
+    >
       <ExploreMap
         center={center}
         zoom={8}
