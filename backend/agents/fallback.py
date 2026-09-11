@@ -311,6 +311,54 @@ def _parse_explicit_location(location: dict | None) -> tuple[float, float] | Non
     return float(lat), float(lon)
 
 
+_FUZZY_PORT_CUTOFF = 0.8
+_AMBIGUOUS_PORT_CUTOFF = 0.6
+
+
+def match_port_name(query: str) -> tuple[str | None, float, bool]:
+    """Fuzzy port-name match returning (canonical_name, score, is_fuzzy).
+
+    Exact substring wins with score 1.0 (is_fuzzy=False). Otherwise each
+    alphabetic token in the query is compared via difflib against known
+    ports; best score >= _FUZZY_PORT_CUTOFF returns (port, score, True).
+    Best score in [_AMBIGUOUS_PORT_CUTOFF, _FUZZY_PORT_CUTOFF) still
+    returns the candidate so callers can ask "did you mean X?".
+    """
+    if not query or not isinstance(query, str):
+        return None, 0.0, False
+    import difflib as _difflib
+
+    q = query.lower()
+    all_ports = {**COASTAL_PORTS, **_KNOWN_PORTS}
+    for port in all_ports:
+        if port.lower() in q:
+            return port, 1.0, False
+    tokens = re.findall(r"[a-z\u0b00-\u0b7f\u0b80-\u0bff\u0c00-\u0c7f\u0900-\u097f]+", q)
+    best: str | None = None
+    best_score = 0.0
+    for tok in tokens:
+        if len(tok) < 4:
+            continue
+        for port in all_ports:
+            s = _difflib.SequenceMatcher(None, tok, port.lower()).ratio()
+            if s > best_score:
+                best_score = s
+                best = port
+    if best is not None and best_score >= _AMBIGUOUS_PORT_CUTOFF:
+        return best, round(best_score, 3), True
+    return None, 0.0, False
+
+
+def suggest_port(query: str) -> tuple[str | None, float]:
+    """Public did-you-mean helper: (canonical_port, score) or (None, 0.0)."""
+    name, score, is_fuzzy = match_port_name(query)
+    if name is None:
+        return None, 0.0
+    if not is_fuzzy:
+        return name, 1.0
+    return name, score
+
+
 def _coastal_port_lookup(query: str) -> tuple[float, float] | None:
     if not query or not isinstance(query, str):
         return None
@@ -318,6 +366,18 @@ def _coastal_port_lookup(query: str) -> tuple[float, float] | None:
     all_ports = {**COASTAL_PORTS, **_KNOWN_PORTS}
     for port, coords in all_ports.items():
         if port.lower() in q:
+            return float(coords[0]), float(coords[1])
+    # Fuzzy fallback: 1-2 char typos like mulambam -> Munambam (0.875).
+    name, score, is_fuzzy = match_port_name(query)
+    if name is not None and is_fuzzy and score >= _FUZZY_PORT_CUTOFF:
+        coords = all_ports.get(name)
+        if coords is not None:
+            logger.info(
+                "fuzzy port match: query token ~ '%s' (score %.3f); resolved to %s",
+                query[:60],
+                score,
+                name,
+            )
             return float(coords[0]), float(coords[1])
     return None
 
