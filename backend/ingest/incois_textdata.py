@@ -439,4 +439,21 @@ async def ingest_textdata(
         logger.debug("Redis cache set skipped: %s", redis_err)
 
     geojson_doc["artifacts"] = artifacts
+
+    # Re-persist the final document so the stored GeoJSON file and Redis
+    # payload carry the completed artifact list (both were serialized above
+    # while it was still empty). Best-effort: never fail the run on rewrite.
+    if artifacts and features:
+        try:
+            with open(_get_pfz_data_path(), "w", encoding="utf-8") as f:
+                json.dump(geojson_doc, f, indent=2)
+        except Exception as rewrite_err:
+            logger.debug("Final GeoJSON rewrite skipped: %s", rewrite_err)
+        try:
+            from backend.db.redis import set_json as _refresh_json
+
+            await _refresh_json("pfz:today", geojson_doc, ttl_seconds=21600)
+        except Exception as refresh_err:
+            logger.debug("Final Redis refresh skipped: %s", refresh_err)
+
     return geojson_doc

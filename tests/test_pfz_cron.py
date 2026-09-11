@@ -100,7 +100,6 @@ def test_refresh_fails_closed_without_secret(client, monkeypatch):
     resp = client.post("/api/pfz/refresh")
     assert resp.status_code == 503
 
-
 def test_refresh_success_open_in_dev(client, monkeypatch):
     monkeypatch.delenv("CRON_SECRET", raising=False)
     monkeypatch.setenv("ALLOW_UNAUTHENTICATED_REFRESH", "true")
@@ -119,3 +118,28 @@ def test_refresh_success_open_in_dev(client, monkeypatch):
     assert data["count"] == 1
     assert data["source"] == "copernicus_fallback"
     assert data["artifacts"] == ["redis:pfz:today"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_persists_final_artifacts(tmp_path, monkeypatch):
+    """Persisted GeoJSON file must carry the completed artifact list, not []."""
+    import json as _json
+
+    from backend.ingest import incois_textdata as _mod
+
+    fake_features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [76.25, 9.95]},
+            "properties": {"place": "Persist Spot", "sector": "SEC005", "sector_name": "KERALA"},
+        }
+    ]
+    monkeypatch.setattr(_mod, "fetch_incois_sectors", AsyncMock(return_value=fake_features))
+    monkeypatch.setattr(_mod, "_get_pfz_data_path", lambda: tmp_path / "pfz-today.geojson")
+
+    doc = await _mod.ingest_textdata()
+
+    persisted = _json.loads((tmp_path / "pfz-today.geojson").read_text(encoding="utf-8"))
+    assert persisted["artifacts"] == doc["artifacts"]
+    assert "data/pfz-today.geojson" in persisted["artifacts"]
+    assert doc["count"] == 1
