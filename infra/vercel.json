@@ -4,6 +4,12 @@
   "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/.next",
   "installCommand": "cd frontend && npm install",
+  "crons": [
+    {
+      "path": "/api/cron/pfz",
+      "schedule": "30 6 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/((?!chat|pfz).*)",

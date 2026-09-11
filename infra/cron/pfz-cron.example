@@ -1,0 +1,12 @@
+# ORCA PFZ daily cron — crontab example
+# INCOIS publishes TextData ~11:30 IST daily → refresh at 12:00 IST (06:00 UTC).
+# Install: crontab -e  → paste one line below (adjust paths + env file).
+#
+# Option A — direct Python CLI (writes data/pfz-today.geojson, upserts PostGIS, refreshes Redis):
+# 0 6 * * * cd /opt/orca-marine-intelligence && /usr/bin/env INCOIS_JSESSIONID=$(grep INCOIS_JSESSIONID .env | cut -d= -f2) /opt/orca-venv/bin/python -m backend.cron.fetch_pfz >> /var/log/orca-pfz-cron.log 2>&1
+#
+# Option B — via running backend API (good for Docker/Render, no venv needed):
+# 0 6 * * * /usr/bin/curl -sS -X POST http://localhost:8000/api/pfz/refresh -H "Authorization: Bearer $CRON_SECRET" >> /var/log/orca-pfz-cron.log 2>&1
+#
+# Verify: tail /var/log/orca-pfz-cron.log ; ls -l data/pfz-today.geojson ; curl -s http://localhost:8000/api/pfz/today | head -c 300
+0 6 * * * cd /opt/orca-marine-intelligence && python -m backend.cron.fetch_pfz >> /var/log/orca-pfz-cron.log 2>&1
