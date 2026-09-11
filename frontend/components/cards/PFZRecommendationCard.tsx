@@ -1,5 +1,5 @@
 /**
- * PFZRecommendationCard (UI-MIG-T3)
+ * PFZRecommendationCard (UI-MIG-T3, extended T6)
  *
  * Owner: M-E (Frontend Chat & App Shell)
  * Module: frontend/components/cards/PFZRecommendationCard.tsx
@@ -7,10 +7,12 @@
  * Ported visuals from source design cards/PFZRecommendationCard (READ-ONLY).
  *
  * Live-only rewiring (no mocks):
- * - `pfz` is a PFZItem mapped by HomeScreen from the FIRST feature of
- *   live `GET /api/pfz` (GeoJSON -> PFZItem mapper). No hardcoded zones.
- * - Buttons call live AppContext: setActiveTab('map'), startRouteNavigation,
- *   openPFZDetail. No simulators.
+ * - `pfz` is a PFZItem mapped by the shared `@/lib/pfz` mapper from live
+ *   `GET /api/pfz` (GeoJSON -> PFZItem). No hardcoded zones.
+ * - Buttons call live AppContext: viewOnMap (map flyTo+highlight),
+ *   startRouteNavigation, openPFZDetail. No simulators.
+ * - PFZItem type lives in `@/lib/pfz` (single source); re-exported here
+ *   so existing T3 importers keep working.
  */
 
 'use client';
@@ -29,30 +31,8 @@ import {
   Eye,
 } from 'lucide-react';
 
-export interface PFZItem {
-  id: string;
-  name: string;
-  code: string;
-  [key: string]: unknown;
-  region: string;
-  distanceKm: number;
-  bearing: string;
-  bearingDegrees: number;
-  suitability: 'SUITABLE' | 'MODERATE' | 'UNSUITABLE';
-  coordinates: [number, number]; // [lat, lon]
-  sstCelsius: number;
-  chlorophyllMgM3: number;
-  waveHeightMeters: number;
-  windSpeedKmh: number;
-  windDirection: string;
-  weatherCondition: string;
-  travelTimeMinutes: number;
-  fuelEstimateLiters: number;
-  depthMeters: number;
-  targetFishSpecies: string[];
-  evidence: string[];
-  lastUpdated: string;
-}
+import type { PFZItem } from '@/lib/pfz';
+export type { PFZItem } from '@/lib/pfz';
 
 interface PFZCardProps {
   pfz: PFZItem;
@@ -63,7 +43,7 @@ export const PFZRecommendationCard: React.FC<PFZCardProps> = ({
   pfz,
   isFeatured = false,
 }) => {
-  const { openPFZDetail, startRouteNavigation, setActiveTab, themeMode } =
+  const { openPFZDetail, startRouteNavigation, viewOnMap, themeMode } =
     useApp();
   const isLight = themeMode === 'light';
 
@@ -230,7 +210,7 @@ export const PFZRecommendationCard: React.FC<PFZCardProps> = ({
       >
         <button
           type="button"
-          onClick={() => setActiveTab('map')}
+          onClick={() => viewOnMap(pfz)}
           data-testid="pfz-card-view-map"
           className={`flex-1 min-w-[110px] px-3 py-2 rounded-xl border transition-colors text-xs font-bold flex items-center justify-center gap-1.5 ${
             isLight

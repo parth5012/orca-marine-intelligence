@@ -1,0 +1,372 @@
+/**
+ * Shared live PFZ helpers (UI-MIG-T6).
+ *
+ * Single GeoJSON -> PFZItem mapper for the whole frontend. HomeScreen (T3)
+ * owned the first copy; T6 extracts it here verbatim so PFZDetailScreen,
+ * RouteViewScreen and PFZRecommendationCard all map the SAME live
+ * `/api/pfz` feature properties. Do not fork — import from `@/lib/pfz`.
+ *
+ * Live-only: no mock imports, no stub zones. Backend-down callers render
+ * empty states, never synthetic zones.
+ */
+
+export interface PFZItem {
+  id: string;
+  name: string;
+  code: string;
+  [key: string]: unknown;
+  region: string;
+  distanceKm: number;
+  bearing: string;
+  bearingDegrees: number;
+  suitability: 'SUITABLE' | 'MODERATE' | 'UNSUITABLE';
+  coordinates: [number, number]; // [lat, lon]
+  sstCelsius: number;
+  chlorophyllMgM3: number;
+  waveHeightMeters: number;
+  windSpeedKmh: number;
+  windDirection: string;
+  weatherCondition: string;
+  travelTimeMinutes: number;
+  fuelEstimateLiters: number;
+  depthMeters: number;
+  targetFishSpecies: string[];
+  evidence: string[];
+  lastUpdated: string;
+}
+
+export interface LiveRouteInfo {
+  originName: string;
+  destinationName: string;
+  totalDistanceKm: number;
+  totalDistanceNm: number;
+  bearing: string;
+  bearingDegrees: number;
+  estimatedTimeMinutes: number;
+  safetyIndexPercent: number;
+  safetyLabel: 'SAFE' | 'CAUTION' | 'AVOID';
+  waypoints: [number, number][]; // [lat, lon]
+  hazardWarnings: string[];
+}
+
+export const KT_TO_KMH = 1.852;
+export const KM_TO_NM = 1.852;
+export const CRUISE_KMH = 25;
+
+export function getBackendBaseUrl(): string {
+  if (typeof window === 'undefined') {
+    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  }
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl && envUrl.trim().length > 0) return envUrl.replace(/\/$/, '');
+  return 'http://localhost:8000';
+}
+
+export function num(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function haversineKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export function compassFromDegrees(deg: number): string {
+  const dirs = [
+    'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW',
+  ];
+  const norm = ((deg % 360) + 360) % 360;
+  return dirs[Math.round(norm / 22.5) % 16];
+}
+
+/** Safety class mirroring backend/routers/weather.py composite status. */
+export function classifySea(
+  windKt: number,
+  waveM: number,
+  currentKt: number,
+  pressureHpa: number
+): 'safe' | 'caution' | 'danger' {
+  if (
+    windKt > 25.0 ||
+    waveM > 2.5 ||
+    currentKt > 2.5 ||
+    pressureHpa < 995.0
+  ) {
+    return 'danger';
+  }
+  if (
+    windKt > 15.0 ||
+    waveM > 1.5 ||
+    currentKt > 1.5 ||
+    pressureHpa < 1005.0
+  ) {
+    return 'caution';
+  }
+  return 'safe';
+}
+
+/** Live safety index from the same thresholds (safe 96 / caution 78 / danger 42). */
+export function safetyIndexFromSea(
+  level: 'safe' | 'caution' | 'danger'
+): { percent: number; label: 'SAFE' | 'CAUTION' | 'AVOID' } {
+  if (level === 'danger') return { percent: 42, label: 'AVOID' };
+  if (level === 'caution') return { percent: 78, label: 'CAUTION' };
+  return { percent: 96, label: 'SAFE' };
+}
+
+/**
+ * Map ONE live PFZ GeoJSON feature -> design PFZItem. Verbatim T3 logic.
+ * Detail values shown on screen therefore equal the live /api/pfz
+ * feature properties (plus haversine distance/bearing from the GPS fix).
+ */
+export function mapFeatureToPFZItem(
+  feature: any,
+  userLat: number,
+  userLon: number
+): PFZItem | null {
+  const coords = feature?.geometry?.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const lon = Number(coords[0]);
+  const lat = Number(coords[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const p = feature?.properties ?? {};
+
+  const rawSuit = String(
+    p.suitability ?? p.safety ?? p.danger ?? p.danger_status ?? 'safe'
+  ).toLowerCase();
+  const suitability: PFZItem['suitability'] = rawSuit.includes('danger') ||
+    rawSuit.includes('red') ||
+    rawSuit.includes('unsuitable') ||
+    rawSuit.includes('avoid')
+    ? 'UNSUITABLE'
+    : rawSuit.includes('caution') ||
+        rawSuit.includes('amber') ||
+        rawSuit.includes('moderate') ||
+        rawSuit.includes('medium') ||
+        rawSuit.includes('warn')
+      ? 'MODERATE'
+      : 'SUITABLE';
+
+  const distRaw =
+    p.distance_km ?? p.distance_from_user_km ?? p.distance ?? p.distanceKm;
+  const distanceKm =
+    distRaw != null && distRaw !== ''
+      ? Number(Number(distRaw).toFixed(1))
+      : Number(haversineKm(userLat, userLon, lat, lon).toFixed(1));
+
+  const bearingDegRaw =
+    p.bearing_degrees ?? p.bearingDegrees ?? p.bearing ?? p.dir_deg;
+  let bearingDegrees = Number(bearingDegRaw);
+  if (!Number.isFinite(bearingDegrees)) {
+    const dLon = ((lon - userLon) * Math.PI) / 180;
+    const y = Math.sin(dLon) * Math.cos((lat * Math.PI) / 180);
+    const x =
+      Math.cos((userLat * Math.PI) / 180) * Math.sin((lat * Math.PI) / 180) -
+      Math.sin((userLat * Math.PI) / 180) *
+        Math.cos((lat * Math.PI) / 180) *
+        Math.cos(dLon);
+    bearingDegrees = Math.round((((Math.atan2(y, x) * 180) / Math.PI + 360) % 360) * 10) / 10;
+  }
+  const compass = compassFromDegrees(bearingDegrees);
+  const bearingLabel =
+    typeof p.bearing === 'string' && /[NSEW]/.test(p.bearing)
+      ? p.bearing
+      : `${compass} ${String(Math.round(bearingDegrees)).padStart(3, '0')}°`;
+
+  const windKt = num(
+    p.wind_kt ?? p.wind_speed_kt ?? p.wind_kts ?? p.wind,
+    10
+  );
+  const windKmh =
+    p.wind_kph != null &&
+    p.wind_kt == null &&
+    p.wind_speed_kt == null &&
+    p.wind_kts == null
+      ? num(p.wind_kph, 18.5)
+      : Number((windKt * KT_TO_KMH).toFixed(1));
+
+  const depthRaw = p.depth_m ?? p.depth;
+  let depthMeters = 40;
+  if (typeof depthRaw === 'number' && Number.isFinite(depthRaw)) {
+    depthMeters = depthRaw;
+  } else if (typeof depthRaw === 'string') {
+    const nums = depthRaw.match(/\d+(?:\.\d+)?/g);
+    if (nums && nums.length >= 2) {
+      depthMeters = (Number(nums[0]) + Number(nums[1])) / 2;
+    } else if (nums && nums.length === 1) {
+      depthMeters = Number(nums[0]);
+    }
+  }
+
+  const code =
+    String(p.zone_id ?? p.code ?? p.id ?? 'PFZ').toUpperCase().length <= 12
+      ? String(p.zone_id ?? p.code ?? p.id ?? 'PFZ')
+      : String(p.zone_id ?? p.code ?? 'PFZ');
+  const name = String(p.place ?? p.name ?? 'Fishing Zone');
+  const region = String(p.sector_name ?? p.sector ?? p.region ?? 'Indian Coast');
+  const travelTimeMinutes = Math.max(
+    5,
+    Math.round((distanceKm / CRUISE_KMH) * 60)
+  );
+
+  return {
+    id: String(p.zone_id ?? feature?.id ?? `${lat},${lon}`),
+    name,
+    code,
+    region,
+    distanceKm,
+    bearing: bearingLabel,
+    bearingDegrees,
+    suitability,
+    coordinates: [lat, lon],
+    sstCelsius: num(p.sst ?? p.sst_c ?? p.temperature_c, 28.4),
+    chlorophyllMgM3: num(p.chlorophyll ?? p.chl ?? p.chlorophyll_mg_m3, 0.8),
+    waveHeightMeters: num(p.wave_m ?? p.wave_height_m ?? p.wave, 1.1),
+    windSpeedKmh: windKmh,
+    windDirection: String(p.wind_direction ?? p.wind_dir ?? 'NE'),
+    weatherCondition: String(p.weather ?? 'Partly Cloudy'),
+    travelTimeMinutes,
+    fuelEstimateLiters: Number((distanceKm * 0.9).toFixed(1)),
+    depthMeters,
+    targetFishSpecies:
+      Array.isArray(p.species) && p.species.length > 0
+        ? p.species.map(String)
+        : Array.isArray(p.target_species) && p.target_species.length > 0
+          ? p.target_species.map(String)
+          : ['Mackerel', 'Sardine'],
+    evidence: [
+      `INCOIS ${region} ${String(p.valid_until ?? p.date ?? 'today')}`,
+    ],
+    lastUpdated: String(
+      p.updated ?? p.valid_until ?? new Date().toISOString()
+    ),
+  };
+}
+
+function isPFZItemLike(v: any): v is PFZItem {
+  return (
+    v != null &&
+    typeof v === 'object' &&
+    Array.isArray((v as PFZItem).coordinates) &&
+    (v as PFZItem).coordinates.length >= 2 &&
+    typeof (v as PFZItem).distanceKm === 'number' &&
+    typeof (v as PFZItem).bearingDegrees === 'number'
+  );
+}
+
+/**
+ * Normalize AppContext.selectedPFZ (opaque: live GeoJSON feature OR a
+ * mapped PFZItem from PFZRecommendationCard) into a PFZItem for screens.
+ * PFZItem input passes through untouched (no recompute); feature input
+ * goes through the shared mapper. Returns null when unmappable.
+ */
+export function toPFZItem(
+  selected: unknown,
+  userLat: number,
+  userLon: number
+): PFZItem | null {
+  if (selected == null) return null;
+  if (isPFZItemLike(selected)) return selected as PFZItem;
+  return mapFeatureToPFZItem(selected, userLat, userLon);
+}
+
+/**
+ * Convert a PFZItem back to a live GeoJSON Point feature ([lon, lat] —
+ * the same SSE `map.route` convention MapInner guards handle) so
+ * View-on-Map / Navigate can flyTo + highlight + draw the route line.
+ * Pass-through when already a feature.
+ */
+export function pfzItemToFeature(pfz: PFZItem | any): any {
+  if (
+    pfz != null &&
+    typeof pfz === 'object' &&
+    (pfz as any).type === 'Feature' &&
+    (pfz as any).geometry?.coordinates
+  ) {
+    return pfz;
+  }
+  const item = pfz as PFZItem;
+  const lat = Number(item?.coordinates?.[0]);
+  const lon = Number(item?.coordinates?.[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return {
+    type: 'Feature',
+    id: (item as any)?.id,
+    properties: {
+      zone_id: (item as any)?.code ?? (item as any)?.id,
+      code: (item as any)?.code,
+      place: (item as any)?.name,
+      name: (item as any)?.name,
+      sector: (item as any)?.region,
+      sector_name: (item as any)?.region,
+      suitability: (item as any)?.suitability,
+      distance_km: (item as any)?.distanceKm,
+      bearing_degrees: (item as any)?.bearingDegrees,
+      bearing: (item as any)?.bearing,
+    },
+    geometry: { type: 'Point', coordinates: [lon, lat] },
+  };
+}
+
+/**
+ * Live route math: haversine distance, bearing label, ETA at cruise
+ * speed, safety index from the live sea class. Waypoints are
+ * origin -> mid-channel -> destination [lat, lon] (drawn by MapInner's
+ * guarded nav polyline from the same lon/lat feature).
+ */
+export function computeLiveRoute(
+  originLat: number,
+  originLon: number,
+  originName: string,
+  dest: PFZItem,
+  seaLevel: 'safe' | 'caution' | 'danger' = 'safe',
+  hazardWarnings: string[] = []
+): LiveRouteInfo {
+  const [dLat, dLon] = dest.coordinates;
+  const distKm = Number(haversineKm(originLat, originLon, dLat, dLon).toFixed(1));
+  const y = Math.sin(((dLon - originLon) * Math.PI) / 180) * Math.cos((dLat * Math.PI) / 180);
+  const x =
+    Math.cos((originLat * Math.PI) / 180) * Math.sin((dLat * Math.PI) / 180) -
+    Math.sin((originLat * Math.PI) / 180) *
+      Math.cos((dLat * Math.PI) / 180) *
+      Math.cos(((dLon - originLon) * Math.PI) / 180);
+  const bearingDegrees = Math.round((((Math.atan2(y, x) * 180) / Math.PI + 360) % 360) * 10) / 10;
+  const bearingLabel = `${compassFromDegrees(bearingDegrees)} ${String(Math.round(bearingDegrees)).padStart(3, '0')}°`;
+  const { percent, label } = safetyIndexFromSea(seaLevel);
+  const mid: [number, number] = [
+    Number(((originLat + dLat) / 2).toFixed(4)),
+    Number(((originLon + dLon) / 2).toFixed(4)),
+  ];
+  return {
+    originName,
+    destinationName: `${dest.code} (${dest.name})`,
+    totalDistanceKm: distKm,
+    totalDistanceNm: Number((distKm / KM_TO_NM).toFixed(1)),
+    bearing: bearingLabel,
+    bearingDegrees,
+    estimatedTimeMinutes: Math.max(5, Math.round((distKm / CRUISE_KMH) * 60)),
+    safetyIndexPercent: percent,
+    safetyLabel: label,
+    waypoints: [
+      [originLat, originLon],
+      mid,
+      [dLat, dLon],
+    ],
+    hazardWarnings,
+  };
+}

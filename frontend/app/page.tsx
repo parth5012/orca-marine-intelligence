@@ -19,8 +19,8 @@
  *   SSE conversation + Leaflet instance survive tab switches)
  * - SafetyBadge + LanguageSwitch fed from LIVE chat state, never mocks
  *
- * NOTE: home/alerts/profile render their full screens (T3/T7); only
- * pfz-detail/route remain minimal live-data placeholders for later tickets.
+ * NOTE: home/alerts/profile render their full screens (T3/T7); pfz-detail
+ * and route render their full live screens (T6).
  */
 
 'use client';
@@ -37,34 +37,12 @@ import { AuthOnboardingOverlay } from '@/components/auth/AuthOnboardingOverlay';
 import { HomeScreen } from '@/components/screens/HomeScreen';
 import { AlertsScreen } from '@/components/screens/AlertsScreen';
 import { ProfileScreen } from '@/components/screens/ProfileScreen';
+import { PFZDetailScreen } from '@/components/screens/PFZDetailScreen';
+import { RouteViewScreen } from '@/components/screens/RouteViewScreen';
 import { VoiceModal } from '@/components/voice/VoiceModal';
 
-function TabPlaceholderPanel({
-  onAskOrca,
-  onExploreMap,
-}: {
-  onAskOrca: () => void;
-  onExploreMap: () => void;
-}) {
-  const {
-    activeTab,
-    selectedPFZ,
-    startRouteNavigation,
-    themeMode,
-  } = useApp();
-
-  const panelShell = (testid: string, children: React.ReactNode) => (
-    <div
-      data-testid={testid}
-      className={`w-full rounded-2xl border p-5 sm:p-6 shadow-sm backdrop-blur ${
-        themeMode === 'light'
-          ? 'bg-white/90 border-cyan-100 text-slate-800'
-          : 'glass-panel bg-slate-950/90 border-cyan-900/40 text-slate-100'
-      }`}
-    >
-      {children}
-    </div>
-  );
+function TabPlaceholderPanel() {
+  const { activeTab } = useApp();
 
   if (activeTab === 'home') {
     // UI-MIG-T3: full HomeScreen (hero + AskOrcaInput + live map preview +
@@ -84,73 +62,22 @@ function TabPlaceholderPanel({
   }
 
   if (activeTab === 'pfz-detail') {
-    return panelShell(
-      'tab-panel-pfz-detail',
-      <div className="space-y-3">
-        <h2 className="text-xl font-extrabold tracking-tight">PFZ Detail</h2>
-        {selectedPFZ ? (
-          <>
-            <p className="text-sm opacity-80">
-              Zone:{' '}
-              <span className="font-bold">
-                {String(selectedPFZ.name ?? selectedPFZ.id ?? 'Selected zone')}
-              </span>
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  startRouteNavigation(
-                    selectedPFZ as Exclude<typeof selectedPFZ, null>
-                  )
-                }
-                className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold transition-colors"
-              >
-                Start route
-              </button>
-              <button
-                type="button"
-                onClick={onAskOrca}
-                className="px-4 py-2 rounded-xl border border-cyan-500/40 text-sm font-bold hover:bg-cyan-50 dark:hover:bg-slate-800 transition-colors"
-              >
-                Back to chat
-              </button>
-            </div>
-          </>
-        ) : (
-          <p className="text-sm opacity-70">
-            No zone selected yet. Pick a zone from chat or the map.
-          </p>
-        )}
+    // UI-MIG-T6: full PFZDetailScreen (live selected zone via shared
+    // @/lib/pfz mapper + live safety/weather/geofence). Owns the
+    // tab-panel-pfz-detail testid.
+    return (
+      <div data-testid="tab-panel-pfz-detail">
+        <PFZDetailScreen />
       </div>
     );
   }
 
   if (activeTab === 'route') {
-    return panelShell(
-      'tab-panel-route',
-      <div className="space-y-3">
-        <h2 className="text-xl font-extrabold tracking-tight">Route</h2>
-        {selectedPFZ ? (
-          <p className="text-sm opacity-80">
-            Route to{' '}
-            <span className="font-bold">
-              {String(selectedPFZ.name ?? selectedPFZ.id ?? 'selected zone')}
-            </span>{' '}
-            — full turn-by-turn navigation lands with the route screen.
-          </p>
-        ) : (
-          <p className="text-sm opacity-70">
-            No destination set. Select a PFZ first, then start navigation.
-          </p>
-        )}
-        <button
-          type="button"
-          onClick={onExploreMap}
-          className="px-4 py-2 rounded-xl border border-cyan-500/40 text-sm font-bold hover:bg-cyan-50 dark:hover:bg-slate-800 transition-colors"
-        >
-          Back to map
-        </button>
+    // UI-MIG-T6: full RouteViewScreen (live GPS origin -> live zone dest,
+    // haversine route + live safety index + guarded chart polyline).
+    return (
+      <div data-testid="tab-panel-route">
+        <RouteViewScreen />
       </div>
     );
   }
@@ -176,6 +103,9 @@ function Shell() {
     setUserLocation,
     gpsStatus,
     setGpsStatus,
+    setSelectedPFZ,
+    mapFocusFeature,
+    mapFocusNonce,
   } = useApp();
 
   const [mapCenter, setMapCenter] = useState<[number, number]>([
@@ -277,6 +207,16 @@ function Shell() {
     [setActiveTab]
   );
 
+  // UI-MIG-T6: View-on-Map requests (Detail card / Route boundary) flow
+  // through the same guarded handleMapHighlight path (NaN/swap/bounds
+  // guards live in MapInner + handleLocationUpdate). Fires once per nonce.
+  const lastFocusNonce = React.useRef(0);
+  useEffect(() => {
+    if (mapFocusNonce === 0 || mapFocusNonce === lastFocusNonce.current) return;
+    lastFocusNonce.current = mapFocusNonce;
+    if (mapFocusFeature) handleMapHighlight([mapFocusFeature]);
+  }, [mapFocusNonce, mapFocusFeature, handleMapHighlight]);
+
   const handleSafetyUpdate = useCallback((safety: SafetyData) => {
     setSafetyState(safety);
   }, []);
@@ -346,10 +286,7 @@ function Shell() {
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
             >
-              <TabPlaceholderPanel
-                onAskOrca={() => setActiveTab('chat')}
-                onExploreMap={() => setActiveTab('map')}
-              />
+              <TabPlaceholderPanel />
             </motion.div>
           </AnimatePresence>
         )}
@@ -447,7 +384,13 @@ function Shell() {
                 zoom={mapZoom}
                 highlightFeatures={highlightFeatures}
                 userLocation={{ lat: userLocation.lat, lon: userLocation.lon }}
-                onSelectZone={(feature) => handleMapHighlight([feature])}
+                onSelectZone={(feature) => {
+                  // UI-MIG-T6: map picks feed BOTH the highlight/flyTo path
+                  // and AppContext.selectedPFZ so Detail/Route show the same
+                  // live zone without switching tabs.
+                  setSelectedPFZ(feature);
+                  handleMapHighlight([feature]);
+                }}
                 onCenterChange={(c) => setMapCenter(c)}
                 showNavLinks
               />

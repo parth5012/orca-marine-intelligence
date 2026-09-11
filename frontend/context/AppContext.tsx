@@ -198,6 +198,16 @@ interface AppContextType {
   setSelectedPFZ: (pfz: SelectedPFZ) => void;
   openPFZDetail: (pfz: Exclude<SelectedPFZ, null>) => void;
   startRouteNavigation: (pfz: Exclude<SelectedPFZ, null>) => void;
+  /**
+   * Pending map focus (UI-MIG-T6). `viewOnMap` sets the selected zone,
+   * queues the raw live feature for the Shell to flyTo+highlight through
+   * its guarded handleMapHighlight path, then switches to the map tab.
+   * `mapFocusNonce` lets the Shell `useEffect` fire once per request.
+   */
+  mapFocusFeature: any | null;
+  mapFocusNonce: number;
+  requestMapFocus: (feature: any) => void;
+  viewOnMap: (pfz: Exclude<SelectedPFZ, null>) => void;
   /** Shared map layers (UI-MIG-T5). toggleLayer stays AppContext-compatible. */
   activeLayers: ActiveLayers;
   setActiveLayers: (layers: ActiveLayers) => void;
@@ -236,6 +246,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [alertsList, setAlertsList] = useState<AlertRef[]>([]);
   const [selectedAlertFilter, setSelectedAlertFilter] = useState<string>('All');
   const [selectedPFZ, setSelectedPFZ] = useState<SelectedPFZ>(null);
+  const [mapFocusFeature, setMapFocusFeature] = useState<any | null>(null);
+  const [mapFocusNonce, setMapFocusNonce] = useState<number>(0);
   const [pendingChatQuery, setPendingChatQuery] =
     useState<PendingChatQuery | null>(null);
   const [activeLayers, setActiveLayers] =
@@ -329,6 +341,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const requestMapFocus = useCallback((feature: any) => {
+    setMapFocusFeature(feature ?? null);
+    setMapFocusNonce((n) => n + 1);
+  }, []);
+
+  const viewOnMap = useCallback(
+    (pfz: Exclude<SelectedPFZ, null>) => {
+      setSelectedPFZ(pfz);
+      setMapFocusFeature(pfz ?? null);
+      setMapFocusNonce((n) => n + 1);
+      setActiveTab('map');
+    },
+    []
+  );
+
   const toggleLayer = useCallback((key: MapLayerKey) => {
     setActiveLayers((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
@@ -401,6 +428,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setSelectedPFZ,
         openPFZDetail,
         startRouteNavigation,
+        mapFocusFeature,
+        mapFocusNonce,
+        requestMapFocus,
+        viewOnMap,
         activeLayers,
         setActiveLayers,
         toggleLayer,

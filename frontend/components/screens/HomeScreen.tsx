@@ -18,7 +18,7 @@
  *   pressure<995hPa; caution: wind>15kt|wave>1.5m|current>1.5kt|
  *   pressure<1005hPa; else safe).
  * - Featured card from `GET /api/pfz` proxy FIRST feature via the
- *   GeoJSON->PFZItem mapper below.
+ *   shared GeoJSON->PFZItem mapper (`@/lib/pfz`, extracted verbatim T6).
  * - Backend-down -> synthetic coordinate-based estimate + warning chip
  *   (data-testid="home-warning-chip"), never a crash.
  */
@@ -31,8 +31,15 @@ import { AskOrcaInput } from '@/components/common/AskOrcaInput';
 import { ConditionCard } from '@/components/common/ConditionCard';
 import {
   PFZRecommendationCard,
-  PFZItem,
 } from '@/components/cards/PFZRecommendationCard';
+import type { PFZItem } from '@/lib/pfz';
+import {
+  KT_TO_KMH,
+  classifySea,
+  getBackendBaseUrl,
+  mapFeatureToPFZItem,
+  num,
+} from '@/lib/pfz';
 import { MapView } from '@/map';
 import { motion } from 'framer-motion';
 import {
@@ -46,89 +53,6 @@ import {
   MapPin,
 } from 'lucide-react';
 
-const KT_TO_KMH = 1.852;
-
-function getBackendBaseUrl(): string {
-  if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  }
-  const envUrl = process.env.NEXT_PUBLIC_API_URL;
-  if (envUrl && envUrl.trim().length > 0) return envUrl.replace(/\/$/, '');
-  return 'http://localhost:8000';
-}
-
-function num(v: unknown, fallback: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function haversineKm(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function compassFromDegrees(deg: number): string {
-  const dirs = [
-    'N',
-    'NNE',
-    'NE',
-    'ENE',
-    'E',
-    'ESE',
-    'SE',
-    'SSE',
-    'S',
-    'SSW',
-    'SW',
-    'WSW',
-    'W',
-    'WNW',
-    'NW',
-    'NNW',
-  ];
-  const norm = ((deg % 360) + 360) % 360;
-  return dirs[Math.round(norm / 22.5) % 16];
-}
-
-/** Safety class mirroring backend/routers/weather.py composite status. */
-function classifySea(
-  windKt: number,
-  waveM: number,
-  currentKt: number,
-  pressureHpa: number
-): 'safe' | 'caution' | 'danger' {
-  if (
-    windKt > 25.0 ||
-    waveM > 2.5 ||
-    currentKt > 2.5 ||
-    pressureHpa < 995.0
-  ) {
-    return 'danger';
-  }
-  if (
-    windKt > 15.0 ||
-    waveM > 1.5 ||
-    currentKt > 1.5 ||
-    pressureHpa < 1005.0
-  ) {
-    return 'caution';
-  }
-  return 'safe';
-}
-
 interface LiveConditions {
   tempC: number;
   windKt: number;
@@ -139,132 +63,6 @@ interface LiveConditions {
   pressureHpa: number;
   safety: 'safe' | 'caution' | 'danger';
   offline: boolean;
-}
-
-/** Map the FIRST live PFZ GeoJSON feature -> design PFZItem. No mocks. */
-function mapFeatureToPFZItem(
-  feature: any,
-  userLat: number,
-  userLon: number
-): PFZItem | null {
-  const coords = feature?.geometry?.coordinates;
-  if (!Array.isArray(coords) || coords.length < 2) return null;
-  const lon = Number(coords[0]);
-  const lat = Number(coords[1]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  const p = feature?.properties ?? {};
-
-  const rawSuit = String(
-    p.suitability ?? p.safety ?? p.danger ?? p.danger_status ?? 'safe'
-  ).toLowerCase();
-  const suitability: PFZItem['suitability'] = rawSuit.includes('danger') ||
-    rawSuit.includes('red') ||
-    rawSuit.includes('unsuitable') ||
-    rawSuit.includes('avoid')
-    ? 'UNSUITABLE'
-    : rawSuit.includes('caution') ||
-        rawSuit.includes('amber') ||
-        rawSuit.includes('moderate') ||
-        rawSuit.includes('medium') ||
-        rawSuit.includes('warn')
-      ? 'MODERATE'
-      : 'SUITABLE';
-
-  const distRaw =
-    p.distance_km ?? p.distance_from_user_km ?? p.distance ?? p.distanceKm;
-  const distanceKm =
-    distRaw != null && distRaw !== ''
-      ? Number(Number(distRaw).toFixed(1))
-      : Number(haversineKm(userLat, userLon, lat, lon).toFixed(1));
-
-  const bearingDegRaw =
-    p.bearing_degrees ?? p.bearingDegrees ?? p.bearing ?? p.dir_deg;
-  let bearingDegrees = Number(bearingDegRaw);
-  if (!Number.isFinite(bearingDegrees)) {
-    // Fallback: bearing from user position to zone.
-    const dLon = ((lon - userLon) * Math.PI) / 180;
-    const y = Math.sin(dLon) * Math.cos((lat * Math.PI) / 180);
-    const x =
-      Math.cos((userLat * Math.PI) / 180) * Math.sin((lat * Math.PI) / 180) -
-      Math.sin((userLat * Math.PI) / 180) *
-        Math.cos((lat * Math.PI) / 180) *
-        Math.cos(dLon);
-    bearingDegrees = Math.round((((Math.atan2(y, x) * 180) / Math.PI + 360) % 360) * 10) / 10;
-  }
-  const compass = compassFromDegrees(bearingDegrees);
-  const bearingLabel =
-    typeof p.bearing === 'string' && /[NSEW]/.test(p.bearing)
-      ? p.bearing
-      : `${compass} ${String(Math.round(bearingDegrees)).padStart(3, '0')}°`;
-
-  const windKt = num(
-    p.wind_kt ?? p.wind_speed_kt ?? p.wind_kts ?? p.wind,
-    10
-  );
-  const windKmh =
-    p.wind_kph != null &&
-    p.wind_kt == null &&
-    p.wind_speed_kt == null &&
-    p.wind_kts == null
-      ? num(p.wind_kph, 18.5)
-      : Number((windKt * KT_TO_KMH).toFixed(1));
-
-  const depthRaw = p.depth_m ?? p.depth;
-  let depthMeters = 40;
-  if (typeof depthRaw === 'number' && Number.isFinite(depthRaw)) {
-    depthMeters = depthRaw;
-  } else if (typeof depthRaw === 'string') {
-    const nums = depthRaw.match(/\d+(?:\.\d+)?/g);
-    if (nums && nums.length >= 2) {
-      depthMeters = (Number(nums[0]) + Number(nums[1])) / 2;
-    } else if (nums && nums.length === 1) {
-      depthMeters = Number(nums[0]);
-    }
-  }
-
-  const code =
-    String(p.zone_id ?? p.code ?? p.id ?? 'PFZ').toUpperCase().length <= 12
-      ? String(p.zone_id ?? p.code ?? p.id ?? 'PFZ')
-      : String(p.zone_id ?? p.code ?? 'PFZ');
-  const name = String(p.place ?? p.name ?? 'Fishing Zone');
-  const region = String(p.sector_name ?? p.sector ?? p.region ?? 'Indian Coast');
-  const travelTimeMinutes = Math.max(
-    5,
-    Math.round((distanceKm / 25) * 60)
-  );
-
-  return {
-    id: String(p.zone_id ?? feature?.id ?? `${lat},${lon}`),
-    name,
-    code,
-    region,
-    distanceKm,
-    bearing: bearingLabel,
-    bearingDegrees,
-    suitability,
-    coordinates: [lat, lon],
-    sstCelsius: num(p.sst ?? p.sst_c ?? p.temperature_c, 28.4),
-    chlorophyllMgM3: num(p.chlorophyll ?? p.chl ?? p.chlorophyll_mg_m3, 0.8),
-    waveHeightMeters: num(p.wave_m ?? p.wave_height_m ?? p.wave, 1.1),
-    windSpeedKmh: windKmh,
-    windDirection: String(p.wind_direction ?? p.wind_dir ?? 'NE'),
-    weatherCondition: String(p.weather ?? 'Partly Cloudy'),
-    travelTimeMinutes,
-    fuelEstimateLiters: Number((distanceKm * 0.9).toFixed(1)),
-    depthMeters,
-    targetFishSpecies:
-      Array.isArray(p.species) && p.species.length > 0
-        ? p.species.map(String)
-        : Array.isArray(p.target_species) && p.target_species.length > 0
-          ? p.target_species.map(String)
-          : ['Mackerel', 'Sardine'],
-    evidence: [
-      `INCOIS ${region} ${String(p.valid_until ?? p.date ?? 'today')}`,
-    ],
-    lastUpdated: String(
-      p.updated ?? p.valid_until ?? new Date().toISOString()
-    ),
-  };
 }
 
 export const HomeScreen: React.FC = () => {
