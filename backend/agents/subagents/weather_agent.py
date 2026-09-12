@@ -468,6 +468,33 @@ async def check_weather(points: list[dict]) -> list[dict]:
         wind_kt, wind_dir, wind_deg, source = await get_wind(lat, lon, zone_id, idx)
         wind_status = _classify_wind(wind_kt)
 
+        # Tide (T2 #117): lazy import to avoid cycles; never breaks the agent.
+        tide_range_m: float | None = None
+        tidal_state: str = "unknown"
+        next_high_tide_utc: str | None = None
+        next_low_tide_utc: str | None = None
+        try:
+            if lat is not None and lon is not None:
+                try:
+                    from backend.ingest.tides import get_tide as _get_tide
+                except ImportError:
+                    from ingest.tides import get_tide as _get_tide  # type: ignore
+                _tide = _get_tide(lat, lon) or {}
+                tide_range_m = _tide.get("tide_range_m")
+                try:
+                    tide_range_m = float(tide_range_m) if tide_range_m is not None else None
+                except (TypeError, ValueError):
+                    tide_range_m = None
+                tidal_state = str(_tide.get("tidal_state") or "unknown")
+                if tidal_state not in ("rising", "falling", "slack", "unknown"):
+                    tidal_state = "unknown"
+                next_high_tide_utc = _tide.get("next_high_tide_utc")
+                next_low_tide_utc = _tide.get("next_low_tide_utc")
+        except Exception as exc:
+            logger.debug("weather_agent: tide lookup failed for %s (%s, %s): %s", zone_id, lat, lon, exc)
+            tide_range_m, tidal_state = None, "unknown"
+            next_high_tide_utc, next_low_tide_utc = None, None
+
         cyclone_alert, nearest_km, cyclone_name, _nearest = await get_cyclone_alert(lat, lon, cyclones)
         status = _overall_status(wind_status, cyclone_alert)
 
@@ -494,6 +521,10 @@ async def check_weather(points: list[dict]) -> list[dict]:
             "cyclone_alert": cyclone_alert,
             "nearest_cyclone_km": nearest_km,
             "cyclone_name": cyclone_name,
+            "tide_range_m": tide_range_m,
+            "tidal_state": tidal_state,
+            "next_high_tide_utc": next_high_tide_utc,
+            "next_low_tide_utc": next_low_tide_utc,
             "status": status,
             "reason": reason,
             "source": source,

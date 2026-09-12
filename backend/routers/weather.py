@@ -63,6 +63,11 @@ class CurrentWeatherResponse(BaseModel):
     wind_speed_kts: Optional[float] = None
     swell_wave_height_m: Optional[float] = None
     swell_wave_period_s: Optional[float] = None
+    # Tide (T2 #117): nulls + unknown when data unavailable
+    tide_range_m: Optional[float] = None
+    tidal_state: Optional[str] = None
+    next_high_tide_utc: Optional[str] = None
+    next_low_tide_utc: Optional[str] = None
 
 
 class CycloneWarningResponse(BaseModel):
@@ -102,11 +107,19 @@ async def get_current_weather(
         logger.warning("Redis cache read error for %s: %s", cache_key, exc)
 
     try:
+        try:
+            from backend.ingest.tides import get_tide as _get_tide
+        except ImportError:
+            from ingest.tides import get_tide as _get_tide  # type: ignore
         # Run upstream providers concurrently: total latency = max(), not sum().
-        weather_data, marine_data = await asyncio.gather(
+        # Tide is local disk/parse — also off the event loop via to_thread.
+        weather_data, marine_data, tide_info = await asyncio.gather(
             asyncio.to_thread(fetch_live_weather, lat, lon),
             asyncio.to_thread(fetch_open_meteo_marine, lat, lon),
+            asyncio.to_thread(_get_tide, lat, lon),
         )
+        if not isinstance(tide_info, dict):
+            tide_info = {"tide_range_m": None, "next_high_tide_utc": None, "next_low_tide_utc": None, "tidal_state": "unknown"}
 
         wind_speed_kt = float(weather_data.get("wind_speed_kt", 10.0))
         wind_gust_kt = float(
@@ -147,6 +160,10 @@ async def get_current_weather(
             "status": status,
             "source": source,
             "cached": False,
+            "tide_range_m": tide_info.get("tide_range_m"),
+            "tidal_state": tide_info.get("tidal_state", "unknown"),
+            "next_high_tide_utc": tide_info.get("next_high_tide_utc"),
+            "next_low_tide_utc": tide_info.get("next_low_tide_utc"),
         }
 
         # Cache in Redis with 30-minute TTL (1800 seconds)
