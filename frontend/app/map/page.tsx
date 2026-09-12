@@ -58,7 +58,7 @@ function MapPageInner() {
 
 export default function MapPage() {
   return (
-    <Suspense fallback={<div className="flex-1 bg-slate-950" />}>
+    <Suspense fallback={<div className="flex-1 bg-slate-100 dark:bg-slate-950" />}>
       <MapPageInner />
     </Suspense>
   );

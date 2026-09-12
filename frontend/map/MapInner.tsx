@@ -181,6 +181,8 @@ export default function MapInner({
 
   useEffect(() => {
     if (!hasManualOverride) {
+      tileErrorsRef.current = 0;
+      setTileError(false);
       setBasemapStyle(getThemeBasemapStyle(effTheme));
     }
   }, [effTheme, hasManualOverride]);

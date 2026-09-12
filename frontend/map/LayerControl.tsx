@@ -200,7 +200,7 @@ export const LayerControl: React.FC<LayerControlProps> = (props) => {
           aria-label="Select CARTO Dark Matter Base Layer"
           onClick={() => props.onSelectBasemap?.('dark_all')}
           className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
-            props.basemapStyle === 'dark_all' || !props.basemapStyle
+            props.basemapStyle === 'dark_all'
               ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
               : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
           }`}
