@@ -501,3 +501,100 @@ async def check_weather(points: list[dict]) -> list[dict]:
 
     # Parallel per-zone: gather preserves order, ~6s total not 5x6s sequential.
     return list(await asyncio.gather(*(_one(idx, pt) for idx, pt in enumerate(points))))
+
+
+async def check_forecast(lat: float, lon: float, hours_ahead: int = 24) -> dict[str, Any]:
+    """
+    Evaluate departure window forecast for coordinates over next 6-24 hours.
+    Queries Open-Meteo hourly forecast via live_fetchers.
+    Returns:
+      {
+        "departure_safe": bool | str,
+        "best_window_utc": str,
+        "forecast_summary": str,
+        "wind_kts_6h": float | None,
+        "wave_m_6h": float | None,
+      }
+    """
+    try:
+        import asyncio as _aio
+        from datetime import datetime, timezone, timedelta
+        try:
+            from backend.ingest import live_fetchers
+        except ImportError:
+            from ingest import live_fetchers  # type: ignore
+
+        _ist = timezone(timedelta(hours=5, minutes=30))
+        now_utc = datetime.now(timezone.utc)
+        target_dt = (now_utc + timedelta(hours=6)).astimezone(_ist)
+
+        # 1. Fetch 6h ahead weather + marine (non-blocking, correct keys)
+        wind_6h = None
+        wave_6h = None
+        try:
+            w_6h = await _aio.to_thread(live_fetchers.fetch_open_meteo_weather, lat, lon, target_dt)
+            wind_6h = w_6h.get("wind_speed_kt")
+            if wind_6h is None:
+                try:
+                    wind_6h = (w_6h.get("trip_window_6h") or {}).get("max_wind_kt")
+                except Exception:
+                    wind_6h = None
+        except Exception:
+            w_6h = {}
+        try:
+            m_6h = await _aio.to_thread(live_fetchers.fetch_open_meteo_marine, lat, lon, target_dt)
+            wave_6h = m_6h.get("wave_height_m") or m_6h.get("wave_height")
+            if wave_6h is None:
+                wave_6h = m_6h.get("max_wave_6h")
+            if wave_6h is None:
+                try:
+                    wave_6h = (m_6h.get("trip_window_6h") or {}).get("max_wave_m")
+                except Exception:
+                    wave_6h = None
+        except Exception:
+            m_6h = {}
+
+        # 2. Compute 24h departure advisory if available
+        advisory_info: dict[str, Any] = {}
+        try:
+            advisory_info = await _aio.to_thread(live_fetchers.compute_departure_window_advisory, lat, lon, hours_ahead)
+        except Exception:
+            pass
+
+        best_window = advisory_info.get("departure_window") or f"{target_dt.strftime('%H:00')} IST"
+        dep_safe = advisory_info.get("is_safe_to_depart")
+        if dep_safe is None:
+            # derive from wind/wave thresholds when advisory unavailable
+            try:
+                _wsafe = (wind_6h is None or float(wind_6h) < 15.0) and (wave_6h is None or float(wave_6h) < 1.5)
+                dep_safe = bool(_wsafe)
+            except Exception:
+                dep_safe = True
+
+        if advisory_info.get("bulletin_text"):
+            summary = advisory_info["bulletin_text"]
+        elif wind_6h is not None and wave_6h is not None:
+            safe_str = "safe to depart" if dep_safe else "conditions unsafe / caution"
+            summary = f"Tomorrow morning ({best_window}): wind {wind_6h} kt, waves {wave_6h}m - {safe_str}."
+        elif wind_6h is not None:
+            safe_str = "safe to depart" if dep_safe else "conditions unsafe / caution"
+            summary = f"Tomorrow morning ({best_window}): wind {wind_6h} kt - {safe_str}."
+        else:
+            summary = "Forecast advisory available."
+
+        return {
+            "departure_safe": dep_safe,
+            "best_window_utc": str(best_window),
+            "forecast_summary": summary,
+            "wind_kts_6h": float(wind_6h) if wind_6h is not None else None,
+            "wave_m_6h": float(wave_6h) if wave_6h is not None else None,
+        }
+    except Exception as exc:
+        logger.warning("weather_agent.check_forecast error for (%s, %s): %s", lat, lon, exc)
+        return {
+            "departure_safe": "unknown",
+            "best_window_utc": "",
+            "forecast_summary": "Forecast unavailable",
+            "wind_kts_6h": None,
+            "wave_m_6h": None,
+        }
