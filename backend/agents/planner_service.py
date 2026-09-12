@@ -825,7 +825,34 @@ async def plan_query(
         return int((time.perf_counter() - t0) * 1000)
 
     recent_turns = await get_recent_turns(session_id)
-    prompt = build_planner_prompt(query, language, location, recent_turns)
+
+    # Multi-turn session memory location fallback (T10 #126):
+    # When explicit location is missing or lacks coordinates, resolve last_lat/last_lon from session
+    resolved_location = location
+    if (
+        resolved_location is None
+        or not isinstance(resolved_location, dict)
+        or resolved_location.get("lat") is None
+    ) and session_id:
+        try:
+            from backend.db import redis as redis_mod
+
+            sess = await asyncio.wait_for(redis_mod.get_session(session_id), timeout=_REDIS_BUDGET_S)
+            if isinstance(sess, dict):
+                s_lat = sess.get("last_lat") if sess.get("last_lat") is not None else sess.get("lat")
+                s_lon = sess.get("last_lon") if sess.get("last_lon") is not None else sess.get("lon")
+                if s_lat is not None and s_lon is not None:
+                    resolved_location = {
+                        "lat": float(s_lat),
+                        "lon": float(s_lon),
+                        "place": sess.get("last_zone_name") or sess.get("place"),
+                        "zone_id": sess.get("last_zone_id") or sess.get("zone_id"),
+                        "source": "session_memory",
+                    }
+        except Exception as exc:
+            logger.debug("planner_service: session fallback location lookup failed: %s", exc)
+
+    prompt = build_planner_prompt(query, language, resolved_location, recent_turns)
 
     # Total SLA budget is timeout_s (default 5.0s) INCLUDING the Redis
     # context fetch above. Whatever Redis consumed is subtracted so the
@@ -908,7 +935,7 @@ async def plan_query(
             f"planner returned invalid PlannerOutput JSON: {exc}"
         ) from exc
 
-    plan = validate_and_normalize_plan(plan, explicit_location=location)
+    plan = validate_and_normalize_plan(plan, explicit_location=resolved_location)
     needs_clarification = plan.needs_clarification()
     clarification = build_clarification_text(plan.detected_language) if needs_clarification else None
 
