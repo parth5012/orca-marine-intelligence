@@ -119,6 +119,8 @@ def load_local_pfz(sectors: Optional[List[str]] = None) -> List[Dict[str, Any]]:
             feat_sec_name = str(props.get("sector_name", "")).upper()
             if norm_sector_set and (feat_sec not in norm_sector_set and feat_sec_name not in norm_sector_set):
                 continue
+            safe_place = str(props.get("place", "zone")).replace(" ", "_")
+            props.setdefault("zone_id", f"{feat_sec or 'SEC000'}_{safe_place}_{len(valid_features):03d}")
             props.setdefault("suitability", "high")
             props.setdefault("timestamp", now_iso)
             props.setdefault("source", "incois_textdata")
@@ -190,10 +192,11 @@ def parse_incois_table(content: str, sector: str, sector_name: str) -> List[Dict
                             "depth": depth,
                             "lat_dms": lat_dms,
                             "lon_dms": lon_dms,
-                            "suitability": "high",
-                            "timestamp": now_iso,
-                            "source": "incois_textdata",
-                        },
+                    "suitability": "high",
+                    "timestamp": now_iso,
+                    "source": "incois_textdata",
+                    "zone_id": f"{sector}_{place.replace(' ', '_')}_{len(features):03d}",
+                },
                     }
                     features.append(feat)
         except Exception as exc:
@@ -242,14 +245,15 @@ def parse_incois_table(content: str, sector: str, sector_name: str) -> List[Dict
                         "bearing": bearing,
                         "distance": distance,
                         "depth": depth,
-                        "lat_dms": lat_dms,
-                        "lon_dms": lon_dms,
-                        "suitability": "high",
-                        "timestamp": now_iso,
-                        "source": "incois_textdata",
-                    },
-                }
-                features.append(feat)
+                "lat_dms": lat_dms,
+                "lon_dms": lon_dms,
+                "suitability": "high",
+                "timestamp": now_iso,
+                "source": "incois_textdata",
+                "zone_id": f"{sector}_{place.replace(' ', '_')}_{len(features):03d}",
+            },
+        }
+        features.append(feat)
 
     return features
 
@@ -412,8 +416,10 @@ async def ingest_textdata(
         out_path = _get_pfz_data_path()
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(out_path, "w", encoding="utf-8") as f:
+            tmp_path = out_path.with_name(f"{out_path.stem}.tmp_{os.getpid()}")
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(geojson_doc, f, indent=2)
+            os.replace(tmp_path, out_path)
             logger.info("Saved %d PFZ features to %s", len(features), out_path)
             artifacts.append("data/pfz-today.geojson")
         except Exception as io_err:
