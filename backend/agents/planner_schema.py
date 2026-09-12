@@ -120,6 +120,8 @@ class PlannerOutput(BaseModel):
     target_location: TargetLocation = Field(default_factory=TargetLocation)
     intents: list[str] = Field(default_factory=list, description="e.g. ['find_fish','check_safety']")
     wants_forecast: bool = Field(default=False, description="True if query asks for departure-window forecast")
+    wants_sst: bool = Field(default=False, description="True if query asks for sea surface temperature / SST data or hotspots")
+    wants_chlorophyll: bool = Field(default=False, description="True if query asks for chlorophyll / phytoplankton / ocean productivity data")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     reasoning_trace: list[str] = Field(
         default_factory=list,

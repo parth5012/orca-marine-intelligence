@@ -535,12 +535,22 @@ def _parse_intent(query: str) -> dict:
     # wants_forecast: departure window, tomorrow, morning, when to leave
     forecast_keywords = ["tomorrow", "morning", "forecast", "when to leave", "safe to go", "safe tomorrow", "trip window", "departure"]
 
+    # wants_sst: SST, temperature, hotspot
+    sst_keywords = ["sst", "sea surface temperature", "temperature", "hotspot"]
+    # wants_chlorophyll: chlorophyll, phytoplankton, productivity
+    chlorophyll_keywords = ["chlorophyll", "phytoplankton", "productivity", "hotspot"]
+
     wants_fish = any(k in q for k in fish_keywords)
     wants_safety = any(k in q for k in safety_keywords)
     wants_forecast = any(k in q for k in forecast_keywords)
+    wants_sst = any(k in q for k in sst_keywords)
+    wants_chlorophyll = any(k in q for k in chlorophyll_keywords)
 
-    # If neither keyword matched, assume user wants both (fish + safety)
-    if not wants_fish and not wants_safety and not wants_forecast:
+    if wants_sst or wants_chlorophyll:
+        wants_fish = True
+
+    # neither keyword matched, assume user wants both (fish + safety)
+    if not wants_fish and not wants_safety and not wants_forecast and not wants_sst and not wants_chlorophyll:
         wants_fish = True
         wants_safety = True
 
@@ -548,6 +558,8 @@ def _parse_intent(query: str) -> dict:
         "wants_fish": wants_fish,
         "wants_safety": wants_safety,
         "wants_forecast": wants_forecast,
+        "wants_sst": wants_sst,
+        "wants_chlorophyll": wants_chlorophyll,
     }
 
 # ---------------------------------------------------------------------------

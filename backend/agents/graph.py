@@ -287,12 +287,22 @@ def _intent_from_planner_intents(intents: list[str] | None) -> dict | None:
         i in ("forecast", "wants_forecast", "departure", "departure_window", "trip_window")
         for i in lowered
     )
-    if not wants_fish and not wants_safety and not wants_forecast:
+    wants_sst = any(
+        i in ("sst", "wants_sst", "temperature", "hotspot")
+        for i in lowered
+    )
+    wants_chlorophyll = any(
+        i in ("chlorophyll", "wants_chlorophyll", "phytoplankton", "productivity")
+        for i in lowered
+    )
+    if not wants_fish and not wants_safety and not wants_forecast and not wants_sst and not wants_chlorophyll:
         return None
     return {
-        "wants_fish": bool(wants_fish),
+        "wants_fish": bool(wants_fish or wants_sst or wants_chlorophyll),
         "wants_safety": bool(wants_safety),
         "wants_forecast": bool(wants_forecast),
+        "wants_sst": bool(wants_sst),
+        "wants_chlorophyll": bool(wants_chlorophyll),
     }
 
 
@@ -733,6 +743,33 @@ async def planner_node(state: ORCAState) -> dict:
     except Exception:
         pass
 
+    # T3 SST and chlorophyll intents: LLM flag or deterministic keywords
+    try:
+        if getattr(plan, "wants_sst", False):
+            intent["wants_sst"] = True
+    except Exception:
+        pass
+    try:
+        if getattr(plan, "wants_chlorophyll", False):
+            intent["wants_chlorophyll"] = True
+    except Exception:
+        pass
+    try:
+        _ql = (query or "").lower()
+        if any(k in _ql for k in ["sst", "sea surface temperature", "temperature", "hotspot"]):
+            intent["wants_sst"] = True
+        if any(k in _ql for k in ["chlorophyll", "phytoplankton", "productivity", "hotspot"]):
+            intent["wants_chlorophyll"] = True
+    except Exception:
+        pass
+    try:
+        if intent.get("wants_sst") or intent.get("wants_chlorophyll"):
+            intent["wants_fish"] = True
+            if selected_tools is not None and TOOL_FIND_FISH not in selected_tools:
+                selected_tools = list(selected_tools) + [TOOL_FIND_FISH]
+    except Exception:
+        pass
+
     # Guard: confident plan with empty toolset would deadlock the pipeline
     # (no fish → no decision). Default to full dispatch with an auditable note.
     if not needs_clarification and not selected_tools:
@@ -810,6 +847,17 @@ async def fish_finder(state: ORCAState) -> dict:
         res = await asyncio.wait_for(ff.find_fishing_zones(lat=lat, lon=lon, radius_km=80.0), timeout=PER_AGENT_TIMEOUT_S)
         if not isinstance(res, list):
             res = []
+        # T3 (#118): Enrich with satellite SST and chlorophyll data when requested
+        intent = state.get("intent") or {}
+        wants_sat = bool(intent.get("wants_sst") or intent.get("wants_chlorophyll"))
+        if wants_sat:
+            try:
+                if hasattr(ff, "_enrich_with_satellite_data"):
+                    res = await asyncio.to_thread(ff._enrich_with_satellite_data, res, lat, lon)
+                elif hasattr(ff, "enrich_with_satellite_data"):
+                    res = await asyncio.to_thread(ff.enrich_with_satellite_data, res, lat, lon)
+            except Exception as enrich_exc:
+                logger.debug("graph.fish_finder: satellite enrichment failed: %s", enrich_exc)
         logger.info("graph.fish_finder: %d zones for %.2f,%.2f", len(res), lat, lon)
         return {"fish_results": res}
     except asyncio.TimeoutError:
