@@ -462,3 +462,13 @@ export function useApp(): AppContextType {
   }
   return context;
 }
+
+export function useThemeModeOptional(): 'light' | 'dark' | null {
+  try {
+    const ctx = useContext(AppContext);
+    return ctx?.themeMode ?? null;
+  } catch {
+    return null;
+  }
+}
+

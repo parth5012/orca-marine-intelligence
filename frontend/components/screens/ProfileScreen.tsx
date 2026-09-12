@@ -131,14 +131,24 @@ export const ProfileScreen: React.FC = () => {
   return (
     <div data-testid="tab-panel-profile" className="max-w-4xl mx-auto space-y-6 pb-16">
       {/* Header Banner */}
-      <div className="glass-panel rounded-3xl p-6 sm:p-8 border border-cyan-500/30 bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950/40 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div
+        className={`rounded-3xl p-6 sm:p-8 border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all ${
+          isLight
+            ? 'bg-white border-slate-200 shadow-sm text-slate-900'
+            : 'glass-panel border-cyan-500/30 bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950/40 text-white shadow-2xl'
+        }`}
+      >
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-400 to-teal-600 flex items-center justify-center text-slate-950 font-black text-2xl shadow-xl shadow-cyan-950/60 shrink-0">
             {userRole === 'official' ? 'CO' : 'FE'}
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-extrabold text-white">
+              <h1
+                className={`text-xl sm:text-2xl font-extrabold ${
+                  isLight ? 'text-slate-900' : 'text-white'
+                }`}
+              >
                 {userProfile.name}
               </h1>
               <span
@@ -157,19 +167,19 @@ export const ProfileScreen: React.FC = () => {
               </span>
             </div>
             {userRole === 'official' ? (
-              <p className="text-xs text-slate-300 mt-1 font-medium flex items-center gap-2">
+              <p className={`text-xs mt-1 font-medium flex items-center gap-2 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
                 <span>Org: {userProfile.org || 'INCOIS Coastal Command'}</span>
                 <span>•</span>
                 <span>ID: {userProfile.email}</span>
               </p>
             ) : (
-              <p className="text-xs text-slate-300 mt-0.5 flex items-center gap-2 font-medium">
+              <p className={`text-xs mt-0.5 flex items-center gap-2 font-medium ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
                 <span>Vessel: {hydrated ? stored.vesselName : DEFAULT_PROFILE.vesselName}</span>
                 <span>•</span>
                 <span>Reg: {hydrated ? stored.regNo : DEFAULT_PROFILE.regNo}</span>
               </p>
             )}
-            <p className="text-xs text-cyan-300 mt-1 flex items-center gap-1 font-semibold">
+            <p className={`text-xs mt-1 flex items-center gap-1 font-semibold ${isLight ? 'text-cyan-700' : 'text-cyan-300'}`}>
               <Anchor className="w-3.5 h-3.5" />
               {hydrated ? stored.landingPort : DEFAULT_PROFILE.landingPort}
             </p>
@@ -181,7 +191,11 @@ export const ProfileScreen: React.FC = () => {
             type="button"
             onClick={logoutOrSwitchRole}
             data-testid="profile-switch-role"
-            className="px-3.5 py-2.5 rounded-2xl font-extrabold text-xs bg-slate-900 border border-slate-700 text-cyan-300 hover:bg-slate-800 transition-all flex items-center gap-1.5"
+            className={`px-3.5 py-2.5 rounded-2xl font-extrabold text-xs border transition-all flex items-center gap-1.5 ${
+              isLight
+                ? 'bg-slate-50 border-slate-300 text-cyan-700 hover:bg-slate-100 shadow-sm'
+                : 'bg-slate-900 border-slate-700 text-cyan-300 hover:bg-slate-800'
+            }`}
             title="Switch Access Role"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -195,6 +209,8 @@ export const ProfileScreen: React.FC = () => {
             className={`px-4 py-2.5 rounded-2xl font-extrabold text-xs shadow-xl flex items-center gap-2 transition-all ${
               sosTriggered
                 ? 'bg-rose-600 text-white animate-pulse'
+                : isLight
+                ? 'bg-rose-50 border border-rose-300 text-rose-700 hover:bg-rose-100'
                 : 'bg-rose-500/20 border border-rose-500/50 text-rose-300 hover:bg-rose-500/30'
             }`}
           >
@@ -207,7 +223,11 @@ export const ProfileScreen: React.FC = () => {
       {savedMsg && (
         <div
           data-testid="profile-saved"
-          className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center gap-2 animate-fade-in"
+          className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 animate-fade-in ${
+            isLight
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-sm'
+              : 'bg-emerald-950/80 border-emerald-500/40 text-emerald-200'
+          }`}
         >
           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           <span>Settings saved successfully!</span>
@@ -289,22 +309,40 @@ export const ProfileScreen: React.FC = () => {
       </div>
 
       {/* Landing Centre & Location Configuration */}
-      <div className="glass-panel rounded-2xl p-5 border border-slate-800 bg-slate-950/80 space-y-4">
-        <div className="flex items-center gap-2 text-white font-bold text-base pb-3 border-b border-slate-800">
+      <div
+        className={`rounded-2xl p-5 border space-y-4 transition-colors ${
+          isLight
+            ? 'bg-white border-slate-200 shadow-sm text-slate-900'
+            : 'glass-panel border-slate-800 bg-slate-950/80 text-white'
+        }`}
+      >
+        <div
+          className={`flex items-center gap-2 font-bold text-base pb-3 border-b ${
+            isLight ? 'text-slate-900 border-slate-100' : 'text-white border-slate-800'
+          }`}
+        >
           <Anchor className="w-5 h-5 text-teal-400" />
           <span>Home Landing Centre & Base Port</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
           <div>
-            <label className="block text-slate-300 font-semibold mb-1.5">
+            <label
+              className={`block font-semibold mb-1.5 ${
+                isLight ? 'text-slate-700' : 'text-slate-300'
+              }`}
+            >
               Saved Home Fishing Harbor:
             </label>
             <select
               value={stored.landingPort}
               onChange={(e) => update({ landingPort: e.target.value })}
               data-testid="profile-landing-port"
-              className="w-full bg-slate-900 border border-slate-800 text-slate-200 rounded-xl p-2.5 font-medium focus:outline-none"
+              className={`w-full rounded-xl p-2.5 font-medium focus:outline-none border ${
+                isLight
+                  ? 'bg-slate-50 border-slate-200 text-slate-800'
+                  : 'bg-slate-900 border-slate-800 text-slate-200'
+              }`}
             >
               <option value="Veraval Fishing Harbor, Gujarat">
                 Veraval Fishing Harbor, Gujarat
@@ -321,10 +359,20 @@ export const ProfileScreen: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-slate-300 font-semibold mb-1.5">
+            <label
+              className={`block font-semibold mb-1.5 ${
+                isLight ? 'text-slate-700' : 'text-slate-300'
+              }`}
+            >
               GPS Position Precision:
             </label>
-            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 flex items-center justify-between font-mono text-xs">
+            <div
+              className={`p-2.5 rounded-xl border flex items-center justify-between font-mono text-xs ${
+                isLight
+                  ? 'bg-slate-50 border-slate-200 text-cyan-800'
+                  : 'bg-slate-900 border-slate-800 text-cyan-300'
+              }`}
+            >
               <span data-testid="profile-gps-coords">
                 {userLocation.lat.toFixed(2)}, {userLocation.lon.toFixed(2)}
               </span>
@@ -350,22 +398,52 @@ export const ProfileScreen: React.FC = () => {
       </div>
 
       {/* Measurement Units & Preferences */}
-      <div className="glass-panel rounded-2xl p-5 border border-slate-800 bg-slate-950/80 space-y-4">
-        <div className="flex items-center gap-2 text-white font-bold text-base pb-3 border-b border-slate-800">
+      <div
+        className={`rounded-2xl p-5 border space-y-4 transition-colors ${
+          isLight
+            ? 'bg-white border-slate-200 shadow-sm text-slate-900'
+            : 'glass-panel border-slate-800 bg-slate-950/80 text-white'
+        }`}
+      >
+        <div
+          className={`flex items-center gap-2 font-bold text-base pb-3 border-b ${
+            isLight ? 'text-slate-900 border-slate-100' : 'text-white border-slate-800'
+          }`}
+        >
           <Sliders className="w-5 h-5 text-amber-400" />
-          <span>Navigation & Unit Preferences</span>
+          <span>Navigation Unit Preferences</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
-            <span className="text-slate-300 font-semibold">Speed Unit:</span>
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+          <div
+            className={`flex items-center justify-between p-3 rounded-xl border ${
+              isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900 border-slate-800'
+            }`}
+          >
+            <span
+              className={`font-semibold ${
+                isLight ? 'text-slate-700' : 'text-slate-300'
+              }`}
+            >
+              Speed Unit:
+            </span>
+            <div
+              className={`flex items-center gap-1 p-1 rounded-lg border ${
+                isLight
+                  ? 'bg-slate-200/70 border-slate-300'
+                  : 'bg-slate-950 border-slate-800'
+              }`}
+            >
               <button
                 type="button"
                 onClick={() => update({ speedUnit: 'kmh' })}
                 data-testid="profile-speed-kmh"
                 className={`px-3 py-1 rounded text-[11px] font-bold ${
-                  stored.speedUnit === 'kmh' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400'
+                  stored.speedUnit === 'kmh'
+                    ? 'bg-cyan-500 text-slate-950'
+                    : isLight
+                    ? 'text-slate-600'
+                    : 'text-slate-400'
                 }`}
               >
                 km/h
@@ -375,7 +453,11 @@ export const ProfileScreen: React.FC = () => {
                 onClick={() => update({ speedUnit: 'knots' })}
                 data-testid="profile-speed-knots"
                 className={`px-3 py-1 rounded text-[11px] font-bold ${
-                  stored.speedUnit === 'knots' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400'
+                  stored.speedUnit === 'knots'
+                    ? 'bg-cyan-500 text-slate-950'
+                    : isLight
+                    ? 'text-slate-600'
+                    : 'text-slate-400'
                 }`}
               >
                 Knots
@@ -383,15 +465,35 @@ export const ProfileScreen: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
-            <span className="text-slate-300 font-semibold">Distance Unit:</span>
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+          <div
+            className={`flex items-center justify-between p-3 rounded-xl border ${
+              isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900 border-slate-800'
+            }`}
+          >
+            <span
+              className={`font-semibold ${
+                isLight ? 'text-slate-700' : 'text-slate-300'
+              }`}
+            >
+              Distance Unit:
+            </span>
+            <div
+              className={`flex items-center gap-1 p-1 rounded-lg border ${
+                isLight
+                  ? 'bg-slate-200/70 border-slate-300'
+                  : 'bg-slate-950 border-slate-800'
+              }`}
+            >
               <button
                 type="button"
                 onClick={() => update({ distUnit: 'km' })}
                 data-testid="profile-dist-km"
                 className={`px-3 py-1 rounded text-[11px] font-bold ${
-                  stored.distUnit === 'km' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400'
+                  stored.distUnit === 'km'
+                    ? 'bg-cyan-500 text-slate-950'
+                    : isLight
+                    ? 'text-slate-600'
+                    : 'text-slate-400'
                 }`}
               >
                 Kilometers
@@ -401,7 +503,11 @@ export const ProfileScreen: React.FC = () => {
                 onClick={() => update({ distUnit: 'nm' })}
                 data-testid="profile-dist-nm"
                 className={`px-3 py-1 rounded text-[11px] font-bold ${
-                  stored.distUnit === 'nm' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400'
+                  stored.distUnit === 'nm'
+                    ? 'bg-cyan-500 text-slate-950'
+                    : isLight
+                    ? 'text-slate-600'
+                    : 'text-slate-400'
                 }`}
               >
                 Nautical Miles
@@ -412,18 +518,42 @@ export const ProfileScreen: React.FC = () => {
       </div>
 
       {/* Safety & Notifications Toggles */}
-      <div className="glass-panel rounded-2xl p-5 border border-slate-800 bg-slate-950/80 space-y-4">
-        <div className="flex items-center gap-2 text-white font-bold text-base pb-3 border-b border-slate-800">
+      <div
+        className={`rounded-2xl p-5 border space-y-4 transition-colors ${
+          isLight
+            ? 'bg-white border-slate-200 shadow-sm text-slate-900'
+            : 'glass-panel border-slate-800 bg-slate-950/80 text-white'
+        }`}
+      >
+        <div
+          className={`flex items-center gap-2 font-bold text-base pb-3 border-b ${
+            isLight ? 'text-slate-900 border-slate-100' : 'text-white border-slate-800'
+          }`}
+        >
           <Bell className="w-5 h-5 text-rose-400" />
           <span>Safety Broadcast & Audio Alerts</span>
         </div>
 
         <div className="space-y-3 text-xs">
-          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
+          <div
+            className={`flex items-center justify-between p-3 rounded-xl border ${
+              isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900 border-slate-800'
+            }`}
+          >
             <div>
-              <div className="font-semibold text-white">Emergency SMS Safety Broadcasts</div>
-              <div className="text-[11px] text-slate-400">
-                Receive instant SMS for cyclone & high wave warnings even without internet
+              <div
+                className={`font-semibold ${
+                  isLight ? 'text-slate-800' : 'text-white'
+                }`}
+              >
+                Emergency SMS Safety Broadcasts
+              </div>
+              <div
+                className={`text-[11px] ${
+                  isLight ? 'text-slate-600' : 'text-slate-400'
+                }`}
+              >
+                Receive instant SMS cyclone & high wave warnings without internet
               </div>
             </div>
             <input
@@ -435,11 +565,25 @@ export const ProfileScreen: React.FC = () => {
             />
           </div>
 
-          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
+          <div
+            className={`flex items-center justify-between p-3 rounded-xl border ${
+              isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900 border-slate-800'
+            }`}
+          >
             <div>
-              <div className="font-semibold text-white">Loud Audio Horn Alarm for Red Alerts</div>
-              <div className="text-[11px] text-slate-400">
-                Play siren alarm sound when vessel enters danger or restricted zone
+              <div
+                className={`font-semibold ${
+                  isLight ? 'text-slate-800' : 'text-white'
+                }`}
+              >
+                Loud Audio Horn Alarm Red Alerts
+              </div>
+              <div
+                className={`text-[11px] ${
+                  isLight ? 'text-slate-600' : 'text-slate-400'
+                }`}
+              >
+                Play siren alarm sound when vessel enters danger restricted zone
               </div>
             </div>
             <input
@@ -451,11 +595,25 @@ export const ProfileScreen: React.FC = () => {
             />
           </div>
 
-          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
+          <div
+            className={`flex items-center justify-between p-3 rounded-xl border ${
+              isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900 border-slate-800'
+            }`}
+          >
             <div>
-              <div className="font-semibold text-white">Offline Marine Tile Caching</div>
-              <div className="text-[11px] text-slate-400">
-                Keep offline marine maps & PFZ data saved locally for deep sea voyages
+              <div
+                className={`font-semibold ${
+                  isLight ? 'text-slate-800' : 'text-white'
+                }`}
+              >
+                Offline Marine Tile Caching
+              </div>
+              <div
+                className={`text-[11px] ${
+                  isLight ? 'text-slate-600' : 'text-slate-400'
+                }`}
+              >
+                Keep offline marine maps & PFZ data saved locally deep sea voyages
               </div>
             </div>
             <input

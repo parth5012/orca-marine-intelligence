@@ -96,7 +96,7 @@ async def get_tiles_config() -> Response:
                 "id": "esri_ocean",
                 "name": "Esri Ocean Basemap",
                 "type": "raster",
-                "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean/MapServer/tile/{z}/{y}/{x}",
+                "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}",
                 "attribution": '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Sources: GEBCO, NOAA, CHS, OSU, UNH, CSUMB, National Geographic, DeLorme, NAVTEQ, and Esri',
                 "min_zoom": 0,
                 "max_native_zoom": 13,

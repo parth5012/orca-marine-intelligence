@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { LivingOceanBackground } from '../components/common/LivingOceanBackground';
+import { AppProvider } from '@/context/AppContext';
 
 export const metadata: Metadata = {
   title: 'ORCA Marine Intelligence | Autonomous Ocean Advisory',
@@ -24,8 +25,10 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="bg-[#edf6ff] text-slate-900 antialiased min-h-screen">
-        <LivingOceanBackground />
-        <div className="relative z-[1]">{children}</div>
+        <AppProvider>
+          <LivingOceanBackground />
+          <div className="relative z-[1]">{children}</div>
+        </AppProvider>
       </body>
     </html>
   );
