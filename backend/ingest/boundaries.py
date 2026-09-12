@@ -446,11 +446,16 @@ def get_eez_boundaries() -> List[Dict[str, Any]]:
     return _EEZ_CACHE
 
 
+def _load_mpa_geojson() -> List[Dict[str, Any]]:
+    """Loads MPA features from data/mpa.geojson candidate paths."""
+    return _load_features_from_file(MPA_CANDIDATES)
+
+
 def get_mpa_boundaries() -> List[Dict[str, Any]]:
     """Get list of loaded MPA GeoJSON features."""
     global _MPA_CACHE
     if _MPA_CACHE is None:
-        _MPA_CACHE = _load_features_from_file(MPA_CANDIDATES)
+        _MPA_CACHE = _load_mpa_geojson()
     return _MPA_CACHE
 
 
