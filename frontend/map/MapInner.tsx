@@ -238,6 +238,38 @@ export default function MapInner({
 
   const [showLayerPanel, setShowLayerPanel] = useState<boolean>(false);
 
+  // Live GPS tracking when userLocation is not provided or to track live updates (T6 #121)
+  const [geoLoc, setGeoLoc] = useState<{ lat: number; lon: number } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !navigator.geolocation) return;
+    let watchId: number | null = null;
+    try {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          if (pos && pos.coords) {
+            setGeoLoc({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+          }
+        },
+        (_err) => {
+          // GPS permission denied or unavailable - graceful fallback (no crash)
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    } catch (_e) {
+      // Ignore geolocation watch errors
+    }
+    return () => {
+      if (watchId !== null && typeof window !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, []);
+
+  const activeLocation = (userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lon === 'number')
+    ? userLocation
+    : geoLoc;
+
   // Fetch PFZ points from /api/pfz proxy
   useEffect(() => {
     let isCancelled = false;
@@ -352,13 +384,13 @@ export default function MapInner({
     return null;
   }, [selectedFeature, highlightFeatures]);
 
-  // Origin point for navigation line (userLocation or center)
+  // Origin point for navigation line (activeLocation or center)
   const navOrigin = useMemo<[number, number]>(() => {
-    if (userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lon === 'number') {
-      return [userLocation.lat, userLocation.lon];
+    if (activeLocation && typeof activeLocation.lat === 'number' && typeof activeLocation.lon === 'number') {
+      return [activeLocation.lat, activeLocation.lon];
     }
     return center;
-  }, [userLocation, center]);
+  }, [activeLocation, center]);
 
   // Calculate distance & bearing for navigation line
   const navMetrics = useMemo(() => {
@@ -700,8 +732,8 @@ export default function MapInner({
           </>
         )}
 
-        {/* 5b. Green route polyline from user GPS to recommended zone (T4 #119) */}
-        {routePositions && routePositions.length >= 2 && userLocation && (
+          {/* 5b. Green route polyline from user GPS to recommended zone (T4 #119) */}
+          {routePositions && routePositions.length >= 2 && (userLocation || activeLocation) && (
           <Polyline
             key={`route-${routePositions[0][0]}-${routePositions[0][1]}`}
             positions={routePositions}
@@ -714,13 +746,37 @@ export default function MapInner({
           />
         )}
 
-        {/* 6. User GPS Marker */}
-        {userLocation && (
-          <Marker position={[userLocation.lat, userLocation.lon]} icon={userIcon}>
-            <Tooltip direction="bottom">
-              <span className="text-xs font-semibold text-sky-400">Vessel Location</span>
-            </Tooltip>
-          </Marker>
+        {/* 6. User GPS Blue Dot Marker (T6 #121) */}
+        {activeLocation && typeof activeLocation.lat === 'number' && typeof activeLocation.lon === 'number' && (
+          <>
+            {/* Outer Accuracy / Aura Circle */}
+            <CircleMarker
+              center={[activeLocation.lat, activeLocation.lon]}
+              radius={20}
+              pathOptions={{
+                color: '#3b82f6',
+                weight: 1.5,
+                fillColor: '#3b82f6',
+                fillOpacity: 0.15,
+                className: 'pulse-animation',
+              }}
+            />
+            {/* Inner Pulsing Blue Dot */}
+            <CircleMarker
+              center={[activeLocation.lat, activeLocation.lon]}
+              radius={8}
+              pathOptions={{
+                color: '#ffffff',
+                weight: 2,
+                fillColor: '#3b82f6',
+                fillOpacity: 0.9,
+              }}
+            >
+              <Tooltip permanent={false} direction="top">
+                <span className="text-xs font-semibold text-blue-300">here</span>
+              </Tooltip>
+            </CircleMarker>
+          </>
         )}
       </MapContainer>
 
