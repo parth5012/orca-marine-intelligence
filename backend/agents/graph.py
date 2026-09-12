@@ -889,9 +889,11 @@ async def weather_agent(state: ORCAState) -> dict:
         pass
     if not fish and not wants_fc:
         return {"weather_results": []}
-    try:
-        from backend.agents.subagents import weather_agent as wa  # type: ignore
+    from backend.agents.subagents import weather_agent as wa  # type: ignore
 
+    # Current conditions and departure forecast run independently: a
+    # check_weather timeout must never suppress the forecast fallback.
+    try:
         if fish:
             res = await asyncio.wait_for(
                 wa.check_weather(fish),
@@ -899,43 +901,55 @@ async def weather_agent(state: ORCAState) -> dict:
             )
         else:
             res = []
-        forecast = None
-        if wants_fc:
-            _ul = state.get("user_location") or {}
-            _flat = _ul.get("lat") if isinstance(_ul, dict) else None
-            _flon = _ul.get("lon") if isinstance(_ul, dict) else None
-            if _flat is None and fish:
-                try:
-                    _flat = fish[0].get("lat")
-                except Exception:
-                    _flat = None
-            if _flon is None and fish:
-                try:
-                    _flon = fish[0].get("lon")
-                except Exception:
-                    _flon = None
-            if _flat is not None and _flon is not None:
-                try:
-                    forecast = await asyncio.wait_for(
-                        wa.check_forecast(float(_flat), float(_flon)),
-                        timeout=TIMEOUT_S,
-                    )
-                except Exception as f_exc:
-                    logger.warning("graph.weather_agent check_forecast: %s", f_exc)
-                    forecast = {
-                        "departure_safe": "unknown",
-                        "best_window_utc": "",
-                        "forecast_summary": "Forecast unavailable",
-                        "wind_kts_6h": None,
-                        "wave_m_6h": None,
-                    }
-        ret = {"weather_results": res if isinstance(res, list) else _degraded_weather(fish)}
-        if forecast is not None:
-            ret["forecast"] = forecast
-        return ret
     except Exception as exc:
         logger.warning("graph.weather_agent: %s", exc)
-        return {"weather_results": _degraded_weather(fish), "degraded": True}
+        res = _degraded_weather(fish)
+    forecast = None
+    if wants_fc:
+        _ul = state.get("user_location") or {}
+        _flat = _ul.get("lat") if isinstance(_ul, dict) else None
+        _flon = _ul.get("lon") if isinstance(_ul, dict) else None
+        if _flat is None and fish:
+            try:
+                _flat = fish[0].get("lat")
+            except Exception:
+                _flat = None
+        if _flon is None and fish:
+            try:
+                _flon = fish[0].get("lon")
+            except Exception:
+                _flon = None
+        if _flat is not None and _flon is not None:
+            try:
+                forecast = await asyncio.wait_for(
+                    wa.check_forecast(float(_flat), float(_flon)),
+                    timeout=TIMEOUT_S,
+                )
+            except Exception as f_exc:
+                logger.warning("graph.weather_agent check_forecast: %s", f_exc)
+                forecast = {
+                    "departure_safe": "unknown",
+                    "best_window_utc": "",
+                    "forecast_summary": "Forecast unavailable",
+                    "wind_kts_6h": None,
+                    "wave_m_6h": None,
+                }
+        else:
+            forecast = {
+                "departure_safe": "unknown",
+                "best_window_utc": "",
+                "forecast_summary": "Forecast unavailable",
+                "wind_kts_6h": None,
+                "wave_m_6h": None,
+            }
+    try:
+        ret = {"weather_results": res if isinstance(res, list) else _degraded_weather(fish)}
+    except Exception as exc:
+        logger.warning("graph.weather_agent: %s", exc)
+        ret = {"weather_results": _degraded_weather(fish), "degraded": True}
+    if forecast is not None:
+        ret["forecast"] = forecast
+    return ret
 
 
 async def danger_agent(state: ORCAState) -> dict:
@@ -1333,7 +1347,10 @@ async def decision_agent(state: ORCAState) -> dict:
                 reply_text = f"{reply_text} {_ftext}".strip()
                 explanation = f"{explanation} {_ftext}".strip()
             if not any("forecast" in str(e).lower() for e in evidence):
-                evidence.append(f"Departure forecast window analyzed ({_win})")
+                if _fsum == "Forecast unavailable":
+                    evidence.append("Departure forecast unavailable — verify official bulletins")
+                else:
+                    evidence.append(f"Departure forecast window analyzed ({_win})")
     except Exception:
         pass
 
@@ -1456,6 +1473,10 @@ def route_after_fish_finder(state: ORCAState):
         "needs_clarification": bool(state.get("needs_clarification")),
         # Read-only for workers (lat/lon) — pass reference, never mutated.
         "user_location": state.get("user_location"),
+        # T1: weather_agent reads intent/query for forecast dispatch, but
+        # Send targets see ONLY this payload — forward both explicitly.
+        "intent": dict(state.get("intent") or {}),
+        "query": state.get("query") or "",
     }
     sends: list = []
     if wants_ocean:

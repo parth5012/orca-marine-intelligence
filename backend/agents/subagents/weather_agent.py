@@ -564,21 +564,26 @@ async def check_forecast(lat: float, lon: float, hours_ahead: int = 24) -> dict[
         best_window = advisory_info.get("departure_window") or f"{target_dt.strftime('%H:00')} IST"
         dep_safe = advisory_info.get("is_safe_to_depart")
         if dep_safe is None:
-            # derive from wind/wave thresholds when advisory unavailable
+            # derive from wind/wave thresholds only when BOTH metrics known;
+            # missing data must read as unknown, never safe.
             try:
-                _wsafe = (wind_6h is None or float(wind_6h) < 15.0) and (wave_6h is None or float(wave_6h) < 1.5)
-                dep_safe = bool(_wsafe)
+                if wind_6h is not None and wave_6h is not None:
+                    dep_safe = bool(float(wind_6h) < 15.0 and float(wave_6h) < 1.5)
+                else:
+                    dep_safe = "unknown"
             except Exception:
-                dep_safe = True
+                dep_safe = "unknown"
 
         if advisory_info.get("bulletin_text"):
             summary = advisory_info["bulletin_text"]
         elif wind_6h is not None and wave_6h is not None:
-            safe_str = "safe to depart" if dep_safe else "conditions unsafe / caution"
+            safe_str = "safe to depart" if dep_safe is True else ("conditions unsafe / caution" if dep_safe is False else "conditions uncertain")
             summary = f"Tomorrow morning ({best_window}): wind {wind_6h} kt, waves {wave_6h}m - {safe_str}."
         elif wind_6h is not None:
-            safe_str = "safe to depart" if dep_safe else "conditions unsafe / caution"
+            safe_str = "safe to depart" if dep_safe is True else ("conditions unsafe / caution" if dep_safe is False else "conditions uncertain")
             summary = f"Tomorrow morning ({best_window}): wind {wind_6h} kt - {safe_str}."
+        elif dep_safe == "unknown":
+            summary = "Forecast unavailable"
         else:
             summary = "Forecast advisory available."
 

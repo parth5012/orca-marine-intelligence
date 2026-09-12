@@ -1314,7 +1314,9 @@ class TestSelectiveToolExecutionMock:
         sea_out = await g.sea_checker(dict(state))
         weather_out = await g.weather_agent(dict(state))
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        assert len(sea_out.get("sea_results", [])) == len(_SHARED_FISH_36)
         assert all(r.get("status") == "unknown" for r in sea_out.get("sea_results", []))
+        assert len(weather_out.get("weather_results", [])) == len(_SHARED_FISH_36)
         assert all(r.get("status") == "unknown" for r in weather_out.get("weather_results", []))
         assert elapsed_ms < 1000.0, f"passthrough must be instant, took {elapsed_ms:.1f}ms"
         # Unselected danger passthrough: no check_geofence -> [] with no I/O.
@@ -1326,6 +1328,7 @@ class TestSelectiveToolExecutionMock:
         t1 = time.perf_counter()
         danger_out = await g.danger_agent(state_no_geofence)
         danger_ms = (time.perf_counter() - t1) * 1000.0
+        assert len(danger_out.get("danger_results", [])) == len(_SHARED_FISH_36)
         assert all(r.get("inside_eez") is None for r in danger_out.get("danger_results", []))
         assert danger_ms < 1000.0, f"danger passthrough must be instant, took {danger_ms:.1f}ms"
 
