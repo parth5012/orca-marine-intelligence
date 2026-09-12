@@ -385,9 +385,10 @@ def _build_feature_from_point(pt: Dict[str, Any], timestamp_str: str) -> Dict[st
             "sst_c": pt.get("sst_c", 28.5),
             "chlorophyll_mg_m3": pt.get("chlorophyll_mg_m3", 1.5),
             "thermal_gradient": 0.85,
-            "timestamp": timestamp_str,
-            "source": "copernicus_fallback",
-        },
+                "timestamp": timestamp_str,
+                "source": "copernicus_fallback",
+                "zone_id": pt.get("zone_id", f"{sector}_{place.replace(' ', '_')}"),
+            },
     }
 
 

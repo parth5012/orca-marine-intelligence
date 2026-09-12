@@ -42,6 +42,8 @@ data/*.nc
 data/*.zip
 data/*.parquet
 data/marine_data_package/
+!data/*.geojson
+!data/pfz-today.geojson
 
 # Harness — per-member work logs (gitignored to avoid merge conflicts between M-A/B/C/D/E)
 # General harness is tracked: AGENTS.md, docs/notion/*
