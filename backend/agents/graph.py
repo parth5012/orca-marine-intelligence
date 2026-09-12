@@ -853,12 +853,17 @@ async def fish_finder(state: ORCAState) -> dict:
         if wants_sat:
             try:
                 if hasattr(ff, "_enrich_with_satellite_data"):
-                    res = await asyncio.to_thread(ff._enrich_with_satellite_data, res, lat, lon)
+                    res = await asyncio.wait_for(
+                        asyncio.to_thread(ff._enrich_with_satellite_data, res, lat, lon),
+                        timeout=PER_AGENT_TIMEOUT_S,
+                    )
                 elif hasattr(ff, "enrich_with_satellite_data"):
-                    res = await asyncio.to_thread(ff.enrich_with_satellite_data, res, lat, lon)
+                    res = await asyncio.wait_for(
+                        asyncio.to_thread(ff.enrich_with_satellite_data, res, lat, lon),
+                        timeout=PER_AGENT_TIMEOUT_S,
+                    )
             except Exception as enrich_exc:
                 logger.debug("graph.fish_finder: satellite enrichment failed: %s", enrich_exc)
-        logger.info("graph.fish_finder: %d zones for %.2f,%.2f", len(res), lat, lon)
         return {"fish_results": res}
     except asyncio.TimeoutError:
         logger.warning("graph.fish_finder: timeout %.0fs (agent_progress: timeout, degraded)", PER_AGENT_TIMEOUT_S)
