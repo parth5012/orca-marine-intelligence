@@ -479,7 +479,7 @@ async def check_weather(points: list[dict]) -> list[dict]:
                     from backend.ingest.tides import get_tide as _get_tide
                 except ImportError:
                     from ingest.tides import get_tide as _get_tide  # type: ignore
-                _tide = _get_tide(lat, lon) or {}
+                _tide = await asyncio.to_thread(_get_tide, lat, lon) or {}
                 tide_range_m = _tide.get("tide_range_m")
                 try:
                     tide_range_m = float(tide_range_m) if tide_range_m is not None else None
