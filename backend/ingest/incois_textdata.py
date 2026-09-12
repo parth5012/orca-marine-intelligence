@@ -194,11 +194,12 @@ def parse_incois_table(content: str, sector: str, sector_name: str) -> List[Dict
                             "lon_dms": lon_dms,
                     "suitability": "high",
                     "timestamp": now_iso,
-                    "source": "incois_textdata",
-                    "zone_id": f"{sector}_{place.replace(' ', '_')}_{len(features):03d}",
-                },
-                    }
-                    features.append(feat)
+                        "source": "incois_textdata",
+                        "zone_id": f"{sector}_{place.replace(' ', '_')}_{len(features):03d}",
+                    },
+                }
+
+                features.append(feat)
         except Exception as exc:
             logger.warning("Error parsing HTML table for sector %s: %s", sector, exc)
     else:
