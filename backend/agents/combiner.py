@@ -452,6 +452,30 @@ def combine_and_rank(
                 wind_ok = max(0.0, 1.0 - (wind_val - 15) / 15)
                 wind_exceeded = True
 
+        # Tide (T2 #117): passthrough from weather_agent; missing -> None/unknown.
+        tide_range_val: float | None = None
+        tidal_state_val: str = "unknown"
+        next_high_val: str | None = None
+        next_low_val: str | None = None
+        if isinstance(weather_entry, dict):
+            try:
+                _tr = weather_entry.get("tide_range_m")
+                tide_range_val = round(float(_tr), 2) if _tr is not None else None
+            except (TypeError, ValueError):
+                tide_range_val = None
+            try:
+                _ts = str(weather_entry.get("tidal_state") or "unknown")
+                tidal_state_val = _ts if _ts in ("rising", "falling", "slack", "unknown") else "unknown"
+            except Exception:
+                tidal_state_val = "unknown"
+            try:
+                _nh = weather_entry.get("next_high_tide_utc")
+                next_high_val = str(_nh) if _nh is not None else None
+                _nl = weather_entry.get("next_low_tide_utc")
+                next_low_val = str(_nl) if _nl is not None else None
+            except Exception:
+                next_high_val, next_low_val = None, None
+
         # Danger: inside_eez, inside_mpa
         danger_entry = danger_lookup.get(zone_id)
         if danger_entry is None and idx < len(danger_results) and isinstance(danger_results[idx], dict):
@@ -511,6 +535,10 @@ def combine_and_rank(
             "wave_height_m": round(float(wave_val), 2) if wave_val is not None else None,
             "wind_kt": round(float(wind_val), 2) if wind_val is not None else None,
             "wind_speed_kt": round(float(wind_val), 2) if wind_val is not None else None,
+            "tide_range_m": tide_range_val,
+            "tidal_state": tidal_state_val,
+            "next_high_tide_utc": next_high_val,
+            "next_low_tide_utc": next_low_val,
             "wave_available": wave_val is not None,
             "wind_available": wind_val is not None,
             "inside_eez": inside_eez,
@@ -626,6 +654,28 @@ def combine_and_rank(
     if forecast_text:
         explanation = f"{explanation} {forecast_text}".strip()
 
+    # Tide (T2 #117): advisory suffix from best zone's weather passthrough.
+    # Only when data exists (range known or state known); never overrides veto.
+    tide_text = ""
+    if best is not None:
+        try:
+            _btr = best.get("tide_range_m")
+            _bts = str(best.get("tidal_state") or "unknown")
+            if _bts not in ("rising", "falling", "slack", "unknown"):
+                _bts = "unknown"
+            if _btr is not None:
+                try:
+                    _rv = round(float(_btr), 2)
+                    tide_text = f"Tide: {_bts}, range {_rv}m." if _bts != "unknown" else f"Tidal range {_rv}m."
+                except (TypeError, ValueError):
+                    tide_text = f"Tide: {_bts}." if _bts != "unknown" else ""
+            elif _bts != "unknown":
+                tide_text = f"Tide: {_bts}."
+        except Exception:
+            tide_text = ""
+    if tide_text:
+        explanation = f"{explanation} {tide_text}".strip()
+
     # best dict shape: include place, lat, lon, score plus extra for map
     if best is not None:
         best_out = {
@@ -639,6 +689,10 @@ def combine_and_rank(
             "wave_height_m": best.get("wave_height_m"),
             "wind_kt": best.get("wind_kt"),
             "wind_speed_kt": best.get("wind_kt"),
+            "tide_range_m": best.get("tide_range_m"),
+            "tidal_state": best.get("tidal_state", "unknown"),
+            "next_high_tide_utc": best.get("next_high_tide_utc"),
+            "next_low_tide_utc": best.get("next_low_tide_utc"),
             "wave_available": best.get("wave_available", True),
             "wind_available": best.get("wind_available", True),
             "inside_eez": best["inside_eez"],
@@ -681,6 +735,8 @@ def combine_and_rank(
             _localized = _lm.render_grounded_advisory(_metrics, lang_code)
             if forecast_text:
                 _localized = f"{_localized} {forecast_text}".strip()
+            if tide_text:
+                _localized = f"{_localized} {tide_text}".strip()
             return {
                 "ranked_zones": ranked,
                 "best": best_out,
