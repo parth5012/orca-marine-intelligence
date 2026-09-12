@@ -523,6 +523,19 @@ def combine_and_rank(
             "score": score,
         }
 
+        # Lightning risk (T8 #124)
+        l_risk = None
+        l_desc = None
+        if isinstance(danger_entry, dict):
+            l_risk = danger_entry.get("lightning_risk")
+            l_desc = danger_entry.get("lightning_description") or danger_entry.get("description")
+            if not l_risk:
+                for w in danger_entry.get("warnings", []):
+                    if "lightning" in str(w).lower():
+                        l_risk = "high"
+                        l_desc = str(w)
+                        break
+
         # Build ranked entry preserving original fish fields plus computed
         entry = {
             "zone_id": zone_id,
@@ -543,15 +556,17 @@ def combine_and_rank(
             "wind_available": wind_val is not None,
             "inside_eez": inside_eez,
             "inside_mpa": inside_mpa,
+            "lightning_risk": l_risk,
+            "lightning_description": l_desc,
             "score": score,
             "score_breakdown": breakdown,
-        # preserve original fish props for map rendering
-        "bearing": fish.get("bearing"),
-        "direction": fish.get("direction") or fish.get("dir"),
-        "depth_range": fish.get("depth_range") or fish.get("depth") or "",
-        "sst_c": fish.get("sst_c"),
-        "chlorophyll_mg_m3": fish.get("chlorophyll_mg_m3"),
-    }
+            # preserve original fish props for map rendering
+            "bearing": fish.get("bearing"),
+            "direction": fish.get("direction") or fish.get("dir"),
+            "depth_range": fish.get("depth_range") or fish.get("depth") or "",
+            "sst_c": fish.get("sst_c"),
+            "chlorophyll_mg_m3": fish.get("chlorophyll_mg_m3"),
+        }
         ranked.append(entry)
 
     # US-ORCA-014: canonical safety annotation (additive — scoring untouched).
@@ -701,39 +716,59 @@ def combine_and_rank(
                 satellite_text = f"{', '.join(_sat_parts)} productive waters."
         except Exception:
             satellite_text = ""
-    if satellite_text:
-        explanation = f"{explanation} {satellite_text}".strip()
+        if satellite_text:
+            explanation = f"{explanation} {satellite_text}".strip()
 
-    # best dict shape: include place, lat, lon, score plus extra for map
-    if best is not None:
-        best_out = {
-            "zone_id": best["zone_id"],
-            "place": best["place"],
-            "sector": best["sector"],
-            "lat": best["lat"],
-            "lon": best["lon"],
-            "distance_km": best["distance_km"],
-            "distance_from_user_km": best["distance_km"],
-            "wave_height_m": best.get("wave_height_m"),
-            "wind_kt": best.get("wind_kt"),
-            "wind_speed_kt": best.get("wind_kt"),
-            "tide_range_m": best.get("tide_range_m"),
-            "tidal_state": best.get("tidal_state", "unknown"),
-            "next_high_tide_utc": best.get("next_high_tide_utc"),
-            "next_low_tide_utc": best.get("next_low_tide_utc"),
-            "wave_available": best.get("wave_available", True),
-            "wind_available": best.get("wind_available", True),
-            "inside_eez": best["inside_eez"],
-            "inside_mpa": best["inside_mpa"],
-            "score": best["score"],
-            "score_breakdown": best["score_breakdown"],
-            "safety": best.get("safety", "caution"),
-            "bearing": best.get("bearing"),
-            "direction": best.get("direction"),
-            "depth_range": best.get("depth_range"),
-            "sst_c": best.get("sst_c"),
-            "chlorophyll_mg_m3": best.get("chlorophyll_mg_m3"),
-        }
+        # Lightning advisory (T8 #124)
+        # When lightning risk is high or notable, mention in advisory
+        lightning_text = ""
+        if best is not None:
+            try:
+                _l_risk = str(best.get("lightning_risk") or "").lower()
+                _l_desc = best.get("lightning_description") or ""
+                if _l_risk == "high":
+                    lightning_text = f"Lightning advisory: High convective storm risk ({_l_desc or 'avoid open sea'})."
+                elif _l_risk == "moderate":
+                    lightning_text = "Lightning advisory: Moderate convective activity; stay alert for thunderstorms."
+                elif _l_risk == "low":
+                    lightning_text = "Lightning risk: Low."
+            except Exception:
+                lightning_text = ""
+        if lightning_text:
+            explanation = f"{explanation} {lightning_text}".strip()
+
+        # best dict shape: must include place, lat, lon, score plus extra for map
+        if best is not None:
+            best_out = {
+                "zone_id": best["zone_id"],
+                "place": best["place"],
+                "sector": best["sector"],
+                "lat": best["lat"],
+                "lon": best["lon"],
+                "distance_km": best["distance_km"],
+                "distance_from_user_km": best["distance_km"],
+                "wave_height_m": best.get("wave_height_m"),
+                "wind_kt": best.get("wind_kt"),
+                "wind_speed_kt": best.get("wind_kt"),
+                "tide_range_m": best.get("tide_range_m"),
+                "tidal_state": best.get("tidal_state", "unknown"),
+                "next_high_tide_utc": best.get("next_high_tide_utc"),
+                "next_low_tide_utc": best.get("next_low_tide_utc"),
+                "wave_available": best.get("wave_available", True),
+                "wind_available": best.get("wind_available", True),
+                "inside_eez": best["inside_eez"],
+                "inside_mpa": best["inside_mpa"],
+                "lightning_risk": best.get("lightning_risk"),
+                "lightning_description": best.get("lightning_description"),
+                "score": best["score"],
+                "score_breakdown": best["score_breakdown"],
+                "safety": best.get("safety", "caution"),
+                "bearing": best.get("bearing"),
+                "direction": best.get("direction"),
+                "depth_range": best.get("depth_range"),
+                "sst_c": best.get("sst_c"),
+                "chlorophyll_mg_m3": best.get("chlorophyll_mg_m3"),
+            }
     else:
         best_out = None
 
