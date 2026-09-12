@@ -116,13 +116,23 @@ async def set_json(key: str, value: dict, ttl_seconds: int = 3600):
 
 
 async def save_session(session_id: str, data: dict, ttl_seconds: int = 86400):
-    """Persist user session data with 24-hour expiration.
+    """Persist user session data with 24-hour expiration (T10 #126).
 
     Key: session:{session_id}
-    Stores lat, lon, zone_id, place, last_advisory_summary, turn_history, etc.
+    Stores last_lat, last_lon, last_zone_id, last_zone_name, detected_language,
+    boat_type, risk_preference, turn_history, etc.
     """
     key = f"session:{session_id}"
-    # Ensure TTL 24h as per spec
+    if isinstance(data, dict):
+        if "lat" in data and "last_lat" not in data:
+            data["last_lat"] = data["lat"]
+        if "lon" in data and "last_lon" not in data:
+            data["last_lon"] = data["lon"]
+        if "place" in data and "last_zone_name" not in data:
+            data["last_zone_name"] = data["place"]
+        if "zone_id" in data and "last_zone_id" not in data:
+            data["last_zone_id"] = data["zone_id"]
+    # Ensure TTL is 24h per spec
     await set_json(key, data, ttl_seconds=ttl_seconds)
 
 
