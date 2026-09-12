@@ -893,6 +893,7 @@ async def weather_agent(state: ORCAState) -> dict:
 
     # Current conditions and departure forecast run independently: a
     # check_weather timeout must never suppress the forecast fallback.
+    _weather_degraded = False
     try:
         if fish:
             res = await asyncio.wait_for(
@@ -904,6 +905,7 @@ async def weather_agent(state: ORCAState) -> dict:
     except Exception as exc:
         logger.warning("graph.weather_agent: %s", exc)
         res = _degraded_weather(fish)
+        _weather_degraded = True
     forecast = None
     if wants_fc:
         _ul = state.get("user_location") or {}
@@ -947,6 +949,8 @@ async def weather_agent(state: ORCAState) -> dict:
     except Exception as exc:
         logger.warning("graph.weather_agent: %s", exc)
         ret = {"weather_results": _degraded_weather(fish), "degraded": True}
+    if _weather_degraded:
+        ret["degraded"] = True
     if forecast is not None:
         ret["forecast"] = forecast
     return ret
