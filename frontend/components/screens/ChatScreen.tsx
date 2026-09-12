@@ -55,6 +55,7 @@ export interface ChatScreenProps {
   onLanguageChange?: (lang: string) => void;
   userLocation?: { lat: number; lon: number } | null;
   onSafetyUpdate?: (safety: SafetyData) => void;
+  onRouteChange?: (route: [number, number][] | number[][] | null) => void;
 }
 
 const QUICK_ACTIONS = [
@@ -101,6 +102,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   onLanguageChange,
   userLocation,
   onSafetyUpdate,
+  onRouteChange,
 }) => {
   const {
     themeMode,
@@ -110,6 +112,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     setActiveTab,
     pendingChatQuery,
     consumeChatQuery,
+    setActiveRoute,
   } = useApp();
   const isLight = themeMode === 'light';
 
@@ -148,6 +151,10 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     onLocationUpdate,
     onMapHighlight,
     onSafetyUpdate,
+    onRouteChange: (route) => {
+      setActiveRoute?.(route);
+      onRouteChange?.(route);
+    },
   });
 
   // Sync external language prop (shell owns selectedLanguage).
