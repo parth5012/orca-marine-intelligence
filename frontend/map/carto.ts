@@ -205,7 +205,7 @@ export function getBasemapTileUrl(
   }
 
   if (safeStyle === 'esri_ocean') {
-    return 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean/MapServer/tile/{z}/{y}/{x}';
+    return 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}';
   }
 
   if (safeStyle === 'esri_dark') {
@@ -239,18 +239,37 @@ export function getBasemapTileUrl(
 }
 
 /**
- * Resolves default basemap style from environment or falls back to 'dark_all'.
+ * Resolves basemap style based on theme mode and user selection.
+ * Priority: userSelected > env override (NEXT_PUBLIC_CARTO_BASEMAP_STYLE) > light ? 'esri_ocean' : 'esri_dark'.
  */
-export function getDefaultBasemapStyle(): BasemapStyle {
+export function getThemeBasemapStyle(
+  theme?: 'light' | 'dark' | string,
+  userSelected?: BasemapStyle
+): BasemapStyle {
+  if (userSelected) {
+    return userSelected;
+  }
+
   if (
     typeof process !== 'undefined' &&
     process.env.NEXT_PUBLIC_CARTO_BASEMAP_STYLE
   ) {
-    return (
-      normalizeBasemapStyle(process.env.NEXT_PUBLIC_CARTO_BASEMAP_STYLE) ||
-      'dark_all'
+    const envStyle = normalizeBasemapStyle(
+      process.env.NEXT_PUBLIC_CARTO_BASEMAP_STYLE
     );
+    if (envStyle) {
+      return envStyle;
+    }
   }
 
-  return 'dark_all';
+  return theme === 'light' ? 'esri_ocean' : 'esri_dark';
+}
+
+/**
+ * Resolves default basemap style, delegating to getThemeBasemapStyle.
+ */
+export function getDefaultBasemapStyle(
+  theme?: 'light' | 'dark' | string
+): BasemapStyle {
+  return getThemeBasemapStyle(theme);
 }

@@ -20,7 +20,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { SafetyData } from '@/chat';
-import { AppProvider, useApp, KOCHI_FALLBACK } from '@/context/AppContext';
+import { useApp, KOCHI_FALLBACK } from '@/context/AppContext';
 import { Navbar } from '@/components/layout/Navbar';
 import { BottomNavigation } from '@/components/layout/BottomNavigation';
 import { HomeScreen } from '@/components/screens/HomeScreen';
@@ -250,9 +250,5 @@ function Shell() {
 }
 
 export default function HomePage() {
-  return (
-    <AppProvider>
-      <Shell />
-    </AppProvider>
-  );
+  return <Shell />;
 }

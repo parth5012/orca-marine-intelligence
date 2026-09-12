@@ -41,6 +41,7 @@ import {
   BASEMAP_OPTIONS,
   getBasemapTileUrl,
   getDefaultBasemapStyle,
+  getThemeBasemapStyle,
   getBasemapAttribution,
   getBasemapMaxNativeZoom,
   getBasemapMaxZoom,
@@ -49,6 +50,7 @@ import {
   ESRI_OCEAN_ATTRIBUTION,
   ESRI_DARK_ATTRIBUTION,
 } from './carto';
+import { useThemeModeOptional } from '@/context/AppContext';
 
 export interface MapLayerToggles {
   pfz?: boolean;
@@ -83,6 +85,7 @@ export interface MapInnerProps {
   onCenterChange?: (center: [number, number]) => void;
   initialBasemapStyle?: BasemapStyle;
   route?: [number, number][] | number[][] | null;
+  themeMode?: 'light' | 'dark';
 }
 
 interface LiveWeatherState {
@@ -161,11 +164,27 @@ export default function MapInner({
   onCenterChange,
   initialBasemapStyle,
   route,
+  themeMode,
 }: MapInnerProps) {
+  const autoTheme = useThemeModeOptional();
+  const effTheme = themeMode ?? autoTheme ?? 'dark';
+  const isLight = effTheme === 'light';
+
+  const [hasManualOverride, setHasManualOverride] = useState<boolean>(
+    Boolean(initialBasemapStyle)
+  );
+
   // Basemap style state & fallback handling
   const [basemapStyle, setBasemapStyle] = useState<BasemapStyle>(
-    initialBasemapStyle || getDefaultBasemapStyle()
+    getThemeBasemapStyle(effTheme, initialBasemapStyle)
   );
+
+  useEffect(() => {
+    if (!hasManualOverride) {
+      setBasemapStyle(getThemeBasemapStyle(effTheme));
+    }
+  }, [effTheme, hasManualOverride]);
+
   const [tileError, setTileError] = useState<boolean>(false);
   const tileErrorsRef = useRef<number>(0);
 
@@ -458,22 +477,30 @@ export default function MapInner({
   );
 
   return (
-    <div className="relative w-full h-full min-h-[400px] overflow-hidden bg-slate-950">
+    <div
+      className={`relative w-full h-full min-h-[400px] overflow-hidden ${
+        isLight ? 'bg-slate-100' : 'bg-slate-950'
+      }`}
+    >
       {/* React-Leaflet Map Instance */}
       <MapContainer
         center={center}
         zoom={zoom}
         scrollWheelZoom={true}
         className="w-full h-full z-0"
-        style={{ height: '100%', width: '100%', background: '#0b132b' }}
+        style={{
+          height: '100%',
+          width: '100%',
+          background: isLight ? '#cad2d3' : '#0b132b',
+        }}
       >
         <MapController center={center} zoom={zoom} highlightFeatures={highlightFeatures} />
         <MapClickHandler onMapClick={handleMapClick} />
 
-        {/* Base Tile Layer: CartoDB Dark Matter / Voyager for marine styling */}
-        <TileLayer
-          key={tileError ? 'osm-fallback' : basemapStyle}
-          attribution={getBasemapAttribution(tileError ? 'osm' : basemapStyle)}
+      {/* Base Tile Layer: CartoDB Dark Matter / Voyager marine styling */}
+      <TileLayer
+        key={tileError ? `osm-fallback-${effTheme}` : `${basemapStyle}-${effTheme}`}
+        attribution={getBasemapAttribution(tileError ? 'osm' : basemapStyle)}
           url={getBasemapTileUrl(tileError ? 'osm' : basemapStyle)}
           maxZoom={getBasemapMaxZoom(tileError ? 'osm' : basemapStyle)}
           maxNativeZoom={getBasemapMaxNativeZoom(tileError ? 'osm' : basemapStyle)}
@@ -955,6 +982,7 @@ export default function MapInner({
                   type="button"
                   data-testid={`basemap-option-${opt.id}`}
                   onClick={() => {
+                    setHasManualOverride(true);
                     tileErrorsRef.current = 0;
                     setBasemapStyle(opt.id);
                     setTileError(false);

@@ -15,11 +15,13 @@
 
 import React, { Suspense, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { AppProvider } from '@/context/AppContext';
+import { useApp } from '@/context/AppContext';
 import { ExploreMap } from '@/map';
 import { normalizeBasemapStyle, BasemapStyle } from '@/map';
 
 function MapPageInner() {
+  const { themeMode } = useApp();
+  const isLight = themeMode === 'light';
   // Client Component: read query params via hook (server page props are
   // unavailable here), wrapped in Suspense for static rendering.
   const searchParams = useSearchParams();
@@ -38,7 +40,11 @@ function MapPageInner() {
   }, [searchParams]);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 font-sans">
+    <div
+      className={`flex flex-col h-screen w-screen overflow-hidden font-sans ${
+        isLight ? 'bg-slate-100 text-slate-900' : 'bg-slate-950 text-slate-100'
+      }`}
+    >
       <div className="flex-1 relative overflow-hidden flex p-3 sm:p-4">
         <ExploreMap
           initialBasemapStyle={resolvedBasemapStyle}
@@ -52,10 +58,8 @@ function MapPageInner() {
 
 export default function MapPage() {
   return (
-    <AppProvider>
-      <Suspense fallback={<div className="flex-1 bg-slate-950" />}>
-        <MapPageInner />
-      </Suspense>
-    </AppProvider>
+    <Suspense fallback={<div className="flex-1 bg-slate-950" />}>
+      <MapPageInner />
+    </Suspense>
   );
 }

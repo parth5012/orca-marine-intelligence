@@ -83,7 +83,7 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
   showNavLinks = true,
 }) => {
   const ctx = readCtx();
-  const themeMode = ctx?.themeMode ?? 'dark';
+  const themeMode = ctx?.themeMode ?? 'light';
   const isLight = themeMode === 'light';
 
   const ctxLayers = (ctx?.activeLayers as Record<MapLayerKey, boolean> | undefined) ?? DEFAULT_ACTIVE_LAYERS;
@@ -468,24 +468,25 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
         </div>
       )}
 
-      {/* Main Live Marine Map (1rem canvas, glow markers via MapInner) */}
-      <div className="w-full h-full flex-1">
-        <MapView
-          center={mapCenter}
-          zoom={mapZoom}
-          sector={selectedSector}
-          activeLayers={mapLayers}
-          highlightFeatures={highlightFeatures}
-          userLocation={userLocation}
-          route={ctx?.activeRoute}
-          initialBasemapStyle={initialBasemapStyle}
-          onSelectZone={handleMarkerSelect}
-          onCenterChange={(c) => {
-            setMapCenter(c);
-            onCenterChange?.(c);
-          }}
-        />
-      </div>
+        {/* Main Live Marine Map (1rem canvas, glow markers via MapInner) */}
+        <div className="w-full h-full flex-1">
+          <MapView
+            center={mapCenter}
+            zoom={mapZoom}
+            sector={selectedSector}
+            activeLayers={mapLayers}
+            highlightFeatures={highlightFeatures}
+            userLocation={userLocation}
+            route={ctx?.activeRoute}
+            themeMode={themeMode}
+            initialBasemapStyle={initialBasemapStyle}
+            onSelectZone={handleMarkerSelect}
+            onCenterChange={(c) => {
+              setMapCenter(c);
+              onCenterChange?.(c);
+            }}
+          />
+        </div>
 
       {/* Bottom Drawer Card (new glass design; legacy inspector testids kept) */}
       {drawerOpen && selectedZone && (

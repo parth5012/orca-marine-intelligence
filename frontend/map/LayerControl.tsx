@@ -174,73 +174,91 @@ export const LayerControl: React.FC<LayerControlProps> = (props) => {
           </span>
           <span className="text-[10px] text-cyan-400 font-mono">ISRO Bhuvan Available</span>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <button
-            type="button"
-            id="basemap-option-bhuvan"
-            data-testid="basemap-option-bhuvan"
-            aria-label="Select Bhuvan Satellite Base Layer"
-            onClick={() => props.onSelectBasemap?.('bhuvan')}
-            className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
-              props.basemapStyle === 'bhuvan'
-                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
-                : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
-            }`}
-          >
-            <span className="text-lg">🛰️</span>
-            <div className="overflow-hidden">
-              <div className="font-semibold text-xs leading-snug truncate">Bhuvan Satellite</div>
-              <div className="text-[10px] text-slate-400 leading-tight truncate">ISRO Satellite (WMS)</div>
-            </div>
-          </button>
-          <button
-            type="button"
-            id="basemap-option-dark_all"
-            data-testid="basemap-option-dark_all"
-            aria-label="Select CARTO Dark Matter Base Layer"
-            onClick={() => props.onSelectBasemap?.('dark_all')}
-            className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
-              props.basemapStyle === 'dark_all' || !props.basemapStyle
-                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
-                : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
-            }`}
-          >
-            <span className="text-lg">🌙</span>
-            <div className="overflow-hidden">
-              <div className="font-semibold text-xs leading-snug truncate">CARTO Dark</div>
-              <div className="text-[10px] text-slate-400 leading-tight truncate">Tactical Night Radar</div>
-            </div>
-          </button>
-          <button
-            type="button"
-            id="basemap-option-esri_ocean"
-            data-testid="basemap-option-esri_ocean"
-            aria-label="Select Esri Ocean Base Layer"
-            onClick={() => props.onSelectBasemap?.('esri_ocean')}
-            className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
-              props.basemapStyle === 'esri_ocean'
-                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
-                : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
-            }`}
-          >
-            <span className="text-lg">🌊</span>
-            <div className="overflow-hidden">
-              <div className="font-semibold text-xs leading-snug truncate">Esri Ocean</div>
-              <div className="text-[10px] text-slate-400 leading-tight truncate">Bathymetric Relief</div>
-            </div>
-          </button>
-          <button
-            type="button"
-            id="basemap-option-osm"
-            data-testid="basemap-option-osm"
-            aria-label="Select OpenStreetMap Base Layer"
-            onClick={() => props.onSelectBasemap?.('osm')}
-            className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
-              props.basemapStyle === 'osm'
-                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
-                : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
-            }`}
-          >
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        <button
+          type="button"
+          id="basemap-option-bhuvan"
+          data-testid="basemap-option-bhuvan"
+          aria-label="Select Bhuvan Satellite Base Layer"
+          onClick={() => props.onSelectBasemap?.('bhuvan')}
+          className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
+            props.basemapStyle === 'bhuvan'
+              ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
+              : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <span className="text-lg">🛰️</span>
+          <div className="overflow-hidden">
+            <div className="font-semibold text-xs leading-snug truncate">Bhuvan Satellite</div>
+            <div className="text-[10px] text-slate-400 leading-tight truncate">ISRO Satellite (WMS)</div>
+          </div>
+        </button>
+        <button
+          type="button"
+          id="basemap-option-dark_all"
+          data-testid="basemap-option-dark_all"
+          aria-label="Select CARTO Dark Matter Base Layer"
+          onClick={() => props.onSelectBasemap?.('dark_all')}
+          className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
+            props.basemapStyle === 'dark_all' || !props.basemapStyle
+              ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
+              : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <span className="text-lg">🌙</span>
+          <div className="overflow-hidden">
+            <div className="font-semibold text-xs leading-snug truncate">CARTO Dark</div>
+            <div className="text-[10px] text-slate-400 leading-tight truncate">Tactical Night Radar</div>
+          </div>
+        </button>
+        <button
+          type="button"
+          id="basemap-option-esri_ocean"
+          data-testid="basemap-option-esri_ocean"
+          aria-label="Select Esri Ocean Base Layer"
+          onClick={() => props.onSelectBasemap?.('esri_ocean')}
+          className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
+            props.basemapStyle === 'esri_ocean'
+              ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
+              : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <span className="text-lg">🌊</span>
+          <div className="overflow-hidden">
+            <div className="font-semibold text-xs leading-snug truncate">Esri Ocean</div>
+            <div className="text-[10px] text-slate-400 leading-tight truncate">Bathymetric Relief</div>
+          </div>
+        </button>
+        <button
+          type="button"
+          id="basemap-option-esri_dark"
+          data-testid="basemap-option-esri_dark"
+          aria-label="Select Esri Dark Gray Base Layer"
+          onClick={() => props.onSelectBasemap?.('esri_dark')}
+          className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
+            props.basemapStyle === 'esri_dark'
+              ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
+              : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <span className="text-lg">🌌</span>
+          <div className="overflow-hidden">
+            <div className="font-semibold text-xs leading-snug truncate">Esri Dark</div>
+            <div className="text-[10px] text-slate-400 leading-tight truncate">Dark Gray Canvas</div>
+          </div>
+        </button>
+        <button
+          type="button"
+          id="basemap-option-osm"
+          data-testid="basemap-option-osm"
+          aria-label="Select OpenStreetMap Base Layer"
+          onClick={() => props.onSelectBasemap?.('osm')}
+          className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
+            props.basemapStyle === 'osm'
+              ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
+              : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
             <span className="text-lg">🌐</span>
             <div className="overflow-hidden">
               <div className="font-semibold text-xs leading-snug truncate">OpenStreetMap</div>

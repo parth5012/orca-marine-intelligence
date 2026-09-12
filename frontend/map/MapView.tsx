@@ -21,6 +21,7 @@ export type { BasemapStyle } from './carto';
 export type MapViewProps = MapInnerProps & {
   className?: string;
   style?: React.CSSProperties;
+  themeMode?: 'light' | 'dark';
 };
 
 const MapInner = dynamic(() => import('./MapInner'), {
@@ -37,7 +38,7 @@ const MapInner = dynamic(() => import('./MapInner'), {
   ),
 });
 
-export default function MapView({ className, style, ...props }: MapViewProps) {
+export default function MapView({ className, style, themeMode, ...props }: MapViewProps) {
   return (
     <div
       id="map-view"
@@ -45,7 +46,7 @@ export default function MapView({ className, style, ...props }: MapViewProps) {
       className={`map-view relative w-full h-full overflow-hidden ${className || ''}`}
       style={style}
     >
-      <MapInner {...props} />
+      <MapInner themeMode={themeMode} {...props} />
     </div>
   );
 }

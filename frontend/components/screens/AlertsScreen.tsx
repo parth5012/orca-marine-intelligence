@@ -104,7 +104,9 @@ export const AlertsScreen: React.FC = () => {
     setActiveTab,
     userLocation,
     submitChatQuery,
+    themeMode,
   } = useApp();
+  const isLight = themeMode === 'light';
 
   const [loading, setLoading] = useState<boolean>(true);
   const [offline, setOffline] = useState<boolean>(false);
@@ -320,23 +322,49 @@ export const AlertsScreen: React.FC = () => {
   return (
     <div data-testid="tab-panel-alerts" className="max-w-4xl mx-auto space-y-6 pb-16">
       {/* Header Banner */}
-      <div className="glass-panel rounded-3xl p-6 sm:p-8 border border-rose-500/30 bg-gradient-to-r from-slate-950 via-slate-900 to-rose-950/20 shadow-2xl">
+      <div
+        className={`rounded-3xl p-6 sm:p-8 border transition-all ${
+          isLight
+            ? 'bg-gradient-to-r from-rose-50 via-white to-amber-50/50 border-rose-200 text-slate-900 shadow-md'
+            : 'glass-panel border-rose-500/30 bg-gradient-to-r from-slate-950 via-slate-900 to-rose-950/20 shadow-2xl'
+        }`}
+      >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-950 text-rose-300 border border-rose-800 text-xs font-bold mb-2">
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+            <div
+              className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-2 border ${
+                isLight
+                  ? 'bg-rose-100/80 text-rose-700 border-rose-300'
+                  : 'bg-rose-950 text-rose-300 border-rose-800'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-500 animate-pulse" />
               <span>INCOIS & IMD Safety Advisory Broadcast</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Marine Safety & Alert Center
+            <h1
+              className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${
+                isLight ? 'text-slate-900' : 'text-white'
+              }`}
+            >
+              Marine Safety Alert Center
             </h1>
-            <p className="text-xs sm:text-sm text-slate-300 mt-1">
+            <p
+              className={`text-xs sm:text-sm mt-1 ${
+                isLight ? 'text-slate-600' : 'text-slate-300'
+              }`}
+            >
               Real-time hazard warnings, wave surges, lightning & weather advisories
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="px-4 py-2 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs font-extrabold flex items-center gap-2 shadow-inner">
+            <div
+              className={`px-4 py-2 rounded-2xl border text-xs font-extrabold flex items-center gap-2 shadow-inner ${
+                isLight
+                  ? 'bg-rose-100/70 border-rose-300 text-rose-800'
+                  : 'bg-rose-500/20 border-rose-500/40 text-rose-200'
+              }`}
+            >
               <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
               <span data-testid="alerts-red-count">
                 {redAlertsCount} CRITICAL ALERT{redAlertsCount === 1 ? '' : 'S'}
@@ -349,9 +377,13 @@ export const AlertsScreen: React.FC = () => {
             type="button"
             onClick={() => setActiveTab('map')}
             data-testid="alerts-view-map"
-            className="px-4 py-2 rounded-xl border border-cyan-500/40 text-cyan-200 text-xs font-bold hover:bg-cyan-950 transition-colors"
+            className={`px-4 py-2 rounded-xl border text-xs font-bold transition-colors ${
+              isLight
+                ? 'border-cyan-300 text-cyan-800 hover:bg-cyan-50'
+                : 'border-cyan-500/40 text-cyan-200 hover:bg-cyan-950'
+            }`}
           >
-            View on map
+            View map
           </button>
           <button
             type="button"
@@ -370,7 +402,11 @@ export const AlertsScreen: React.FC = () => {
               void loadLiveAlerts(controller.signal);
             }}
             data-testid="alerts-refresh"
-            className="px-4 py-2 rounded-xl border border-slate-600 text-slate-300 text-xs font-bold hover:bg-slate-800 transition-colors"
+            className={`px-4 py-2 rounded-xl border text-xs font-bold transition-colors ${
+              isLight
+                ? 'border-slate-300 text-slate-700 hover:bg-slate-100 shadow-sm'
+                : 'border-slate-600 text-slate-300 hover:bg-slate-800'
+            }`}
           >
             Refresh live feed
           </button>
@@ -381,7 +417,11 @@ export const AlertsScreen: React.FC = () => {
         <div
           data-testid="alerts-warning"
           role="alert"
-          className="p-3 rounded-xl bg-amber-950/80 border border-amber-500/40 text-amber-200 text-xs font-bold"
+          className={`p-3 rounded-xl border text-xs font-bold ${
+            isLight
+              ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-sm'
+              : 'bg-amber-950/80 border-amber-500/40 text-amber-200'
+          }`}
         >
           Live alert feed unavailable (backend offline) — showing offline
           skeleton. Treat offshore sectors with caution until the feed reconnects.
@@ -390,7 +430,11 @@ export const AlertsScreen: React.FC = () => {
 
       {/* Category Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar text-xs">
-        <Filter className="w-4 h-4 text-cyan-400 shrink-0 ml-1" />
+        <Filter
+          className={`w-4 h-4 shrink-0 ml-1 ${
+            isLight ? 'text-cyan-600' : 'text-cyan-400'
+          }`}
+        />
         {FILTER_CATEGORIES.map((cat) => {
           const isSelected = selectedAlertFilter === cat;
           return (
@@ -402,6 +446,8 @@ export const AlertsScreen: React.FC = () => {
               className={`px-3.5 py-2 rounded-xl transition-all shrink-0 font-semibold ${
                 isSelected
                   ? 'bg-gradient-to-r from-cyan-400 to-teal-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                  : isLight
+                  ? 'bg-white border border-slate-200 text-slate-600 shadow-sm hover:text-slate-900 hover:border-cyan-500/40'
                   : 'glass-panel bg-slate-900/70 border border-slate-800 text-slate-300 hover:text-white hover:border-cyan-500/40'
               }`}
             >
@@ -418,21 +464,55 @@ export const AlertsScreen: React.FC = () => {
             {[0, 1].map((i) => (
               <div
                 key={i}
-                className="rounded-2xl p-5 border border-slate-800 bg-slate-950/60 animate-pulse"
+                className={`rounded-2xl p-5 border animate-pulse ${
+                  isLight
+                    ? 'bg-white border-slate-200 shadow-sm'
+                    : 'border-slate-800 bg-slate-950/60'
+                }`}
               >
-                <div className="h-4 w-2/3 rounded bg-slate-800" />
-                <div className="h-3 w-full rounded bg-slate-800/70 mt-3" />
-                <div className="h-3 w-5/6 rounded bg-slate-800/70 mt-2" />
+                <div
+                  className={`h-4 w-2/3 rounded ${
+                    isLight ? 'bg-slate-200' : 'bg-slate-800'
+                  }`}
+                />
+                <div
+                  className={`h-3 w-full rounded mt-3 ${
+                    isLight ? 'bg-slate-200/70' : 'bg-slate-800/70'
+                  }`}
+                />
+                <div
+                  className={`h-3 w-5/6 rounded mt-2 ${
+                    isLight ? 'bg-slate-200/70' : 'bg-slate-800/70'
+                  }`}
+                />
               </div>
             ))}
           </div>
         ) : filteredAlerts.length > 0 ? (
           filteredAlerts.map((alert) => <AlertCard key={alert.id} alert={alert} />)
         ) : (
-          <div className="glass-panel rounded-2xl p-8 text-center text-slate-400 border border-slate-800">
+          <div
+            className={`rounded-2xl p-8 text-center border ${
+              isLight
+                ? 'bg-white border-slate-200 text-slate-500 shadow-sm'
+                : 'glass-panel border-slate-800 text-slate-400'
+            }`}
+          >
             <ShieldCheck className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
-            <p className="font-semibold text-white">No active warnings in this category.</p>
-            <p className="text-xs mt-1">Operational waters are safe for fishing activities.</p>
+            <p
+              className={`font-semibold ${
+                isLight ? 'text-slate-800' : 'text-white'
+              }`}
+            >
+              No active warnings in this category.
+            </p>
+            <p
+              className={`text-xs mt-1 ${
+                isLight ? 'text-slate-500' : 'text-slate-400'
+              }`}
+            >
+              Operational waters safe for fishing activities.
+            </p>
           </div>
         )}
       </div>
