@@ -1,10 +1,6 @@
-# ORCA Marine Intelligence — Backend Dockerfile
-# Owner: M6 (Platform) / M-C (Backend API)
+FROM python:3.11-slim
 
-FROM python:3.11-slim as base
-
-# Install system dependencies for geospatial libraries
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install --no-install-recommends -y \
     build-essential \
     libgdal-dev \
     libgeos-dev \
@@ -14,17 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Set Python path so `backend.*` imports resolve cleanly
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-# Install Python dependencies
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code and static assets
 COPY backend/ /app/backend/
 COPY data/ /app/data/
+COPY scripts/ /app/scripts/
 
 EXPOSE 8000
 
