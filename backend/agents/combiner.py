@@ -305,32 +305,48 @@ def combine_and_rank(
         now = datetime.now()
     date_str = now.strftime("%d-%b-%Y")
 
-    # Empty case
+    # Empty case — still carry the departure forecast advisory when present.
     if not fish_results:
         citation = f"INCOIS TextData {date_str}"
         _empty_en = "No fishing zones found within search radius. Try expanding the search area or check back later."
+        _fc_suffix = ""
+        if isinstance(forecast, dict):
+            _fs = forecast.get("forecast_summary")
+            _dw = forecast.get("best_window_utc") or "Tomorrow morning"
+            _w6 = forecast.get("wind_kts_6h")
+            _v6 = forecast.get("wave_m_6h")
+            _ds = forecast.get("departure_safe")
+            if _w6 is not None and _v6 is not None:
+                _ss = "safe to depart" if _ds is True else ("conditions unsafe / caution" if _ds is False else "conditions uncertain")
+                _fc_suffix = f" Departure advisory ({_dw}): wind {_w6} kt, waves {_v6}m - {_ss}."
+            elif _fs and _fs != "Forecast unavailable":
+                _fc_suffix = f" Departure advisory: {_fs}"
+            elif _fs:
+                _fc_suffix = " Departure advisory: Forecast unavailable."
         _empty_loc = _localize_empty_advisory(detected_language)
         if _empty_loc is not None:
             return {
                 "ranked_zones": [],
                 "best": None,
-                "explanation": _empty_loc,
-                "explanation_en": _empty_en,
-                "localized_reply": _empty_loc,
+                "explanation": f"{_empty_loc}{_fc_suffix}".strip(),
+                "explanation_en": f"{_empty_en}{_fc_suffix}".strip(),
+                "localized_reply": f"{_empty_loc}{_fc_suffix}".strip(),
                 "detected_language": _normalize_lang_code(detected_language),
                 "citation": citation,
                 "all_unsafe": False,
                 "score_breakdown": {},
+                "forecast": forecast,
             }
         return {
             "ranked_zones": [],
             "best": None,
-            "explanation": _empty_en,
-            "localized_reply": _empty_en,
+            "explanation": f"{_empty_en}{_fc_suffix}".strip(),
+            "localized_reply": f"{_empty_en}{_fc_suffix}".strip(),
             "detected_language": "en",
             "citation": citation,
             "all_unsafe": False,
             "score_breakdown": {},
+            "forecast": forecast,
         }
 
     # Build lookups by zone_id for cross-agent join; fallback to index alignment
