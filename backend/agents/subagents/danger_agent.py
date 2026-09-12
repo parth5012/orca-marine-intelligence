@@ -36,6 +36,7 @@ import json
 import logging
 import math
 from pathlib import Path
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -426,9 +427,107 @@ async def fetch_imd_cyclone_alert(lat: float, lon: float) -> dict | None:
         return {"active": False}
 
 
+_PARQUET_LIGHTNING_CACHE = None
+_PARQUET_LIGHTNING_LOCK = threading.Lock()
+
+
+def _get_coastal_parquet_lightning_data() -> dict | None:
+    global _PARQUET_LIGHTNING_CACHE
+    if _PARQUET_LIGHTNING_CACHE is not None:
+        return _PARQUET_LIGHTNING_CACHE
+    with _PARQUET_LIGHTNING_LOCK:
+        if _PARQUET_LIGHTNING_CACHE is not None:
+            return _PARQUET_LIGHTNING_CACHE
+        base = Path(__file__).resolve().parents[3]
+        candidates = [
+            base / "data" / "marine_data_package" / "marine-data" / "unified" / "marine_features" / "coastal_point_features.parquet",
+            base / "data" / "coastal_point_features.parquet",
+            Path("data/coastal_point_features.parquet"),
+            Path.cwd() / "data" / "coastal_point_features.parquet",
+        ]
+        target_path = None
+        for p in candidates:
+            try:
+                if p.is_file():
+                    target_path = p.resolve()
+                    break
+            except Exception:
+                continue
+        if not target_path:
+            return None
+        try:
+            import pyarrow.parquet as pq
+
+            tbl = pq.read_table(
+                str(target_path),
+                columns=["latitude", "longitude", "olr_wm2", "convective_favorable_derived"],
+            )
+            _PARQUET_LIGHTNING_CACHE = {
+                "lats": tbl["latitude"].to_numpy(),
+                "lons": tbl["longitude"].to_numpy(),
+                "olrs": tbl["olr_wm2"].to_numpy(),
+                "conv": tbl["convective_favorable_derived"].to_numpy(),
+            }
+            return _PARQUET_LIGHTNING_CACHE
+        except Exception as exc:
+            logger.debug("danger_agent: failed loading lightning parquet: %s", exc)
+            return None
+
+
 async def fetch_imd_lightning_alert(lat: float, lon: float) -> dict | None:
-    """W2 lightning alert stub."""
-    raise NotImplementedError("IMD lightning fetch not configured — W2")
+    """Fetch IMD convective cloud / lightning risk proxy data (T8 #124)."""
+    data = _get_coastal_parquet_lightning_data()
+    if not data:
+        return None
+    try:
+        import numpy as np
+
+        lats = data["lats"]
+        lons = data["lons"]
+        olrs = data["olrs"]
+        conv = data["conv"]
+        dists = (lats - lat) ** 2 + (lons - lon) ** 2
+        idx = int(np.argmin(dists))
+        min_dist_deg = float(np.sqrt(dists[idx]))
+        min_dist_km = min_dist_deg * 111.0
+        if min_dist_km > 200.0:
+            return None
+
+        olr_val = float(olrs[idx]) if not np.isnan(olrs[idx]) else None
+        is_conv = (
+            bool(conv[idx])
+            if conv[idx] is not None and not (isinstance(conv[idx], float) and np.isnan(conv[idx]))
+            else False
+        )
+
+        if olr_val is not None:
+            if olr_val < 180.0 or (olr_val < 210.0 and is_conv):
+                risk = "high"
+                desc = f"High convective activity (OLR: {round(olr_val, 1)} W/m²). Severe lightning risk."
+            elif olr_val < 240.0 or is_conv:
+                risk = "moderate"
+                desc = f"Moderate convective clouds (OLR: {round(olr_val, 1)} W/m²). Scattered lightning possible."
+            else:
+                risk = "low"
+                desc = f"Low convective clouds (OLR: {round(olr_val, 1)} W/m²). Minimal lightning risk."
+        elif is_conv:
+            risk = "moderate"
+            desc = "Convective cloud formation detected. Moderate lightning risk."
+        else:
+            risk = "low"
+            desc = "Normal conditions. Lightning risk is low."
+
+        active = risk == "high"
+        return {
+            "active": active,
+            "lightning_risk": risk,
+            "description": desc,
+            "olr_wm2": olr_val,
+            "distance_km": round(min_dist_km, 1),
+        }
+    except Exception as exc:
+        logger.debug("danger_agent: lightning query error: %s", exc)
+        return None
 
 
 async def _check_imd_safe(lat: float, lon: float) -> tuple[bool, list[str]]:
@@ -648,7 +747,22 @@ async def check_safety(
                 warnings.append(f"Within {IMBL_BUFFER_KM:.0f}km of International Maritime Boundary Line — risk of crossing ({distance_to_boundary:.1f}km to boundary)")
 
     # ------------------------------------------------------------------
-    # 4. W2 IMD extensible stub
+    # 4. Lightning & Convective Check (T8 #124)
+    # ------------------------------------------------------------------
+    lightning_info = None
+    try:
+        lightning_info = await fetch_imd_lightning_alert(lat_f, lon_f)
+    except Exception as exc:
+        logger.debug("danger_agent: fetch_imd_lightning_alert error: %s", exc)
+
+    if lightning_info:
+        l_risk = lightning_info.get("lightning_risk")
+        if l_risk == "high" or lightning_info.get("active"):
+            warnings.append(f"Lightning warning: {lightning_info.get('description', 'High convective activity; severe lightning likely')}")
+            status = "danger"
+
+    # ------------------------------------------------------------------
+    # 5. W2 IMD extensible stub (cyclone)
     # ------------------------------------------------------------------
     if check_imd:
         try:
@@ -660,7 +774,7 @@ async def check_safety(
         except Exception as exc:
             logger.debug("danger_agent: IMD check error: %s", exc)
 
-    is_safe = status == "safe"
+    is_safe = (status == "safe")
 
     return {
         "is_safe": is_safe,
@@ -669,6 +783,8 @@ async def check_safety(
         "inside_eez": bool(inside_eez),
         "inside_mpa": bool(inside_mpa),
         "mpa_name": mpa_name,
+        "lightning_risk": lightning_info.get("lightning_risk") if lightning_info else None,
+        "lightning_description": lightning_info.get("description") if lightning_info else None,
     }
 
 
