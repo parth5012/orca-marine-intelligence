@@ -44,6 +44,20 @@ class TestGetTideFallback:
         assert out["tidal_state"] == "rising"
         assert out["next_high_tide_utc"] == "2026-01-01T08:00:00Z"
 
+    def test_invalid_source_coords_skipped(self, tmp_path, monkeypatch):
+        p = tmp_path / "t.csv"
+        p.write_text(
+            "latitude,longitude,tide_range_m,tidal_state\n"
+            "10.0,370.0,9.9,rising\n"
+            "9.93,76.26,1.2,rising\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(tides_mod, "TIDE_DIR", tmp_path)
+        tides_mod.clear_cache()
+        out = tides_mod.get_tide(9.93, 76.26)
+        assert out["tide_range_m"] == 1.2
+        assert out["tidal_state"] == "rising"
+
     def test_scalar_synonyms_do_not_fake_zero_range(self):
         rec = {"latitude": 9.9, "longitude": 76.2, "height_m": 1.5, "height": 1.5}
         out = tides_mod._record_to_tide(rec)

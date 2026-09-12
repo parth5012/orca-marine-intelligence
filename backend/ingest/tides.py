@@ -108,13 +108,18 @@ def _norm_state(v: Any) -> str:
     return "unknown"
 
 
-def _load_csv_records(path: Path) -> list[dict]:
+def _load_csv_records(path: Path, budget: int = MAX_TIDE_RECORDS) -> list[dict]:
     try:
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             if not reader.fieldnames:
                 return []
-            return [dict(r) for r in reader]
+            out: list[dict] = []
+            for r in reader:
+                out.append(dict(r))
+                if len(out) >= budget:
+                    break
+            return out
     except Exception as exc:
         logger.debug("tides: failed reading CSV %s: %s", path, exc)
         return []
@@ -127,6 +132,8 @@ def _load_json_records(path: Path) -> list[dict]:
         if isinstance(payload, dict) and payload.get("type") == "FeatureCollection":
             out: list[dict] = []
             for feat in payload.get("features", []):
+                if len(out) >= MAX_TIDE_RECORDS:
+                    break
                 if not isinstance(feat, dict):
                     continue
                 props = feat.get("properties") if isinstance(feat.get("properties"), dict) else {}
@@ -142,12 +149,12 @@ def _load_json_records(path: Path) -> list[dict]:
                 out.append(rec)
             return out
         if isinstance(payload, list):
-            return [r for r in payload if isinstance(r, dict)]
+            return [r for r in payload if isinstance(r, dict)][:MAX_TIDE_RECORDS]
         if isinstance(payload, dict):
             # single record or {records: [...]} / {data: [...]}
             for k in ("records", "data", "tides", "points"):
                 if isinstance(payload.get(k), list):
-                    return [r for r in payload[k] if isinstance(r, dict)]
+                    return [r for r in payload[k] if isinstance(r, dict)][:MAX_TIDE_RECORDS]
             return [payload]
         return []
     except Exception as exc:
@@ -180,6 +187,8 @@ def _load_netcdf_records(path: Path) -> list[dict]:
         ds = xr.open_dataset(str(path))
         try:
             df = ds.to_dataframe().reset_index()
+            if len(df) > MAX_TIDE_RECORDS:
+                df = df.head(MAX_TIDE_RECORDS)
             return [dict(r) for r in df.to_dict(orient="records")]
         finally:
             try:
@@ -262,10 +271,12 @@ def _scan_dir() -> list[dict]:
             _CACHE["records"] = []
             return []
         for p in files:
+            if len(records) >= MAX_TIDE_RECORDS:
+                break
             suf = p.suffix.lower()
             try:
                 if suf == ".csv":
-                    records.extend(_load_csv_records(p))
+                    records.extend(_load_csv_records(p, MAX_TIDE_RECORDS - len(records)))
                 elif suf in (".json", ".geojson"):
                     records.extend(_load_json_records(p))
                 elif suf in (".parquet", ".pq"):
@@ -276,6 +287,7 @@ def _scan_dir() -> list[dict]:
             except Exception as exc:
                 logger.debug("tides: skipping file %s: %s", p, exc)
                 continue
+        records = records[:MAX_TIDE_RECORDS]
     except Exception as exc:
         logger.debug("tides: scan failed: %s", exc)
         records = []
@@ -384,6 +396,8 @@ def get_tide(lat: float | None, lon: float | None) -> dict[str, Any]:
             rlat = _to_float(_pick(rec, "latitude", "lat", "y"))
             rlon = _to_float(_pick(rec, "longitude", "lon", "lng", "long", "x"))
             if rlat is None or rlon is None:
+                continue
+            if not (-90.0 <= rlat <= 90.0 and -180.0 <= rlon <= 180.0):
                 continue
             try:
                 d = _haversine_km(flat, flon, rlat, rlon)
