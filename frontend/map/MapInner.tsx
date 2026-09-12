@@ -82,6 +82,7 @@ export interface MapInnerProps {
   sector?: string;
   onCenterChange?: (center: [number, number]) => void;
   initialBasemapStyle?: BasemapStyle;
+  route?: [number, number][] | number[][] | null;
 }
 
 interface LiveWeatherState {
@@ -159,6 +160,7 @@ export default function MapInner({
   sector,
   onCenterChange,
   initialBasemapStyle,
+  route,
 }: MapInnerProps) {
   // Basemap style state & fallback handling
   const [basemapStyle, setBasemapStyle] = useState<BasemapStyle>(
@@ -183,6 +185,26 @@ export default function MapInner({
       setLayers((prev) => ({ ...prev, ...initialLayers }));
     }
   }, [initialLayers]);
+
+  // Green route polyline from user GPS to recommended zone (T4 #119)
+  const routePositions = useMemo<[number, number][] | null>(() => {
+    if (!route || !Array.isArray(route) || route.length < 2) return null;
+    const validPoints: [number, number][] = [];
+    for (const pt of route) {
+      if (!Array.isArray(pt) || pt.length < 2) continue;
+      const num0 = Number(pt[0]);
+      const num1 = Number(pt[1]);
+      if (!Number.isFinite(num0) || !Number.isFinite(num1)) continue;
+      // Convert GeoJSON [lon, lat] to Leaflet [lat, lon]
+      // In Indian waters (lat 5-30, lon 65-95), if num0 > 40 and num1 < 40, pt is [lon, lat]
+      const lat = num0 > 40 && num1 < 40 ? num1 : num0;
+      const lon = num0 > 40 && num1 < 40 ? num0 : num1;
+      if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+        validPoints.push([lat, lon]);
+      }
+    }
+    return validPoints.length >= 2 ? validPoints : null;
+  }, [route]);
 
   // UI-MIG-T5 visual-only flags (missing => true so legacy 5-key bags are unchanged).
   const ext = layers as Record<string, boolean | undefined>;
@@ -676,6 +698,20 @@ export default function MapInner({
             </Polyline>
             )}
           </>
+        )}
+
+        {/* 5b. Green route polyline from user GPS to recommended zone (T4 #119) */}
+        {routePositions && routePositions.length >= 2 && userLocation && (
+          <Polyline
+            key={`route-${routePositions[0][0]}-${routePositions[0][1]}`}
+            positions={routePositions}
+            pathOptions={{
+              color: '#22c55e',
+              weight: 3,
+              dashArray: '8, 6',
+              opacity: 0.85,
+            }}
+          />
         )}
 
         {/* 6. User GPS Marker */}

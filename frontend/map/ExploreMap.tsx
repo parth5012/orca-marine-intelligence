@@ -477,6 +477,7 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
           activeLayers={mapLayers}
           highlightFeatures={highlightFeatures}
           userLocation={userLocation}
+          route={ctx?.activeRoute}
           initialBasemapStyle={initialBasemapStyle}
           onSelectZone={handleMarkerSelect}
           onCenterChange={(c) => {

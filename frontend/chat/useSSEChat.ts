@@ -79,6 +79,7 @@ export interface UseSSEChatOptions {
   onMapHighlight?: (features: any[]) => void;
   onLocationUpdate?: (lat: number, lon: number) => void;
   onSafetyUpdate?: (safety: SafetyData) => void;
+  onRouteChange?: (route: [number, number][] | number[][] | null) => void;
 }
 
 const AGENT_TITLE_MAP: Record<string, string> = {
@@ -241,6 +242,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
     }
     setMessages([]);
     setIsStreaming(false);
+    options.onRouteChange?.(null);
   }, []);
 
   const parseZoneFeatures = useCallback((features: any[] = [], center?: [number, number] | null): MarineZoneCard[] => {
@@ -327,6 +329,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || isStreaming) return;
+      options.onRouteChange?.(null);
 
       const userMessageId = `user-${Date.now()}`;
       const assistantMessageId = `asst-${Date.now()}`;
@@ -575,9 +578,13 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                     updated.zone_cards = parsed.zones;
                   }
 
-                  if (pfzFeatures.length > 0) {
-                    options.onMapHighlight?.(pfzFeatures);
-                  }
+          if (pfzFeatures.length > 0) {
+            options.onMapHighlight?.(pfzFeatures);
+          }
+
+          if (route && Array.isArray(route) && route.length > 0) {
+            options.onRouteChange?.(route);
+          }
           if (center && Array.isArray(center) && center.length === 2) {
             const actualLat = center[0] > 50 && center[1] < 40 ? center[1] : center[0];
             const actualLon = center[0] > 50 && center[1] < 40 ? center[0] : center[1];

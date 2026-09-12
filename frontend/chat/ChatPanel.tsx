@@ -33,6 +33,7 @@ export interface ChatPanelProps {
   onLanguageChange?: (lang: string) => void;
   userLocation?: { lat: number; lon: number } | null;
   onSafetyUpdate?: (safety: SafetyData) => void;
+  onRouteChange?: (route: [number, number][] | number[][] | null) => void;
 }
 
 const QUICK_ACTIONS = [
@@ -50,6 +51,7 @@ export default function ChatPanel({
   onLanguageChange,
   userLocation,
   onSafetyUpdate,
+  onRouteChange,
 }: ChatPanelProps) {
   const [inputText, setInputText] = useState<string>('');
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -84,6 +86,7 @@ export default function ChatPanel({
     onLocationUpdate,
     onMapHighlight,
     onSafetyUpdate,
+    onRouteChange,
   });
 
   // Sync external language prop

@@ -212,6 +212,8 @@ interface AppContextType {
   activeLayers: ActiveLayers;
   setActiveLayers: (layers: ActiveLayers) => void;
   toggleLayer: (key: MapLayerKey) => void;
+  activeRoute: [number, number][] | number[][] | null;
+  setActiveRoute: (route: [number, number][] | number[][] | null) => void;
   // Auth passthrough — always authenticated (overlay forced authenticated).
   authStep: AuthStep;
   setAuthStep: (step: AuthStep) => void;
@@ -252,6 +254,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     useState<PendingChatQuery | null>(null);
   const [activeLayers, setActiveLayers] =
     useState<ActiveLayers>(DEFAULT_ACTIVE_LAYERS);
+  const [activeRoute, setActiveRoute] = useState<[number, number][] | number[][] | null>(null);
 
   // Hydrate theme + language from localStorage (layout init script owns .dark pre-paint).
   useEffect(() => {
@@ -320,6 +323,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const submitChatQuery = useCallback((text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    setActiveRoute(null);
     setPendingChatQuery({ text: trimmed, nonce: Date.now() });
     setActiveTab('chat');
   }, []);
@@ -432,9 +436,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         mapFocusNonce,
         requestMapFocus,
         viewOnMap,
-        activeLayers,
-        setActiveLayers,
-        toggleLayer,
+      activeLayers,
+      setActiveLayers,
+      toggleLayer,
+      activeRoute,
+      setActiveRoute,
         authStep,
         setAuthStep,
         userRole,
