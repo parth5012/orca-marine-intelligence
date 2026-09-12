@@ -384,8 +384,9 @@ def test_endpoint_serves_from_redis(client):
             {
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [76.25, 9.95]},
-                "properties": {
-                    "place": "Cached Zone Alpha",
+                    "properties": {
+                        "zone_id": "SEC005_Cached_Zone_Alpha_001",
+                        "place": "Cached Zone Alpha",
                     "sector": "SEC005",
                     "sector_name": "KERALA",
                     "bearing": 240,
