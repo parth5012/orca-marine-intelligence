@@ -545,11 +545,13 @@ def combine_and_rank(
             "inside_mpa": inside_mpa,
             "score": score,
             "score_breakdown": breakdown,
-            # preserve original fish props for map rendering
-            "bearing": fish.get("bearing"),
-            "direction": fish.get("direction") or fish.get("dir"),
-            "depth_range": fish.get("depth_range") or fish.get("depth") or "",
-        }
+        # preserve original fish props for map rendering
+        "bearing": fish.get("bearing"),
+        "direction": fish.get("direction") or fish.get("dir"),
+        "depth_range": fish.get("depth_range") or fish.get("depth") or "",
+        "sst_c": fish.get("sst_c"),
+        "chlorophyll_mg_m3": fish.get("chlorophyll_mg_m3"),
+    }
         ranked.append(entry)
 
     # US-ORCA-014: canonical safety annotation (additive — scoring untouched).
@@ -676,6 +678,32 @@ def combine_and_rank(
     if tide_text:
         explanation = f"{explanation} {tide_text}".strip()
 
+    # Satellite SST / chlorophyll advisory (T3 #118)
+    # When SST/chlorophyll data present, include advisory:
+    # "SST: 28.5C, Chlorophyll: 0.6 mg/m3 productive waters."
+    satellite_text = ""
+    if best is not None:
+        try:
+            _sst = best.get("sst_c")
+            _chlo = best.get("chlorophyll_mg_m3")
+            _sat_parts = []
+            if _sst is not None:
+                try:
+                    _sat_parts.append(f"SST: {round(float(_sst), 1)}C")
+                except (TypeError, ValueError):
+                    pass
+            if _chlo is not None:
+                try:
+                    _sat_parts.append(f"Chlorophyll: {round(float(_chlo), 2)} mg/m3")
+                except (TypeError, ValueError):
+                    pass
+            if _sat_parts:
+                satellite_text = f"{', '.join(_sat_parts)} productive waters."
+        except Exception:
+            satellite_text = ""
+    if satellite_text:
+        explanation = f"{explanation} {satellite_text}".strip()
+
     # best dict shape: include place, lat, lon, score plus extra for map
     if best is not None:
         best_out = {
@@ -703,6 +731,8 @@ def combine_and_rank(
             "bearing": best.get("bearing"),
             "direction": best.get("direction"),
             "depth_range": best.get("depth_range"),
+            "sst_c": best.get("sst_c"),
+            "chlorophyll_mg_m3": best.get("chlorophyll_mg_m3"),
         }
     else:
         best_out = None
@@ -712,8 +742,8 @@ def combine_and_rank(
     lang_code = _normalize_lang_code(detected_language)
     if lang_code != "en" and best_out is not None:
         # Same-language grounded rendering (offline, token-safe, pre-stream).
-        # Code trumps LLM: all_unsafe veto already computed above; the
-        # renderer only localizes it via lexical_mask (never overrides).
+        # Code trumps LLM: all_unsafe veto is computed above; the
+        # renderer only localizes the lexical_mask (never overrides).
         try:
             from backend.agents import lexical_mask as _lm
 
@@ -737,6 +767,8 @@ def combine_and_rank(
                 _localized = f"{_localized} {forecast_text}".strip()
             if tide_text:
                 _localized = f"{_localized} {tide_text}".strip()
+            if satellite_text:
+                _localized = f"{_localized} {satellite_text}".strip()
             return {
                 "ranked_zones": ranked,
                 "best": best_out,
