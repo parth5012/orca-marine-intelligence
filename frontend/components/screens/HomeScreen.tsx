@@ -73,6 +73,7 @@ export const HomeScreen: React.FC = () => {
     openPFZDetail,
     themeMode,
     t,
+    activeRoute,
   } = useApp();
   const isLight = themeMode === 'light';
 
@@ -371,12 +372,13 @@ export const HomeScreen: React.FC = () => {
           data-testid="home-map-preview"
           className="h-[380px] sm:h-[440px] rounded-2xl overflow-hidden border border-cyan-500/20"
         >
-          <MapView
-            center={[userLocation.lat, userLocation.lon]}
-            zoom={8}
-            userLocation={{ lat: userLocation.lat, lon: userLocation.lon }}
-            onSelectZone={(feature) => openPFZDetail(feature)}
-          />
+              <MapView
+                center={[userLocation.lat, userLocation.lon]}
+                zoom={8}
+                userLocation={{ lat: userLocation.lat, lon: userLocation.lon }}
+                route={activeRoute}
+                onSelectZone={(feature) => openPFZDetail(feature)}
+              />
         </div>
       </div>
 
