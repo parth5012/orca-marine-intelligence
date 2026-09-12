@@ -1,14 +1,23 @@
-# ORCA Marine Intelligence — Docker Compose (Local Development)
-# Owner: M-C (Backend API & Platform) — Docker env (PostGIS + Redis + Backend)
+# ORCA Marine Intelligence — Docker Compose (Single-Command Stack)
+# Owner: M-C (Backend API & Platform)
 #
-# Services:
-#   - postgis: PostgreSQL with PostGIS (port 5432)
-#   - redis: Redis cache (port 6379)
-#   - backend: FastAPI application (port 8000)
+# All services: PostGIS + Redis + Backend (FastAPI) + Frontend (Next.js)
 #
 # Usage:
-#   docker compose up -d          # Starts all services (or just PostGIS + Redis: docker compose up -d postgis redis)
-#   docker compose down           # Stops all containers
+#   docker compose up --build          # all 4 services (first build ~2-3 min)
+#   docker compose up -d               # detached
+#   docker compose down                # stop + remove containers
+#   docker compose down -v             # also wipe DB/Redis volumes
+#   docker compose logs -f backend     # tail one service
+#
+# Ports (host:container):
+#   5432:5432  PostGIS  (host 5432 must be free — stop local postgres if needed)
+#   6379:6379  Redis    (inside Docker:6379; bare-metal .env uses 7379 to dodge conflicts)
+#   5000:8000  Backend  (8000 blocked on Windows by Hyper-V excluded range 7945-8044 → WinError 10013)
+#   3000:3000  Frontend (Next.js)
+#
+# Env: .env is auto-loaded. Docker overrides DATABASE_URL/REDIS_URL to use
+# service hostnames (postgis/redis). Add secrets to .env, not here.
 
 services:
   postgis:
@@ -23,7 +32,7 @@ services:
       - "5432:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
-      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U orca -d orca_marine"]
       interval: 10s
@@ -35,7 +44,7 @@ services:
     container_name: orca-redis
     restart: unless-stopped
     ports:
-      - "7379:6379"
+      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -50,16 +59,43 @@ services:
       dockerfile: backend/Dockerfile
     container_name: orca-backend
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
+      # Override host-specific URLs with Docker-network hostnames
       DATABASE_URL: postgresql://orca:orca@postgis:5432/orca_marine
       REDIS_URL: redis://redis:6379/0
       PORT: 8000
     ports:
-      - "8000:8000"
+      # 8000 → WinError 10013 on Windows host; expose 5000 instead
+      - "5000:8000"
     depends_on:
       postgis:
         condition: service_healthy
       redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || curl -sf http://localhost:8000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: orca-frontend
+    restart: unless-stopped
+    environment:
+      # Server-side proxy (Next.js route handlers) → backend container
+      BACKEND_API_URL: http://backend:8000
+      # Client-side fetch (browser) → host-mapped backend port
+      NEXT_PUBLIC_API_URL: http://localhost:5000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
         condition: service_healthy
 
 volumes:
