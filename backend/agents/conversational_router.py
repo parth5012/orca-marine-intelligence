@@ -28,8 +28,12 @@ import re
 _MARINE_RE = re.compile(
     r"(pfz|fish|fishing|catch|zone|coord|weather|wave|wind|cyclone|storm|"
     r"safety|safe|sail|tide|sst|chlorophyll|temperature|route|geofence|"
-    r"eez|mpa|imb|harbor|harbour|port|sea|ocean|marine|advisory|alert|"
+    r"eez|mpa|imbl|harbor|harbour|port|sea|ocean|marine|advisory|alert|"
     r"kochi|munambam|beypore|kollam|vizag|visakhapatnam|veraval|chennai|"
+    r"മീൻ|മീന|മത്സ്യം|കടൽ|സമുദ്രം|തിരമാല|കാറ്റ്|"
+    r"மீன்|மீன|கடல்|அலை|காற்று|புயல்|மீன்பிடி|"
+    r"చేప|సముద్రం|అలలు|గాలి|తుఫాను|"
+    r"मछली|machhli|समुद्र|लहरें|हवा|तूफान|"
     r"\b\d{1,2}\.\d+\s*,\s*\d{1,3}\.\d+)",
     re.IGNORECASE,
 )

@@ -119,6 +119,7 @@ class PlannerOutput(BaseModel):
     detected_language: str = Field(default="en", description="BCP-47-ish code, e.g. en/ml/ta/hi")
     target_location: TargetLocation = Field(default_factory=TargetLocation)
     intents: list[str] = Field(default_factory=list, description="e.g. ['find_fish','check_safety']")
+    wants_forecast: bool = Field(default=False, description="True if query asks for departure-window forecast")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     reasoning_trace: list[str] = Field(
         default_factory=list,

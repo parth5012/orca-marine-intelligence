@@ -220,6 +220,7 @@ def combine_and_rank(
     detected_language: str = "en",
     port_name: str | None = None,
     species_list: list | None = None,
+    forecast: dict | None = None,
 ) -> dict:
     """
     Rank PFZ zones by composite safety and proximity score.
@@ -591,6 +592,24 @@ def combine_and_rank(
         if not bd.get("wave_available") or not bd.get("wind_available"):
             explanation += " Sea/wind data unavailable — treat conditions with caution."
 
+    forecast_text = ""
+    if forecast and isinstance(forecast, dict):
+        f_summary = forecast.get("forecast_summary")
+        dep_safe = forecast.get("departure_safe")
+        window = forecast.get("best_window_utc") or "Tomorrow morning"
+        wind_6h = forecast.get("wind_kts_6h")
+        wave_6h = forecast.get("wave_m_6h")
+        if wind_6h is not None and wave_6h is not None:
+            f_safe_str = "safe to depart" if dep_safe is True else ("conditions unsafe / caution" if dep_safe is False else "conditions uncertain")
+            forecast_text = f"Departure advisory ({window}): wind {wind_6h} kt, waves {wave_6h}m — {f_safe_str}."
+        elif f_summary and f_summary != "Forecast unavailable":
+            forecast_text = f"Departure advisory: {f_summary}"
+        elif f_summary == "Forecast unavailable":
+            forecast_text = "Departure advisory: Forecast unavailable."
+
+    if forecast_text:
+        explanation = f"{explanation} {forecast_text}".strip()
+
     # best dict shape: include place, lat, lon, score plus extra for map
     if best is not None:
         best_out = {
@@ -644,6 +663,8 @@ def combine_and_rank(
                 "species_list": species_list or [],
             }
             _localized = _lm.render_grounded_advisory(_metrics, lang_code)
+            if forecast_text:
+                _localized = f"{_localized} {forecast_text}".strip()
             return {
                 "ranked_zones": ranked,
                 "best": best_out,
@@ -654,6 +675,7 @@ def combine_and_rank(
                 "citation": citation,
                 "all_unsafe": all_unsafe,
                 "score_breakdown": top_breakdown,
+                "forecast": forecast,
             }
         except Exception:
             pass  # fall through to English explanation (graceful degrade)
@@ -667,6 +689,7 @@ def combine_and_rank(
         "citation": citation,
         "all_unsafe": all_unsafe,
         "score_breakdown": top_breakdown,
+        "forecast": forecast,
     }
 
 

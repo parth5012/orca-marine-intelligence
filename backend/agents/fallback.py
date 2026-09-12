@@ -528,19 +528,27 @@ def _is_temporal_followup(query: str) -> bool:
 
 def _parse_intent(query: str) -> dict:
     q = (query or "").lower()
-    # wants_fish: keywords fish/PFZ
+    # wants_fish: keywords around fish/PFZ
     fish_keywords = ["fish", "pfz", "catch", "fishing", "zone", "மீன்", "மீன", "മീൻ", "മത്സ്യം", "machhli", "chepa"]
     # wants_safety: wave, wind, cyclone, safe, danger, tide, weather, storm
     safety_keywords = ["safe", "danger", "wave", "wind", "cyclone", "storm", "tide", "weather", "sea", "current", "lightning"]
-    # In W1, if query is short or unknown, default both to true (independent)
+    # wants_forecast: departure window, tomorrow, morning, when to leave
+    forecast_keywords = ["tomorrow", "morning", "forecast", "when to leave", "safe to go", "safe tomorrow", "trip window", "departure"]
+
     wants_fish = any(k in q for k in fish_keywords)
     wants_safety = any(k in q for k in safety_keywords)
+    wants_forecast = any(k in q for k in forecast_keywords)
+
     # If neither keyword matched, assume user wants both (fish + safety)
-    if not wants_fish and not wants_safety:
+    if not wants_fish and not wants_safety and not wants_forecast:
         wants_fish = True
         wants_safety = True
-    return {"wants_fish": wants_fish, "wants_safety": wants_safety}
 
+    return {
+        "wants_fish": wants_fish,
+        "wants_safety": wants_safety,
+        "wants_forecast": wants_forecast,
+    }
 
 # ---------------------------------------------------------------------------
 # Legacy gather placeholders (reserved for future edge/offline mode)

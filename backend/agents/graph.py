@@ -85,7 +85,7 @@ class ORCAState(TypedDict, total=False):
     route: str | None  # chitchat | marine | None (None = not yet routed)
     chitchat_reply: str | None
     # supervisor outputs
-    intent: dict  # {wants_fish, wants_safety}
+    intent: dict  # {wants_fish, wants_safety, wants_forecast}
     user_location: dict | None  # {lat, lon} resolved
     cached_session: dict | None
     degraded: Annotated[bool, _degraded_or]
@@ -94,6 +94,7 @@ class ORCAState(TypedDict, total=False):
     sea_results: list[dict]
     weather_results: list[dict]
     danger_results: list[dict]
+    forecast: dict | None
     # decision
     combined: dict | None
     best: dict | None
@@ -257,7 +258,7 @@ def _needs_clarification_short_circuit(state: ORCAState) -> bool:
 
 
 def _intent_from_planner_intents(intents: list[str] | None) -> dict | None:
-    """Map LLM intent vocabulary to {wants_fish, wants_safety}.
+    """Map LLM intent vocabulary to {wants_fish, wants_safety, wants_forecast}.
 
     Returns None when ``intents`` is empty/unknown so callers fall back
     to deterministic ``_parse_intent`` (never emit a dead both-False
@@ -282,9 +283,17 @@ def _intent_from_planner_intents(intents: list[str] | None) -> dict | None:
         )
         for i in lowered
     )
-    if not wants_fish and not wants_safety:
+    wants_forecast = any(
+        i in ("forecast", "wants_forecast", "departure", "departure_window", "trip_window")
+        for i in lowered
+    )
+    if not wants_fish and not wants_safety and not wants_forecast:
         return None
-    return {"wants_fish": bool(wants_fish), "wants_safety": bool(wants_safety)}
+    return {
+        "wants_fish": bool(wants_fish),
+        "wants_safety": bool(wants_safety),
+        "wants_forecast": bool(wants_forecast),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -706,6 +715,24 @@ async def planner_node(state: ORCAState) -> dict:
     except (TypeError, ValueError):
         planner_confidence = 0.0
 
+    # T1 forecast intent: LLM flag or deterministic keywords
+    try:
+        if getattr(plan, "wants_forecast", False):
+            intent["wants_forecast"] = True
+    except Exception:
+        pass
+    try:
+        _ql = (query or "").lower()
+        if any(k in _ql for k in ["tomorrow", "morning", "forecast", "when to leave", "safe to go", "safe tomorrow"]):
+            intent["wants_forecast"] = True
+    except Exception:
+        pass
+    try:
+        if intent.get("wants_forecast") and selected_tools is not None and TOOL_WEATHER not in selected_tools:
+            selected_tools = list(selected_tools) + [TOOL_WEATHER]
+    except Exception:
+        pass
+
     # Guard: confident plan with empty toolset would deadlock the pipeline
     # (no fish → no decision). Default to full dispatch with an auditable note.
     if not needs_clarification and not selected_tools:
@@ -821,7 +848,10 @@ async def sea_checker(state: ORCAState) -> dict:
     try:
         from backend.agents.subagents import sea_checker as sc  # type: ignore
 
-        res = await sc.check_sea_conditions(fish)
+        res = await asyncio.wait_for(
+            sc.check_sea_conditions(fish),
+            timeout=TIMEOUT_S,
+        )
         return {"sea_results": res if isinstance(res, list) else _degraded_sea(fish)}
     except Exception as exc:
         logger.warning("graph.sea_checker: %s", exc)
@@ -849,13 +879,60 @@ async def weather_agent(state: ORCAState) -> dict:
                 pass
         return {"weather_results": []}
     fish = state.get("fish_results") or []
-    if not fish:
+    # T1: forecast intent computed before fish-empty early return
+    wants_fc = bool((state.get("intent") or {}).get("wants_forecast"))
+    try:
+        _q = (state.get("query") or "").lower()
+        if any(k in _q for k in ["tomorrow", "morning", "forecast", "when to leave", "safe to go", "safe tomorrow"]):
+            wants_fc = True
+    except Exception:
+        pass
+    if not fish and not wants_fc:
         return {"weather_results": []}
     try:
         from backend.agents.subagents import weather_agent as wa  # type: ignore
 
-        res = await wa.check_weather(fish)
-        return {"weather_results": res if isinstance(res, list) else _degraded_weather(fish)}
+        if fish:
+            res = await asyncio.wait_for(
+                wa.check_weather(fish),
+                timeout=TIMEOUT_S,
+            )
+        else:
+            res = []
+        forecast = None
+        if wants_fc:
+            _ul = state.get("user_location") or {}
+            _flat = _ul.get("lat") if isinstance(_ul, dict) else None
+            _flon = _ul.get("lon") if isinstance(_ul, dict) else None
+            if _flat is None and fish:
+                try:
+                    _flat = fish[0].get("lat")
+                except Exception:
+                    _flat = None
+            if _flon is None and fish:
+                try:
+                    _flon = fish[0].get("lon")
+                except Exception:
+                    _flon = None
+            if _flat is not None and _flon is not None:
+                try:
+                    forecast = await asyncio.wait_for(
+                        wa.check_forecast(float(_flat), float(_flon)),
+                        timeout=TIMEOUT_S,
+                    )
+                except Exception as f_exc:
+                    logger.warning("graph.weather_agent check_forecast: %s", f_exc)
+                    forecast = {
+                        "departure_safe": "unknown",
+                        "best_window_utc": "",
+                        "forecast_summary": "Forecast unavailable",
+                        "wind_kts_6h": None,
+                        "wave_m_6h": None,
+                    }
+        ret = {"weather_results": res if isinstance(res, list) else _degraded_weather(fish)}
+        if forecast is not None:
+            ret["forecast"] = forecast
+        return ret
     except Exception as exc:
         logger.warning("graph.weather_agent: %s", exc)
         return {"weather_results": _degraded_weather(fish), "degraded": True}
@@ -892,10 +969,13 @@ async def danger_agent(state: ORCAState) -> dict:
 
         # Use batch helper if available (preserves order, respects shared points)
         if hasattr(da, "check_safety_batch"):
-            res = await da.check_safety_batch(fish)
+            res = await asyncio.wait_for(
+                da.check_safety_batch(fish),
+                timeout=TIMEOUT_S,
+            )
         else:
-            # per-point fallback: no per-agent wait_for — subagents have
-            # internal 3.5s single-try fetchers, gather runs parallel.
+            # per-point fallback: per-agent wait_for inside subagents
+            # (internal 3.5s single-try fetchers, gather runs in parallel).
             async def _one(pt: dict) -> dict:
                 lat = pt.get("lat")
                 lon = pt.get("lon")
@@ -911,7 +991,10 @@ async def danger_agent(state: ORCAState) -> dict:
                     }
                 return await da.check_safety(float(lat), float(lon))
 
-            res = list(await asyncio.gather(*(_one(pt) for pt in fish)))
+            res = list(await asyncio.wait_for(
+                asyncio.gather(*(_one(pt) for pt in fish)),
+                timeout=TIMEOUT_S,
+            ))
         return {"danger_results": res if isinstance(res, list) else _degraded_danger(fish)}
     except Exception as exc:
         logger.warning("graph.danger_agent: %s", exc)
@@ -1000,6 +1083,7 @@ async def decision_agent(state: ORCAState) -> dict:
         combined = cb.combine_and_rank(
             fish_results=fish, sea_results=sea, weather_results=weather,
             danger_results=danger, user_location=user_location,
+            detected_language=language, forecast=state.get("forecast"),
         )
     except Exception as exc:
         logger.error("graph.decision: combiner failed %s", exc)
@@ -1228,6 +1312,31 @@ async def decision_agent(state: ORCAState) -> dict:
     except Exception:
         pass
 
+    # T1 departure forecast surfacing (safe tomorrow morning query)
+    try:
+        _finfo = state.get("forecast")
+        if isinstance(_finfo, dict):
+            _fsum = _finfo.get("forecast_summary")
+            _dsafe = _finfo.get("departure_safe")
+            _win = _finfo.get("best_window_utc") or "Tomorrow morning"
+            _w6 = _finfo.get("wind_kts_6h")
+            _wv6 = _finfo.get("wave_m_6h")
+            _ftext = ""
+            if _w6 is not None and _wv6 is not None:
+                _ss = "safe to depart" if _dsafe is True else ("conditions unsafe / caution" if _dsafe is False else "conditions uncertain")
+                _ftext = f"Departure advisory ({_win}): wind {_w6} kt, waves {_wv6}m - {_ss}."
+            elif _fsum and _fsum != "Forecast unavailable":
+                _ftext = f"Departure advisory: {_fsum}"
+            elif _fsum:
+                _ftext = "Departure advisory: Forecast unavailable."
+            if _ftext and _ftext not in str(reply_text):
+                reply_text = f"{reply_text} {_ftext}".strip()
+                explanation = f"{explanation} {_ftext}".strip()
+            if not any("forecast" in str(e).lower() for e in evidence):
+                evidence.append(f"Departure forecast window analyzed ({_win})")
+    except Exception:
+        pass
+
     return {
         "combined": combined,
         "best": best,
@@ -1239,6 +1348,7 @@ async def decision_agent(state: ORCAState) -> dict:
         "safety": safety,
         "evidence": evidence,
         "confidence": confidence,
+        "forecast": state.get("forecast"),
         "synthesis_status": synthesis_status,
         "synthesis_error": synthesis_error,
         "synthesis_elapsed_ms": synthesis_elapsed_ms,
@@ -1520,6 +1630,7 @@ async def orchestrate_via_graph(
             "confidence": DEGRADED_CONFIDENCE,
             "session_id": sid,
             "intent": final.get("intent") or {"wants_fish": True, "wants_safety": True},
+            "forecast": final.get("forecast"),
             "needs_clarification": True,
             "clarification_text": str(clarification_text),
             "selected_tools": final.get("selected_tools"),
@@ -1542,6 +1653,7 @@ async def orchestrate_via_graph(
             "confidence": DEGRADED_CONFIDENCE,
             "session_id": sid,
             "intent": final.get("intent") or {"wants_fish": True, "wants_safety": True},
+            "forecast": final.get("forecast"),
             "needs_clarification": bool(final.get("needs_clarification", False)),
             "selected_tools": final.get("selected_tools"),
             "reasoning_trace": list(final.get("reasoning_trace") or []),
@@ -1596,6 +1708,7 @@ async def orchestrate_via_graph(
         "confidence": final.get("confidence") or (DEGRADED_CONFIDENCE if final.get("degraded") else DEFAULT_CONFIDENCE),
         "session_id": final.get("session_id"),
         "intent": final.get("intent"),
+        "forecast": final.get("forecast"),
         "combined": final.get("combined"),  # for debugging
         "needs_clarification": bool(final.get("needs_clarification", False)),
         "selected_tools": final.get("selected_tools"),
