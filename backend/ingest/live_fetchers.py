@@ -638,28 +638,24 @@ def fetch_live_weather(
     Open-Meteo primary, OpenWeatherMap backup (fail-fast 3s x1).
     OWM previously stalled 6s x3 (~19s) per call on TLS timeouts.
     """
-    try:
-        return fetch_open_meteo_weather(lat, lon, timeout_s=timeout_s)
-    except Exception as exc:
-        logger.warning(
-            "Open-Meteo fetch failed for (%s, %s): %s. Trying OWM backup.",
-            lat, lon, exc,
-        )
     key = api_key or os.getenv("OPENWEATHER_API_KEY")
-    if key:
+    if key and key.strip() and key.strip().lower() not in ("none", "null", "false", "undefined"):
         try:
             return fetch_openweathermap(
-                lat, lon, api_key=key,
-                timeout_s=OWM_TIMEOUT_S, max_retries=OWM_RETRIES,
+                lat,
+                lon,
+                api_key=key.strip(),
+                timeout_s=OWM_TIMEOUT_S,
+                max_retries=OWM_RETRIES,
             )
         except Exception as exc:
             logger.warning(
-                "OWM backup failed for (%s, %s): %s.",
-                lat, lon, exc,
+                "OWM primary failed for (%s, %s): %s. Falling back to Open-Meteo.",
+                lat,
+                lon,
+                exc,
             )
-
     return fetch_open_meteo_weather(lat, lon, timeout_s=timeout_s)
-
 # ---------------------------------------------------------------------------
 # 3. Real INCOIS PFZ Feature Loader
 # ---------------------------------------------------------------------------
