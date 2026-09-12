@@ -384,7 +384,16 @@ export default function MapInner({
     return null;
   }, [selectedFeature, highlightFeatures]);
 
-  // Origin point for navigation line (activeLocation or center)
+  // Highlighted feature object and properties (T9 #125)
+  const highlightedFeature = useMemo(() => {
+    if (selectedFeature) return selectedFeature;
+    if (highlightFeatures && highlightFeatures.length > 0) return highlightFeatures[0];
+    return null;
+  }, [selectedFeature, highlightFeatures]);
+
+  const hlProps = useMemo(() => {
+    return highlightedFeature?.properties || {};
+  }, [highlightedFeature]);
   const navOrigin = useMemo<[number, number]>(() => {
     if (activeLocation && typeof activeLocation.lat === 'number' && typeof activeLocation.lon === 'number') {
       return [activeLocation.lat, activeLocation.lon];
@@ -701,12 +710,82 @@ export default function MapInner({
                 fillColor: '#06b6d4',
                 fillOpacity: 0.95,
               }}
+              ref={(markerRef) => {
+                if (markerRef && highlightFeatures && highlightFeatures.length > 0) {
+                  setTimeout(() => {
+                    try {
+                      markerRef.openPopup();
+                    } catch (_e) {
+                      // ignore if component unmounted
+                    }
+                  }, 300);
+                }
+              }}
             >
               <Tooltip permanent direction="top" offset={[0, -10]}>
                 <span className="text-xs font-bold text-cyan-300">
                   Target Fishing Zone
                 </span>
               </Tooltip>
+              <Popup>
+                <div className="text-xs text-slate-100 min-w-[210px] p-1 font-sans">
+                  <div className="flex items-center justify-between border-b border-slate-700 pb-1 mb-2">
+                    <span className="font-bold text-sm text-cyan-300">
+                      {hlProps.place || hlProps.name || hlProps.zone_id || 'Target Fishing Zone'}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      {hlProps.suitability || 'HIGH'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-slate-300">
+                    <div>
+                      <span className="text-slate-400">Sector:</span>{' '}
+                      <span className="text-white font-medium">
+                        {hlProps.sector_name || hlProps.sector || 'N/A'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Bearing:</span>{' '}
+                      <span className="text-white font-medium">
+                        {hlProps.bearing ? `${hlProps.bearing}°` : (navMetrics ? `${navMetrics.bearingDeg}° (${navMetrics.compass})` : 'N/A')}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Distance:</span>{' '}
+                      <span className="text-white font-medium">
+                        {hlProps.distance || hlProps.distance_km || (navMetrics ? `${navMetrics.distKm} km` : '25 km')}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Depth:</span>{' '}
+                      <span className="text-white font-medium">
+                        {hlProps.depth || hlProps.depth_m || '40 m'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 pt-1.5 border-t border-slate-800 text-[10px] text-slate-400 flex items-center justify-between">
+                    <span>Citation:</span>
+                    <span className="text-cyan-200 font-mono">
+                      {hlProps.citation || hlProps.source || 'INCOIS TextData'}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (highlightedFeature) {
+                        setSelectedFeature(highlightedFeature);
+                        onSelectZone?.(highlightedFeature);
+                      }
+                    }}
+                    className="mt-2.5 w-full py-1 px-2.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition-colors shadow flex items-center justify-center gap-1.5"
+                  >
+                    <span>🎯</span> Select Zone
+                  </button>
+                </div>
+              </Popup>
             </CircleMarker>
 
             {/* Navigation Line connecting origin (userLocation/center) to target.
