@@ -74,8 +74,15 @@ export const HomeScreen: React.FC = () => {
     themeMode,
     t,
     activeRoute,
+    mapFocusFeature,
+    mapFocusNonce,
   } = useApp();
   const isLight = themeMode === 'light';
+
+  const highlightFeatures = useMemo(() => {
+    if (mapFocusFeature && mapFocusNonce > 0) return [mapFocusFeature];
+    return undefined;
+  }, [mapFocusFeature, mapFocusNonce]);
 
   const [conditions, setConditions] = useState<LiveConditions | null>(null);
   const [featuredPFZ, setFeaturedPFZ] = useState<PFZItem | null>(null);
@@ -372,13 +379,14 @@ export const HomeScreen: React.FC = () => {
           data-testid="home-map-preview"
           className="h-[380px] sm:h-[440px] rounded-2xl overflow-hidden border border-cyan-500/20"
         >
-              <MapView
-                center={[userLocation.lat, userLocation.lon]}
-                zoom={8}
-                userLocation={{ lat: userLocation.lat, lon: userLocation.lon }}
-                route={activeRoute}
-                onSelectZone={(feature) => openPFZDetail(feature)}
-              />
+          <MapView
+            center={[userLocation.lat, userLocation.lon]}
+            zoom={8}
+            highlightFeatures={highlightFeatures}
+            userLocation={{ lat: userLocation.lat, lon: userLocation.lon }}
+            route={activeRoute}
+            onSelectZone={(feature) => openPFZDetail(feature)}
+          />
         </div>
       </div>
 
