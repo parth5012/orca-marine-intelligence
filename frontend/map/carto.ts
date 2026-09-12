@@ -11,9 +11,10 @@ export type BasemapStyle =
   | 'light_all'
   | 'esri_ocean'
   | 'esri_dark'
-  | 'osm';
+  | 'osm'
+  | 'bhuvan';
 
-export type BasemapProvider = 'carto' | 'esri' | 'osm';
+export type BasemapProvider = 'carto' | 'esri' | 'osm' | 'bhuvan';
 
 export interface BasemapOption {
   id: BasemapStyle;
@@ -66,6 +67,13 @@ export const BASEMAP_OPTIONS: BasemapOption[] = [
     description: 'Standard community open cartography fallback',
     provider: 'osm',
   },
+  {
+    id: 'bhuvan',
+    label: 'Bhuvan Satellite',
+    icon: '🛰️',
+    description: 'ISRO Indian Space Research Organisation satellite imagery (WMS)',
+    provider: 'bhuvan',
+  },
 ];
 
 export const CARTO_ATTRIBUTION =
@@ -79,6 +87,9 @@ export const ESRI_OCEAN_ATTRIBUTION =
 
 export const ESRI_DARK_ATTRIBUTION =
   '&copy; <a href="https://www.esri.com/" target="_blank" rel="noopener noreferrer">Esri</a> &mdash; Esri, DeLorme, NAVTEQ';
+
+export const BHUVAN_ATTRIBUTION =
+  '&copy; <a href="https://bhuvan.nrsc.gov.in/" target="_blank" rel="noopener noreferrer">ISRO / NRSC Bhuvan</a>';
 
 /**
  * Normalizes a user-supplied basemap alias to a canonical BasemapStyle.
@@ -108,6 +119,11 @@ export function normalizeBasemapStyle(
     esri_dark_gray: 'esri_dark',
     osm: 'osm',
     openstreetmap: 'osm',
+    bhuvan: 'bhuvan',
+    bhuvan_satellite: 'bhuvan',
+    bhuvan_wms: 'bhuvan',
+    isro: 'bhuvan',
+    isro_satellite: 'bhuvan',
   };
   return table[alias];
 }
@@ -117,6 +133,8 @@ export function normalizeBasemapStyle(
  */
 export function getBasemapAttribution(style: BasemapStyle): string {
   switch (style) {
+    case 'bhuvan':
+      return BHUVAN_ATTRIBUTION;
     case 'esri_ocean':
       return ESRI_OCEAN_ATTRIBUTION;
     case 'esri_dark':
@@ -137,6 +155,8 @@ export function getBasemapAttribution(style: BasemapStyle): string {
  */
 export function getBasemapMaxNativeZoom(style: BasemapStyle): number | undefined {
   switch (style) {
+    case 'bhuvan':
+      return 18;
     case 'esri_ocean':
       return 13;
     case 'esri_dark':
@@ -147,11 +167,12 @@ export function getBasemapMaxNativeZoom(style: BasemapStyle): number | undefined
 }
 
 /**
- * Returns max display zoom supported for the basemap style.
+ * Returns max display zoom supported by the basemap style.
  * 18 for Esri endpoints, 19 for CARTO and OpenStreetMap.
  */
 export function getBasemapMaxZoom(style: BasemapStyle): number {
   switch (style) {
+    case 'bhuvan':
     case 'esri_ocean':
     case 'esri_dark':
       return 18;
@@ -165,15 +186,19 @@ export function getBasemapMaxZoom(style: BasemapStyle): number {
 }
 
 /**
- * Builds tile URL for CARTO, Esri MapServer, or OSM raster tiles.
- * Validates style to prevent unexpected path interpolation.
- * Appends ?api_key=${apiKey} if valid non-placeholder API key provided for CARTO.
+ * Builds the tile URL for CARTO, Esri MapServer, OSM, or ISRO Bhuvan raster tiles.
+ * Validates the style to prevent unexpected path interpolation.
+ * Appends ?api_key=${apiKey} if a valid non-placeholder API key is provided for CARTO.
  */
 export function getBasemapTileUrl(
   style: BasemapStyle = 'dark_all',
   apiKey?: string
 ): string {
   const safeStyle = normalizeBasemapStyle(style) || 'dark_all';
+
+  if (safeStyle === 'bhuvan') {
+    return 'https://bhuvan-vec1.nrsc.gov.in/bhuvan/gwc/service/wmts/?service=WMTS&request=GetTile&version=1.0.0&layer=bhuvan:india3&style=default&tilematrixset=EPSG:900913&tilematrix=EPSG:900913:{z}&tilerow={y}&tilecol={x}&format=image/jpeg';
+  }
 
   if (safeStyle === 'osm') {
     return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';

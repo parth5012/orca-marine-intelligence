@@ -1,19 +1,19 @@
 /**
- * LayerControl (UI-MIG-T5).
+ * LayerControl (UI-MIG-T5 & T12 #128).
  *
  * Owner: M-D (Frontend & Maps)
  * Module: frontend/map/LayerControl.tsx
  *
- * Visual copy of the source design-system `LayerControl` (glass-panel card,
+ * Visual copy of source design-system `LayerControl` (glass-panel card,
  * pill grid, semantic legend) rewired to LIVE state:
- * - Uses AppContext.activeLayers/toggleLayer when a provider exists
+ * - Uses AppContext.activeLayers/toggleLayer when provider exists
  *   (AppContext-compatible per ticket); otherwise falls back to
- *   props.activeLayers/props.onToggle, otherwise an internal default bag.
+ *   props.activeLayers/props.onToggle, otherwise internal default bag.
  * - Every pill keeps `id="layer-toggle-{key}"` + `data-testid` + `aria-label`
- *   + `aria-pressed` so the 5 old keys (pfz/eez/mpa/imbl/weather) keep their
- *   exact testids and the 8 new visual-only keys gain `layer-toggle-*` too.
- * - No Leaflet import here (stays out of ssr:false chunks).
- * - No mock data, no new backend (see layers.ts LAYER_SOURCE_MAPPING).
+ *   + `aria-pressed`. 5 old keys (pfz/eez/mpa/imbl/weather) keep
+ *   exact testids; 8 new visual-only keys gain `layer-toggle-*` too.
+ * - Includes Base Cartography selector with Bhuvan Satellite (ISRO),
+ *   CARTO Dark Matter, Esri Ocean, and OpenStreetMap (T12 #128).
  */
 
 'use client';
@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { useApp, DEFAULT_ACTIVE_LAYERS } from '@/context/AppContext';
 import type { MapLayerKey } from '@/context/AppContext';
+import type { BasemapStyle } from './carto';
 
 interface LayerItem {
   key: MapLayerKey;
@@ -64,6 +65,8 @@ const LAYER_ITEMS: LayerItem[] = [
 export interface LayerControlProps {
   activeLayers?: Partial<Record<MapLayerKey, boolean>>;
   onToggle?: (key: MapLayerKey) => void;
+  basemapStyle?: BasemapStyle;
+  onSelectBasemap?: (style: BasemapStyle) => void;
 }
 
 function useLayerState(props: LayerControlProps) {
@@ -73,9 +76,11 @@ function useLayerState(props: LayerControlProps) {
   } catch {
     ctx = null;
   }
-  const [internal, setInternal] = useState<Record<MapLayerKey, boolean>>(
-    () => ({ ...DEFAULT_ACTIVE_LAYERS, ...props.activeLayers })
-  );
+
+  const [internal, setInternal] = useState<Record<MapLayerKey, boolean>>({
+    ...DEFAULT_ACTIVE_LAYERS,
+    ...props.activeLayers,
+  });
 
   if (ctx && ctx.activeLayers && !props.activeLayers && !props.onToggle) {
     return {
@@ -83,6 +88,7 @@ function useLayerState(props: LayerControlProps) {
       toggle: ctx.toggleLayer,
     };
   }
+
   if (props.activeLayers || props.onToggle) {
     return {
       active: { ...DEFAULT_ACTIVE_LAYERS, ...props.activeLayers },
@@ -92,10 +98,12 @@ function useLayerState(props: LayerControlProps) {
       },
     };
   }
+
   return {
     active: internal,
-    toggle: (key: MapLayerKey) =>
-      setInternal((prev) => ({ ...prev, [key]: !prev[key] })),
+    toggle: (key: MapLayerKey) => {
+      setInternal((prev) => ({ ...prev, [key]: !prev[key] }));
+    },
   };
 }
 
@@ -156,6 +164,90 @@ export const LayerControl: React.FC<LayerControlProps> = (props) => {
             </button>
           );
         })}
+      </div>
+
+      {/* Base Cartography Selector (T12 #128) */}
+      <div className="mt-4 pt-3 border-t border-slate-800">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-slate-400 font-mono text-[11px] uppercase tracking-wider">
+            Base Cartography
+          </span>
+          <span className="text-[10px] text-cyan-400 font-mono">ISRO Bhuvan Available</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <button
+            type="button"
+            id="basemap-option-bhuvan"
+            data-testid="basemap-option-bhuvan"
+            aria-label="Select Bhuvan Satellite Base Layer"
+            onClick={() => props.onSelectBasemap?.('bhuvan')}
+            className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
+              props.basemapStyle === 'bhuvan'
+                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
+                : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+            }`}
+          >
+            <span className="text-lg">🛰️</span>
+            <div className="overflow-hidden">
+              <div className="font-semibold text-xs leading-snug truncate">Bhuvan Satellite</div>
+              <div className="text-[10px] text-slate-400 leading-tight truncate">ISRO Satellite (WMS)</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            id="basemap-option-dark_all"
+            data-testid="basemap-option-dark_all"
+            aria-label="Select CARTO Dark Matter Base Layer"
+            onClick={() => props.onSelectBasemap?.('dark_all')}
+            className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
+              props.basemapStyle === 'dark_all' || !props.basemapStyle
+                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
+                : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+            }`}
+          >
+            <span className="text-lg">🌙</span>
+            <div className="overflow-hidden">
+              <div className="font-semibold text-xs leading-snug truncate">CARTO Dark</div>
+              <div className="text-[10px] text-slate-400 leading-tight truncate">Tactical Night Radar</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            id="basemap-option-esri_ocean"
+            data-testid="basemap-option-esri_ocean"
+            aria-label="Select Esri Ocean Base Layer"
+            onClick={() => props.onSelectBasemap?.('esri_ocean')}
+            className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
+              props.basemapStyle === 'esri_ocean'
+                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
+                : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+            }`}
+          >
+            <span className="text-lg">🌊</span>
+            <div className="overflow-hidden">
+              <div className="font-semibold text-xs leading-snug truncate">Esri Ocean</div>
+              <div className="text-[10px] text-slate-400 leading-tight truncate">Bathymetric Relief</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            id="basemap-option-osm"
+            data-testid="basemap-option-osm"
+            aria-label="Select OpenStreetMap Base Layer"
+            onClick={() => props.onSelectBasemap?.('osm')}
+            className={`flex items-center gap-2 p-2 rounded-xl border text-left transition-all ${
+              props.basemapStyle === 'osm'
+                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-md shadow-cyan-950/40'
+                : 'bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+            }`}
+          >
+            <span className="text-lg">🌐</span>
+            <div className="overflow-hidden">
+              <div className="font-semibold text-xs leading-snug truncate">OpenStreetMap</div>
+              <div className="text-[10px] text-slate-400 leading-tight truncate">Standard Cartography</div>
+            </div>
+          </button>
+        </div>
       </div>
 
       <div className="mt-4 pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between text-xs font-semibold gap-2">
