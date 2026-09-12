@@ -576,6 +576,30 @@ class TestDangerAgent:
         assert results[0]["lat"] == pytest.approx(9.93)
         assert results[1]["lat"] == pytest.approx(10.0)
 
+    @pytest.mark.asyncio
+    async def test_lightning_alert_fetch_and_warning(self):
+        from backend.agents.subagents import danger_agent
+
+        # Test live or proxy lightning alert
+        alert = await danger_agent.fetch_imd_lightning_alert(lat=9.93, lon=76.26)
+        assert alert is not None
+        assert "lightning_risk" in alert
+        assert alert["lightning_risk"] in ("low", "moderate", "high")
+
+        # Mock high lightning risk triggers danger warning
+        mock_high_alert = {
+            "active": True,
+            "lightning_risk": "high",
+            "description": "Severe convective storm with active lightning strikes",
+            "olr_wm2": 165.0,
+            "distance_km": 5.0,
+        }
+        with patch.object(danger_agent, "fetch_imd_lightning_alert", return_value=mock_high_alert):
+            res = await danger_agent.check_safety(lat=9.93, lon=76.26)
+            assert res["status"] == "danger"
+            assert res["lightning_risk"] == "high"
+            assert any("Lightning warning" in w for w in res["warnings"])
+
 
 # ---------------------------------------------------------------------------
 # Combiner — scoring formula + benchmark case
@@ -732,6 +756,24 @@ class TestCombiner:
         assert "outside Indian EEZ" not in result["explanation"]
         assert "DO NOT SAIL" not in result["explanation"]
         assert "unverified" in result["explanation"]
+
+    def test_lightning_advisory_in_combiner(self):
+        from backend.agents.combiner import combine_and_rank
+
+        fish = [{"zone_id": "z1", "place": "Chillickal", "sector": "KERALA", "lat": 9.79, "lon": 75.81, "distance_from_user_km": 10.0}]
+        sea = [{"zone_id": "z1", "wave_height_m": 0.8}]
+        weather = [{"zone_id": "z1", "wind_kt": 8.0}]
+        danger = [{
+            "zone_id": "z1",
+            "inside_eez": True,
+            "inside_mpa": False,
+            "lightning_risk": "high",
+            "lightning_description": "Severe convective activity and active lightning detected",
+        }]
+        result = combine_and_rank(fish, sea, weather, danger, {"lat": 9.93, "lon": 76.26})
+        assert "Lightning advisory" in result["explanation"]
+        assert "Severe convective" in result["explanation"]
+        assert result["best"]["lightning_risk"] == "high"
 
 
 # ---------------------------------------------------------------------------
