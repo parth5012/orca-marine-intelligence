@@ -11,6 +11,7 @@ Wayfinder T3 (map #92): GET /api/pfz/history deleted per human grill
 decision (post-MVP slider deferred) — today endpoint only.
 """
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -136,32 +137,35 @@ async def get_pfz_history(
     """
     now = datetime.now(timezone.utc)
     target_sec = sector.strip().upper() if sector else None
-    history_entries: List[Dict[str, Any]] = []
 
-    for day_offset in range(days):
-        day_dt = now - timedelta(days=day_offset)
-        date_str = day_dt.strftime("%Y-%m-%d")
-        cache_key = f"pfz:history:{date_str}"
+    # Fetch daily snapshots with bounded concurrency
+    date_strs = [(now - timedelta(days=day_offset)).strftime("%Y-%m-%d") for day_offset in range(days)]
+    cache_keys = [f"pfz:history:{d}" for d in date_strs]
 
+    async def _fetch_day(offset: int, key: str) -> Optional[Dict[str, Any]]:
         day_data = None
         try:
-            day_data = await get_json(cache_key)
+            day_data = await get_json(key)
         except Exception:
             pass
-
-        # If today and not yet cached in history, fall back to pfz:today
-        if not day_data and day_offset == 0:
+        if not day_data and offset == 0:
             try:
                 day_data = await get_json("pfz:today")
             except Exception:
                 pass
-
-        # If still None for today, try live ingest
-        if not day_data and day_offset == 0:
+        if not day_data and offset == 0:
             try:
                 day_data = await ingest_textdata()
             except Exception:
                 pass
+        return day_data
+
+    day_results = await asyncio.gather(*[_fetch_day(i, k) for i, k in enumerate(cache_keys)], return_exceptions=True)
+    history_entries: List[Dict[str, Any]] = []
+
+    for day_offset, (date_str, day_data) in enumerate(zip(date_strs, day_results)):
+        if isinstance(day_data, Exception) or not isinstance(day_data, dict):
+            day_data = None
 
         feats = day_data.get("features", []) if day_data else []
         if target_sec:

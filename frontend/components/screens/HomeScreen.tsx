@@ -233,7 +233,7 @@ export const HomeScreen: React.FC = () => {
         items.sort((a, b) => a.distanceKm - b.distanceKm);
         const nearest = items[0];
 
-        setActiveZonesCount(features.length);
+        setActiveZonesCount(items.length);
         setNearestPfzDist(nearest.distanceKm);
         setNearestPfzBearing(nearest.bearing);
         setNearestPfzName(nearest.name);
@@ -448,7 +448,7 @@ export const HomeScreen: React.FC = () => {
         }
         avgSstC={avgSst ?? conditions?.tempC ?? null}
         avgChlorophyllMgM3={avgChl}
-        isLoading={pfzLoading && conditions === null}
+        isLoading={pfzLoading || conditions === null}
         isGhostDemo={pfzFallback}
       />
 
