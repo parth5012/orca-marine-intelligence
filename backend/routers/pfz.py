@@ -125,6 +125,85 @@ async def get_today_pfz(
     }
 
 
+@router.get("/pfz/history")
+async def get_pfz_history(
+    days: int = Query(7, ge=1, le=30, description="Sliding window size in days (1-30, default 7)"),
+    sector: Optional[str] = Query(None, description="Optional sector code filter (e.g. SEC005)"),
+) -> Dict[str, Any]:
+    """
+    Return 7-day sliding window of historical PFZ snapshots.
+    Fetches daily cached documents from Redis (pfz:history:{YYYY-MM-DD}) or fallback.
+    """
+    now = datetime.now(timezone.utc)
+    target_sec = sector.strip().upper() if sector else None
+    history_entries: List[Dict[str, Any]] = []
+
+    for day_offset in range(days):
+        day_dt = now - timedelta(days=day_offset)
+        date_str = day_dt.strftime("%Y-%m-%d")
+        cache_key = f"pfz:history:{date_str}"
+
+        day_data = None
+        try:
+            day_data = await get_json(cache_key)
+        except Exception:
+            pass
+
+        # If today and not yet cached in history, fall back to pfz:today
+        if not day_data and day_offset == 0:
+            try:
+                day_data = await get_json("pfz:today")
+            except Exception:
+                pass
+
+        # If still None for today, try live ingest
+        if not day_data and day_offset == 0:
+            try:
+                day_data = await ingest_textdata()
+            except Exception:
+                pass
+
+        feats = day_data.get("features", []) if day_data else []
+        if target_sec:
+            feats = [
+                f for f in feats
+                if f.get("properties", {}).get("sector", "").upper() == target_sec
+                or f.get("properties", {}).get("sector_name", "").upper() == target_sec
+            ]
+
+        # Calculate averages for this day
+        sst_vals = [
+            float(f["properties"]["sst_c"])
+            for f in feats
+            if f.get("properties", {}).get("sst_c") is not None
+        ]
+        chl_vals = [
+            float(f["properties"]["chlorophyll_mg_m3"])
+            for f in feats
+            if f.get("properties", {}).get("chlorophyll_mg_m3") is not None
+        ]
+
+        avg_sst = round(sum(sst_vals) / len(sst_vals), 1) if sst_vals else None
+        avg_chl = round(sum(chl_vals) / len(chl_vals), 2) if chl_vals else None
+        unique_sectors = len({f.get("properties", {}).get("sector") for f in feats if f.get("properties", {}).get("sector")})
+
+        history_entries.append({
+            "date": date_str,
+            "count": len(feats),
+            "sector_count": unique_sectors,
+            "avg_sst_c": avg_sst,
+            "avg_chlorophyll_mg_m3": avg_chl,
+            "features": feats,
+        })
+
+    return {
+        "days": days,
+        "sector": sector,
+        "total_days_available": len(history_entries),
+        "history": history_entries,
+    }
+
+
 @router.post("/pfz/refresh")
 async def refresh_pfz(
     authorization: Optional[str] = Header(None, description="Bearer <CRON_SECRET>"),

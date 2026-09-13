@@ -743,13 +743,14 @@ def test_isro_r6_vernacular_voice_and_language_support(client: TestClient):
     mock_resp.status_code = 200
     mock_resp.json.return_value = {"text": "എവിടെ മത്സ്യം? (Where to fish?)"}
 
-    with patch("httpx.AsyncClient.post", return_value=mock_resp):
-        v_resp = client.post("/api/chat/voice", files=files, data={"language": "ml"})
-        assert v_resp.status_code == 200
-        v_data = v_resp.json()
-        assert "transcription" in v_data
-        assert "session_id" in v_data
-        assert len(v_data["transcription"]) > 0
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test_groq_key"}):
+        with patch("httpx.AsyncClient.post", return_value=mock_resp):
+            v_resp = client.post("/api/chat/voice", files=files, data={"language": "ml"})
+            assert v_resp.status_code == 200
+            v_data = v_resp.json()
+            assert "transcription" in v_data
+            assert "session_id" in v_data
+            assert len(v_data["transcription"]) > 0
 
     # 2. Marine Glossary Masking: preserving nautical metrics across vernacular translations
     masker = lm.MarineGlossaryMasker()

@@ -436,11 +436,13 @@ async def ingest_textdata(
         except Exception as db_err:
             logger.debug("PostGIS upsert skipped (offline/disconnected): %s", db_err)
 
-    # 3. Cache in Redis (6-hour TTL)
+    # 3. Cache in Redis (6-hour TTL for today, 7-day TTL for history sliding window)
     try:
         from backend.db.redis import set_json
 
         await set_json("pfz:today", geojson_doc, ttl_seconds=21600)
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        await set_json(f"pfz:history:{today_str}", geojson_doc, ttl_seconds=604800)
         artifacts.append("redis:pfz:today")
     except Exception as redis_err:
         logger.debug("Redis cache set skipped: %s", redis_err)
