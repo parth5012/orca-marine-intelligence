@@ -37,13 +37,15 @@ export type { PFZItem } from '@/lib/pfz';
 interface PFZCardProps {
   pfz: PFZItem;
   isFeatured?: boolean;
+  isGhostDemo?: boolean;
 }
 
 export const PFZRecommendationCard: React.FC<PFZCardProps> = ({
   pfz,
   isFeatured = false,
+  isGhostDemo = false,
 }) => {
-  const { openPFZDetail, startRouteNavigation, viewOnMap, themeMode } =
+  const { openPFZDetail, startRouteNavigation, viewOnMap, setActiveTab, themeMode } =
     useApp();
   const isLight = themeMode === 'light';
 
@@ -51,15 +53,17 @@ export const PFZRecommendationCard: React.FC<PFZCardProps> = ({
     <motion.div
       whileHover={{ y: -3 }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-      data-testid="pfz-featured-card"
+      data-testid={isGhostDemo ? 'pfz-ghost-card' : 'pfz-featured-card'}
       className={`rounded-2xl p-5 border transition-all ${
-        isLight
+        isGhostDemo
+          ? 'opacity-60 border-dashed border-amber-500/70 dark:border-amber-400/60 bg-amber-500/5 dark:bg-amber-950/10 shadow-sm'
+          : isLight
           ? isFeatured
             ? 'border-sky-300 bg-white shadow-lg shadow-sky-900/5'
             : 'border-slate-200 bg-white shadow-sm'
           : isFeatured
-            ? 'glass-panel glass-card-interactive border-cyan-500/50 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/40 shadow-xl shadow-cyan-950/60'
-            : 'glass-panel glass-card-interactive border-slate-800 bg-slate-950/80'
+          ? 'glass-panel glass-card-interactive border-cyan-500/50 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/40 shadow-xl shadow-cyan-950/60'
+          : 'glass-panel glass-card-interactive border-slate-800 bg-slate-950/80'
       }`}
     >
       {/* Top Header Row */}
@@ -70,13 +74,23 @@ export const PFZRecommendationCard: React.FC<PFZCardProps> = ({
           <div className="flex items-center gap-2">
             <span
               className={`px-2.5 py-0.5 rounded-md font-mono text-xs font-bold border ${
-                isLight
+                isGhostDemo
+                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-700'
+                  : isLight
                   ? 'bg-sky-100 text-sky-800 border-sky-200'
                   : 'bg-cyan-950 text-cyan-300 border-cyan-800'
               }`}
             >
               {pfz.code}
             </span>
+            {isGhostDemo && (
+              <span
+                data-testid="pfz-demo-badge"
+                className="px-2 py-0.5 rounded font-bold text-[10px] tracking-wider uppercase bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40"
+              >
+                DEMO
+              </span>
+            )}
             <h3
               className={`font-extrabold text-base sm:text-lg ${isLight ? 'text-slate-900' : 'text-white'}`}
             >
@@ -208,43 +222,72 @@ export const PFZRecommendationCard: React.FC<PFZCardProps> = ({
       <div
         className={`flex flex-wrap items-center justify-between gap-2 pt-3 border-t ${isLight ? 'border-slate-100' : 'border-slate-800'}`}
       >
-        <button
-          type="button"
-          onClick={() => viewOnMap(pfz)}
-          data-testid="pfz-card-view-map"
-          className={`flex-1 min-w-[110px] px-3 py-2 rounded-xl border transition-colors text-xs font-bold flex items-center justify-center gap-1.5 ${
-            isLight
-              ? 'bg-cyan-50 border-cyan-200 text-cyan-900 hover:bg-cyan-100'
-              : 'bg-cyan-950/80 border-cyan-800 text-cyan-300 hover:bg-cyan-900/60'
-          }`}
-        >
-          <MapPin className="w-4 h-4 text-cyan-600 shrink-0" />
-          <span>View on Map</span>
-        </button>
+        {isGhostDemo ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setActiveTab('map')}
+              data-testid="pfz-ghost-explore-map"
+              className="flex-1 min-w-[130px] px-3 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 active:scale-95"
+            >
+              <Compass className="w-4 h-4 text-white shrink-0" />
+              <span>Explore Map</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('map')}
+              data-testid="pfz-ghost-save-zone"
+              className={`flex-1 min-w-[130px] px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                isLight
+                  ? 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
+                  : 'bg-amber-950/40 border-amber-700/60 text-amber-300 hover:bg-amber-900/40'
+              }`}
+            >
+              <Navigation className="w-4 h-4 text-amber-500 shrink-0" />
+              <span>Save first zone</span>
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => viewOnMap(pfz)}
+              data-testid="pfz-card-view-map"
+              className={`flex-1 min-w-[110px] px-3 py-2 rounded-xl border transition-colors text-xs font-bold flex items-center justify-center gap-1.5 ${
+                isLight
+                  ? 'bg-cyan-50 border-cyan-200 text-cyan-900 hover:bg-cyan-100'
+                  : 'bg-cyan-950/80 border-cyan-800 text-cyan-300 hover:bg-cyan-900/60'
+              }`}
+            >
+              <MapPin className="w-4 h-4 text-cyan-600 shrink-0" />
+              <span>View Map</span>
+            </button>
 
-        <button
-          type="button"
-          onClick={() => startRouteNavigation(pfz)}
-          data-testid="pfz-card-safe-route"
-          className="flex-1 min-w-[110px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 text-white text-xs font-extrabold shadow-md hover:scale-[1.02] transition-transform flex items-center justify-center gap-1.5"
-        >
-          <Navigation className="w-4 h-4 fill-white shrink-0" />
-          <span>Safe Route</span>
-        </button>
+            <button
+              type="button"
+              onClick={() => startRouteNavigation(pfz)}
+              data-testid="pfz-card-safe-route"
+              className="flex-1 min-w-[110px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 text-white text-xs font-extrabold shadow-md hover:scale-[1.02] transition-transform flex items-center justify-center gap-1.5"
+            >
+              <Navigation className="w-4 h-4 fill-white shrink-0" />
+              <span>Safe Route</span>
+            </button>
 
-        <button
-          type="button"
-          onClick={() => openPFZDetail(pfz)}
-          data-testid="pfz-card-why"
-          className={`flex-1 min-w-[150px] px-3 py-2 rounded-xl border transition-colors text-xs font-bold flex items-center justify-center gap-1.5 ${
-            isLight
-              ? 'bg-white border-slate-300 text-slate-800 hover:bg-slate-50'
-              : 'bg-slate-900 border-slate-800 text-cyan-200 hover:text-white'
-          }`}
-        >
-          <Eye className="w-4 h-4 text-cyan-600 shrink-0" />
-          <span>Why this recommendation?</span>
-        </button>
+            <button
+              type="button"
+              onClick={() => openPFZDetail(pfz)}
+              data-testid="pfz-card-why"
+              className={`flex-1 min-w-[150px] px-3 py-2 rounded-xl border transition-colors text-xs font-bold flex items-center justify-center gap-1.5 ${
+                isLight
+                  ? 'bg-white border-slate-300 text-slate-800 hover:bg-slate-50'
+                  : 'bg-slate-900 border-slate-800 text-cyan-200 hover:text-white'
+              }`}
+            >
+              <Eye className="w-4 h-4 text-cyan-600 shrink-0" />
+              <span>Why recommendation?</span>
+            </button>
+          </>
+        )}
       </div>
     </motion.div>
   );

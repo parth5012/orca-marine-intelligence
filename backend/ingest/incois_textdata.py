@@ -175,31 +175,31 @@ def parse_incois_table(content: str, sector: str, sector_name: str) -> List[Dict
                         if m:
                             bearing = int(m.group())
 
-                    feat = {
-                        "type": "Feature",
-                        "geometry": {
-                            "type": "Point",
-                            "coordinates": [round(lon, 5), round(lat, 5)],
+                        feat = {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [round(lon, 5), round(lat, 5)],
+                            },
+                            "properties": {
+                                "place": place,
+                                "sector": sector,
+                                "sector_name": sector_name,
+                                "dir": direction,
+                                "direction": direction,
+                                "bearing": bearing,
+                                "distance": distance,
+                                "depth": depth,
+                                "lat_dms": lat_dms,
+                                "lon_dms": lon_dms,
+                        "suitability": "high",
+                        "timestamp": now_iso,
+                            "source": "incois_textdata",
+                            "zone_id": f"{sector}_{place.replace(' ', '_')}_{len(features):03d}",
                         },
-                        "properties": {
-                            "place": place,
-                            "sector": sector,
-                            "sector_name": sector_name,
-                            "dir": direction,
-                            "direction": direction,
-                            "bearing": bearing,
-                            "distance": distance,
-                            "depth": depth,
-                            "lat_dms": lat_dms,
-                            "lon_dms": lon_dms,
-                    "suitability": "high",
-                    "timestamp": now_iso,
-                        "source": "incois_textdata",
-                        "zone_id": f"{sector}_{place.replace(' ', '_')}_{len(features):03d}",
-                    },
-                }
+                    }
 
-                features.append(feat)
+                    features.append(feat)
         except Exception as exc:
             logger.warning("Error parsing HTML table for sector %s: %s", sector, exc)
     else:
