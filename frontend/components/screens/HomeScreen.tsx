@@ -27,17 +27,24 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '@/context/AppContext';
-import { AskOrcaInput } from '@/components/common/AskOrcaInput';
-import { ConditionCard } from '@/components/common/ConditionCard';
+import AskOrcaInput from '@/components/common/AskOrcaInput';
+import ConditionCard from '@/components/common/ConditionCard';
 import {
   PFZRecommendationCard,
 } from '@/components/cards/PFZRecommendationCard';
+import { BaseKPIGrid } from '@/components/analytics/BaseKPIGrid';
+import { KPITrends } from '@/components/analytics/KPITrends';
+import { EmptyState } from '@/components/common/EmptyState';
+import { SkeletonLoader } from '@/components/common/SkeletonLoader';
+import { SystemStatusBadge } from '@/components/common/SystemStatusBadge';
+import { KOCHI_GHOST_PFZ } from '@/lib/ghostPFZ';
 import type { PFZItem } from '@/lib/pfz';
 import {
   KT_TO_KMH,
   classifySea,
   getBackendBaseUrl,
   mapFeatureToPFZItem,
+  haversineKm,
   num,
 } from '@/lib/pfz';
 import { MapView } from '@/map';
@@ -87,6 +94,13 @@ export const HomeScreen: React.FC = () => {
   const [conditions, setConditions] = useState<LiveConditions | null>(null);
   const [featuredPFZ, setFeaturedPFZ] = useState<PFZItem | null>(null);
   const [pfzFallback, setPfzFallback] = useState<boolean>(false);
+  const [pfzLoading, setPfzLoading] = useState<boolean>(true);
+  const [activeZonesCount, setActiveZonesCount] = useState<number | null>(null);
+  const [nearestPfzDist, setNearestPfzDist] = useState<number | null>(null);
+  const [nearestPfzBearing, setNearestPfzBearing] = useState<string | undefined>(undefined);
+  const [nearestPfzName, setNearestPfzName] = useState<string | undefined>(undefined);
+  const [avgSst, setAvgSst] = useState<number | null>(null);
+  const [avgChl, setAvgChl] = useState<number | null>(null);
 
   // Live weather telemetry (direct backend call per docs/API.md T5 rule).
   useEffect(() => {
