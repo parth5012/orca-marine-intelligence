@@ -244,7 +244,7 @@ export const PFZRecommendationCard: React.FC<PFZCardProps> = ({
               }`}
             >
               <Navigation className="w-4 h-4 text-amber-500 shrink-0" />
-              <span>Save first zone</span>
+              <span>Navigate on Map</span>
             </button>
           </>
         ) : (

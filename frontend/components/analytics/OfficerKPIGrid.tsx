@@ -189,7 +189,7 @@ export const OfficerKPIGrid: React.FC<OfficerKPIGridProps> = ({
             {data?.distress_alerts_open ?? 0}
           </div>
           <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mt-1">
-            Zero active SOS signals
+            {(data?.distress_alerts_open ?? 0) === 0 ? 'Zero active SOS signals' : `${data?.distress_alerts_open} active SOS alerts`}
           </p>
         </div>
 
@@ -210,7 +210,7 @@ export const OfficerKPIGrid: React.FC<OfficerKPIGridProps> = ({
             {data?.incois_bulletins_active ?? 14}
           </div>
           <p className="text-[11px] font-medium text-cyan-600 dark:text-cyan-400 mt-1">
-            14 sectors synchronized
+            {data?.incois_bulletins_active ?? 14} sectors synchronized
           </p>
         </div>
       </div>

@@ -51,11 +51,11 @@ export interface UseStatusPollingResult {
 }
 
 const DEFAULT_SERVICES: ServiceStatusMap = {
-  weather: true,
-  pfz: true,
-  geofence: true,
-  tiles: true,
-  chat: true,
+  weather: false,
+  pfz: false,
+  geofence: false,
+  tiles: false,
+  chat: false,
 };
 
 export function useStatusPolling(
@@ -107,6 +107,7 @@ export function useStatusPolling(
       }
     } catch (err: any) {
       setStatus('degraded');
+      setServices(DEFAULT_SERVICES);
       setError(err?.message || 'Failed to poll /api/status');
       setLastChecked(new Date());
     } finally {
