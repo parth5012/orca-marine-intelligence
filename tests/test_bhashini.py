@@ -107,7 +107,7 @@ async def test_translate_429_fallback():
 
 @pytest.mark.asyncio
 async def test_translate_5xx_retries_then_fallback():
-    """Mocked 500 x 3 -> translated=False, retry called 3x."""
+    """Mocked 500 x 4 -> translated=False, retry called 3x (4 total attempts)."""
     resp_500 = MagicMock()
     resp_500.status_code = 500
     resp_500.text = "Internal Server Error"
@@ -120,8 +120,8 @@ async def test_translate_5xx_retries_then_fallback():
                 assert res.text == "കൊച്ചി"
                 assert res.translated is False
                 assert res.cached is False
-                assert mock_post.call_count == 3
-                assert mock_sleep.call_count == 2  # Sleeps between 3 attempts: attempt 1->sleep 1s, attempt 2->sleep 2s
+                assert mock_post.call_count == 4
+                assert [call.args[0] for call in mock_sleep.await_args_list] == [1.0, 2.0, 4.0]
 
 
 @pytest.mark.asyncio
