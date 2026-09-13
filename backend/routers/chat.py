@@ -31,10 +31,12 @@ from pydantic import BaseModel, Field
 
 try:
     from backend.agents.graph import orchestrate_stream_via_graph
-    from backend.db.redis import append_message
+    from backend.core.bhashini import translate_from_english, translate_to_english
+    from backend.db.redis import append_message, get_redis_client
 except ImportError:
     from agents.graph import orchestrate_stream_via_graph  # type: ignore
-    from db.redis import append_message  # type: ignore
+    from core.bhashini import translate_from_english, translate_to_english  # type: ignore
+    from db.redis import append_message, get_redis_client  # type: ignore
 
 logger = logging.getLogger("orca.chat")
 
@@ -81,11 +83,31 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             if req.lat is not None and req.lon is not None
             else None
         )
+        user_lang = req.language or "en"
+        english_query = req.message
+        redis_client = None
+
+        if user_lang != "en":
+            try:
+                redis_client = await get_redis_client()
+            except Exception as e:
+                logger.warning("Failed to get redis client: %s", e)
+            try:
+                result = await translate_to_english(req.message, user_lang, redis_client)
+                english_query = result.text
+                if not result.translated:
+                    warning_event = {
+                        "type": "warning",
+                        "message": "Bhashini input translation unavailable — processing in original language",
+                    }
+                    yield f"event: warning\ndata: {json.dumps(warning_event)}\n\n"
+            except Exception as te:
+                logger.warning("translate_to_english failed: %s", te)
 
         try:
             async for event in orchestrate_stream_via_graph(
-                query=req.message,
-                language=req.language or "en",
+                query=english_query,
+                language=user_lang,
                 location=location,
                 session_id=session_id,
             ):
@@ -101,6 +123,27 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
                     if event.get("session_id"):
                         session_id = str(event["session_id"])
+
+                    if user_lang != "en" and full_reply:
+                        if redis_client is None:
+                            try:
+                                redis_client = await get_redis_client()
+                            except Exception:
+                                pass
+                        try:
+                            t_result = await translate_from_english(full_reply, user_lang, redis_client)
+                            if t_result.translated:
+                                event = dict(event)
+                                event["reply"] = t_result.text
+                                event["translated"] = True
+                                event["original_reply_en"] = full_reply
+                            else:
+                                event = dict(event)
+                                event["translation_warning"] = "Bhashini translation unavailable — showing English response"
+                        except Exception as ote:
+                            logger.warning("translate_from_english failed: %s", ote)
+                            event = dict(event)
+                            event["translation_warning"] = "Bhashini translation unavailable — showing English response"
 
                     await save_turn(full_reply)
 

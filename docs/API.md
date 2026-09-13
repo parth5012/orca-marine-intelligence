@@ -222,6 +222,38 @@ data: <JSON>
 
 `safety.badge` follows `backend/routers/weather.py`: `green` requires wave <1.5m and wind <15kt; `amber` covers wave 1.5-2.5m or wind 15-25kt (boundary values 1.5m, 2.5m, 15kt, 25kt are `amber`); `red` covers wave >2.5m or wind >25kt (including 26-30kt).
 
+### Language & Translation
+
+- **`language`** (string, ISO 639-1): Detected language code from the frontend (`bhashini.ts detectLanguage()`). Default: `"en"`.
+- When `language != "en"`, the backend automatically:
+  1. Translates the user query from `language` → English (Bhashini Dhruva API)
+  2. Runs all agents in English
+  3. Translates the final reply from English → `language` in the `done` SSE event
+- **Language detection** uses **offline Unicode script-block analysis** in the browser (`frontend/chat/bhashini.ts detectLanguage()`). NOT Bhashini NLP. This is intentional: zero-latency, offline-capable, and sufficient for the 10 distinct Indian scripts supported.
+- Translation results are cached in Redis for 1 hour.
+- **Fallback**: If Bhashini is unavailable, the English response is served with a `translation_warning` field in the `done` event. The SSE stream never crashes.
+
+#### SSE done event shape (with translation)
+```json
+{
+  "type": "done",
+  "reply": "ഏറ്റവും അടുത്ത PFZ സോൺ...",
+  "translated": true,
+  "original_reply_en": "The nearest PFZ zone is...",
+  "session_id": "abc123"
+}
+```
+
+#### SSE done event shape (translation fallback)
+```json
+{
+  "type": "done",
+  "reply": "The nearest PFZ zone is...",
+  "translation_warning": "Bhashini translation unavailable — showing English response",
+  "session_id": "abc123"
+}
+```
+
 **Frontend:** `useSSEChat.ts:273` posts direct to the backend, falling back to the `POST /api/chat` Next.js proxy (`:298`) when the direct fetch fails (HTTPS deployments).
 
 **Status Codes:**

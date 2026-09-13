@@ -1,5 +1,15 @@
 /**
- * Bhashini Language Service Client
+ * @module bhashini
+ *
+ * ARCHITECTURE NOTE (post Bhashini multilingual map):
+ * Language detection remains here (offline Unicode script-block analysis).
+ * Text translation is now handled by the backend (backend/core/bhashini.py)
+ * which calls the Bhashini Dhruva API server-side with Redis caching.
+ *
+ * The `translate()` function below is kept as a client-side fallback ONLY
+ * for local development when BHASHINI_API_KEY is set in the browser env.
+ * In production, do NOT call translate() from the browser — send the
+ * detected lang code in the chat request and let the backend handle it.
  *
  * Owner: M-E (Frontend Chat & App Shell) - Bhashini ULCA translate & script detection
  * Module: frontend/chat/bhashini.ts
@@ -66,6 +76,8 @@ export async function detectLanguage(text: string): Promise<DetectionResult> {
 
 /**
  * Translate text between supported languages.
+ * @deprecated In production, backend/core/bhashini.py handles translation.
+ * This function is retained as a client-side dev fallback only.
  * @param text Input text to translate
  * @param sourceLang Source language code (ISO 639-1)
  * @param targetLang Target language code (ISO 639-1)
