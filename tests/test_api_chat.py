@@ -539,3 +539,101 @@ class TestChatIntegrationEndToEnd:
             assert user_msgs[0][2] == "Fish near Kochi?"
             assert len(asst_msgs) == 1
             assert len(asst_msgs[0][2]) > 0
+
+
+class TestChatBhashiniTranslation:
+    """Tests for bidirectional Bhashini translation in POST /api/chat."""
+
+    def test_bhashini_translation_happy_path(self, client):
+        """Malayalam request translated to English on input, and reply translated to Malayalam on output."""
+        from backend.core.bhashini import TranslationResult
+
+        async def mock_translate_in(text, src, redis_client=None):
+            return TranslationResult(
+                text="Where are fishing zones near Kochi?",
+                source_lang=src,
+                target_lang="en",
+                translated=True,
+            )
+
+        async def mock_translate_out(text, tgt, redis_client=None):
+            return TranslationResult(
+                text="കൊച്ചിക്ക് സമീപമുള്ള PFZ സോണുകൾ ലഭ്യമാണ്.",
+                source_lang="en",
+                target_lang=tgt,
+                translated=True,
+            )
+
+        async def fake_graph_stream(query, language, location, session_id):
+            assert query == "Where are fishing zones near Kochi?"
+            assert language == "ml"
+            yield {"type": "token", "text": "Fishing zones available."}
+            yield {"type": "done", "reply": "Fishing zones available.", "session_id": session_id}
+
+        with patch("backend.routers.chat.translate_to_english", side_effect=mock_translate_in):
+            with patch("backend.routers.chat.translate_from_english", side_effect=mock_translate_out):
+                with patch("backend.routers.chat.orchestrate_stream_via_graph", side_effect=fake_graph_stream):
+                    resp = client.post(
+                        "/api/chat",
+                        json={
+                            "message": "കൊച്ചി അടുത്ത് മത്സ്യബന്ധന മേഖലകള് എവിടെ?",
+                            "language": "ml",
+                        },
+                    )
+
+        assert resp.status_code == 200
+        parsed = parse_sse_events(resp.text)
+        done_events = [p for p in parsed if p["event"] == "done"]
+        assert len(done_events) == 1
+        done_data = done_events[0]["data"]
+        assert done_data.get("translated") is True
+        assert done_data.get("reply") == "കൊച്ചിക്ക് സമീപമുള്ള PFZ സോണുകൾ ലഭ്യമാണ്."
+        assert done_data.get("original_reply_en") == "Fishing zones available."
+
+    def test_bhashini_translation_fallback_on_failure(self, client):
+        """When Bhashini translation is unavailable, stream remains intact with warnings and English fallback."""
+        from backend.core.bhashini import TranslationResult
+
+        async def mock_translate_in_fail(text, src, redis_client=None):
+            return TranslationResult(
+                text=text,
+                source_lang=src,
+                target_lang="en",
+                translated=False,
+            )
+
+        async def mock_translate_out_fail(text, tgt, redis_client=None):
+            return TranslationResult(
+                text=text,
+                source_lang="en",
+                target_lang=tgt,
+                translated=False,
+            )
+
+        async def fake_graph_stream(query, language, location, session_id):
+            yield {"type": "token", "text": "English reply text."}
+            yield {"type": "done", "reply": "English reply text.", "session_id": session_id}
+
+        with patch("backend.routers.chat.translate_to_english", side_effect=mock_translate_in_fail):
+            with patch("backend.routers.chat.translate_from_english", side_effect=mock_translate_out_fail):
+                with patch("backend.routers.chat.orchestrate_stream_via_graph", side_effect=fake_graph_stream):
+                    resp = client.post(
+                        "/api/chat",
+                        json={
+                            "message": "കൊച്ചി ചോദ്യം",
+                            "language": "ml",
+                        },
+                    )
+
+        assert resp.status_code == 200
+        parsed = parse_sse_events(resp.text)
+        warning_events = [p for p in parsed if p["event"] == "warning"]
+        assert len(warning_events) == 1
+        assert "Bhashini input translation unavailable" in warning_events[0]["data"]["message"]
+
+        done_events = [p for p in parsed if p["event"] == "done"]
+        assert len(done_events) == 1
+        done_data = done_events[0]["data"]
+        assert done_data.get("reply") == "English reply text."
+        assert "translation_warning" in done_data
+

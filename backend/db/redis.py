@@ -71,6 +71,14 @@ async def init_redis(redis_url: str | None = None):
     return _redis_client
 
 
+async def get_redis_client():
+    """Return the global Redis client, or None if Redis is not configured or unavailable."""
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    return await init_redis()
+
+
 async def get_json(key: str) -> dict | None:
     """Get a JSON value from Redis cache."""
     # Try real Redis first if connected

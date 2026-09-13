@@ -783,6 +783,44 @@ def test_isro_r6_vernacular_voice_and_language_support(client: TestClient):
         assert "12" in out["explanation"]
         assert "210" in out["explanation"]
 
+    # 4. Bidirectional Bhashini SSE Chat Translation
+    from backend.core.bhashini import TranslationResult
+
+    async def mock_translate_in(text, src, redis_client=None):
+        return TranslationResult(
+            text="Where are the best fishing zones near Kochi?",
+            source_lang=src,
+            target_lang="en",
+            translated=True,
+        )
+
+    async def mock_translate_out(text, tgt, redis_client=None):
+        return TranslationResult(
+            text="കൊച്ചിക്ക് സമീപമുള്ള മികച്ച മത്സ്യബന്ധന മേഖലകൾ ഇവിടെ ലഭ്യമാണ്.",
+            source_lang="en",
+            target_lang=tgt,
+            translated=True,
+        )
+
+    with patch("backend.routers.chat.translate_to_english", side_effect=mock_translate_in):
+        with patch("backend.routers.chat.translate_from_english", side_effect=mock_translate_out):
+            ml_resp = client.post(
+                "/api/chat",
+                json={
+                    "message": "കൊച്ചി അടുത്ത് മത്സ്യബന്ധന മേഖലകൾ എവിടെ?",
+                    "language": "ml",
+                    "lat": KOCHI_LAT,
+                    "lon": KOCHI_LON,
+                },
+            )
+            assert ml_resp.status_code == 200
+            parsed_events = parse_sse_events(ml_resp.text)
+            done_ev = next((p["data"] for p in parsed_events if p["event"] == "done"), None)
+            assert done_ev is not None
+            assert done_ev.get("translated") is True
+            assert done_ev.get("reply") == "കൊച്ചിക്ക് സമീപമുള്ള മികച്ച മത്സ്യബന്ധന മേഖലകൾ ഇവിടെ ലഭ്യമാണ്."
+            assert "original_reply_en" in done_ev
+
 
 @pytest.mark.isro
 def test_isro_r7_graceful_offline_degradation(client: TestClient):
