@@ -114,10 +114,10 @@ async def translate(
         "Authorization": api_key,
     }
 
-    max_retries = 3
     backoff_delays = [1.0, 2.0, 4.0]
+    max_attempts = len(backoff_delays) + 1
 
-    for attempt in range(max_retries):
+    for attempt in range(max_attempts):
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(BHASHINI_ENDPOINT, json=payload, headers=headers)
@@ -179,7 +179,7 @@ async def translate(
         except Exception as err:
             logger.warning("Unexpected error calling Bhashini on attempt %d: %s", attempt + 1, err)
 
-        if attempt < max_retries - 1:
+        if attempt < max_attempts - 1:
             await asyncio.sleep(backoff_delays[attempt])
 
     # All retries exhausted or non-retryable error
