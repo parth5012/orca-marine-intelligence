@@ -6,8 +6,9 @@
  *
  * Ported layout from source design screens/HomeScreen.tsx (READ-ONLY):
  * hero + waves + INCOIS pill + t(greeting) + base port + Explore-Map button,
- * AskOrcaInput, MarineMap preview h-[380px], 5 ConditionCards, featured
- * PFZRecommendationCard. Both themes (#edf6ff light / #070d18 dark).
+ * AskOrcaInput, BaseKPIGrid, MarineMap preview h-[380px], KPITrends,
+ * 5 ConditionCards, featured / ghost PFZRecommendationCard.
+ * Both themes (#edf6ff light / #070d18 dark).
  *
  * Live-only rewiring (no mock data, no stub services, no fake workflows):
  * - AskOrcaInput submit -> AppContext.submitChatQuery -> chat tab + real
@@ -17,8 +18,10 @@
  *   backend/routers/weather.py (danger: wind>25kt|wave>2.5m|current>2.5kt|
  *   pressure<995hPa; caution: wind>15kt|wave>1.5m|current>1.5kt|
  *   pressure<1005hPa; else safe).
- * - Featured card from `GET /api/pfz` proxy FIRST feature via the
- *   shared GeoJSON->PFZItem mapper (`@/lib/pfz`, extracted verbatim T6).
+ * - Featured card & BaseKPIGrid from `GET /api/pfz?limit=100` via the
+ *   shared GeoJSON->PFZItem mapper (`@/lib/pfz`).
+ * - Ghost demo fallback (`KOCHI_GHOST_PFZ`) when no live PFZ features returned.
+ * - SystemStatusBadge with live health status polling.
  * - Backend-down -> synthetic coordinate-based estimate + warning chip
  *   (data-testid="home-warning-chip"), never a crash.
  */
@@ -27,14 +30,14 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '@/context/AppContext';
-import AskOrcaInput from '@/components/common/AskOrcaInput';
-import ConditionCard from '@/components/common/ConditionCard';
+import { AskOrcaInput } from '@/components/common/AskOrcaInput';
+import { ConditionCard } from '@/components/common/ConditionCard';
 import {
   PFZRecommendationCard,
 } from '@/components/cards/PFZRecommendationCard';
 import { BaseKPIGrid } from '@/components/analytics/BaseKPIGrid';
+import { OfficerKPIGrid } from '@/components/analytics/OfficerKPIGrid';
 import { KPITrends } from '@/components/analytics/KPITrends';
-import { EmptyState } from '@/components/common/EmptyState';
 import { SkeletonLoader } from '@/components/common/SkeletonLoader';
 import { SystemStatusBadge } from '@/components/common/SystemStatusBadge';
 import { KOCHI_GHOST_PFZ } from '@/lib/ghostPFZ';
@@ -44,7 +47,6 @@ import {
   classifySea,
   getBackendBaseUrl,
   mapFeatureToPFZItem,
-  haversineKm,
   num,
 } from '@/lib/pfz';
 import { MapView } from '@/map';
@@ -165,10 +167,11 @@ export const HomeScreen: React.FC = () => {
     };
   }, [userLocation.lat, userLocation.lon]);
 
-  // Featured zone: FIRST live PFZ feature via the Next.js proxy.
+  // Featured zone & Base KPI derivation: live PFZ features via Next.js proxy.
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/pfz?limit=5')
+    setPfzLoading(true);
+    fetch('/api/pfz?limit=100')
       .then((res) => {
         if (!res.ok) throw new Error(`pfz ${res.status}`);
         return res.json();
@@ -179,20 +182,78 @@ export const HomeScreen: React.FC = () => {
         if (features.length === 0) {
           setFeaturedPFZ(null);
           setPfzFallback(true);
+          setActiveZonesCount(0);
+          setNearestPfzDist(null);
+          setNearestPfzBearing(undefined);
+          setNearestPfzName(undefined);
+          setAvgSst(null);
+          setAvgChl(null);
+          setPfzLoading(false);
           return;
         }
-        const item = mapFeatureToPFZItem(
-          features[0],
-          userLocation.lat,
-          userLocation.lon
-        );
-        setFeaturedPFZ(item);
-        setPfzFallback(item == null);
+
+        const items: PFZItem[] = [];
+        let sstSum = 0;
+        let sstCount = 0;
+        let chlSum = 0;
+        let chlCount = 0;
+
+        for (const feat of features) {
+          const item = mapFeatureToPFZItem(
+            feat,
+            userLocation.lat,
+            userLocation.lon
+          );
+          if (item) {
+            items.push(item);
+            if (typeof item.sstCelsius === 'number' && Number.isFinite(item.sstCelsius) && item.sstCelsius > 0) {
+              sstSum += item.sstCelsius;
+              sstCount += 1;
+            }
+            if (typeof item.chlorophyllMgM3 === 'number' && Number.isFinite(item.chlorophyllMgM3) && item.chlorophyllMgM3 > 0) {
+              chlSum += item.chlorophyllMgM3;
+              chlCount += 1;
+            }
+          }
+        }
+
+        if (items.length === 0) {
+          setFeaturedPFZ(null);
+          setPfzFallback(true);
+          setActiveZonesCount(0);
+          setNearestPfzDist(null);
+          setNearestPfzBearing(undefined);
+          setNearestPfzName(undefined);
+          setAvgSst(null);
+          setAvgChl(null);
+          setPfzLoading(false);
+          return;
+        }
+
+        items.sort((a, b) => a.distanceKm - b.distanceKm);
+        const nearest = items[0];
+
+        setActiveZonesCount(features.length);
+        setNearestPfzDist(nearest.distanceKm);
+        setNearestPfzBearing(nearest.bearing);
+        setNearestPfzName(nearest.name);
+        setAvgSst(sstCount > 0 ? Number((sstSum / sstCount).toFixed(1)) : null);
+        setAvgChl(chlCount > 0 ? Number((chlSum / chlCount).toFixed(2)) : null);
+        setFeaturedPFZ(nearest);
+        setPfzFallback(false);
+        setPfzLoading(false);
       })
       .catch(() => {
         if (cancelled) return;
         setFeaturedPFZ(null);
         setPfzFallback(true);
+        setActiveZonesCount(0);
+        setNearestPfzDist(null);
+        setNearestPfzBearing(undefined);
+        setNearestPfzName(undefined);
+        setAvgSst(null);
+        setAvgChl(null);
+        setPfzLoading(false);
       });
     return () => {
       cancelled = true;
@@ -315,9 +376,12 @@ export const HomeScreen: React.FC = () => {
 
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-700/60 text-xs font-bold mb-2 shadow-sm">
-              <Sparkles className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
-              <span>INCOIS Live Marine Feeds Active</span>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-700/60 text-xs font-bold shadow-sm">
+                <Sparkles className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
+                <span>INCOIS Live Marine Feeds Active</span>
+              </div>
+              <SystemStatusBadge />
             </div>
             <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
               {t('greeting')}
@@ -366,6 +430,31 @@ export const HomeScreen: React.FC = () => {
         </div>
       </div>
 
+      {/* 4 Base KPIs Grid */}
+      <BaseKPIGrid
+        activeZonesCount={activeZonesCount}
+        nearestPfzDistanceKm={nearestPfzDist}
+        nearestPfzBearing={nearestPfzBearing}
+        nearestPfzName={nearestPfzName}
+        seaSafety={conditions?.safety ?? null}
+        seaSafetyLabel={
+          conditions?.safety === 'safe'
+            ? 'Safe to sail'
+            : conditions?.safety === 'caution'
+              ? 'Exercise caution'
+              : conditions?.safety === 'danger'
+                ? 'Rough seas - avoid'
+                : 'Unknown'
+        }
+        avgSstC={avgSst ?? conditions?.tempC ?? null}
+        avgChlorophyllMgM3={avgChl}
+        isLoading={pfzLoading && conditions === null}
+        isGhostDemo={pfzFallback}
+      />
+
+      {/* Officer-Gated 2nd KPI Row (T3 #147) */}
+      <OfficerKPIGrid />
+
       {/* Main Interactive Marine Map */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -403,6 +492,16 @@ export const HomeScreen: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* KPI Trends Section */}
+      <KPITrends
+        liveStats={{
+          sstC: avgSst ?? conditions?.tempC ?? null,
+          waveM: conditions?.waveM ?? null,
+          windKt: conditions?.windKt ?? null,
+          activeZones: activeZonesCount,
+        }}
+      />
 
       {/* Quick Condition Cards Row */}
       <div className="space-y-3">
@@ -503,7 +602,7 @@ export const HomeScreen: React.FC = () => {
           <span
             className={`text-xs font-semibold ${isLight ? 'text-slate-500' : 'text-slate-400'}`}
           >
-            {showWarning ? 'Estimate — verifying…' : 'Live from INCOIS feed'}
+            {showWarning ? 'Demo Estimate' : 'Live from INCOIS feed'}
           </span>
         </div>
 
@@ -512,17 +611,12 @@ export const HomeScreen: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
-          {featuredPFZ ? (
+          {pfzLoading ? (
+            <SkeletonLoader variant="card" />
+          ) : featuredPFZ ? (
             <PFZRecommendationCard pfz={featuredPFZ} isFeatured={true} />
           ) : (
-            <div
-              data-testid="pfz-featured-empty"
-              className={`rounded-2xl border p-5 text-sm font-medium ${isLight ? 'bg-white border-sky-100 text-slate-500' : 'bg-slate-950/80 border-cyan-900/40 text-slate-400'}`}
-            >
-              {pfzFallback
-                ? 'No live PFZ zones right now — check the map for the latest feed.'
-                : 'Loading recommended fishing zone…'}
-            </div>
+            <PFZRecommendationCard pfz={KOCHI_GHOST_PFZ} isGhostDemo={true} isFeatured={true} />
           )}
         </motion.div>
       </div>

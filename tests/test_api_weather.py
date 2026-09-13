@@ -136,13 +136,35 @@ class TestCurrentWeatherEndpoint:
             },
         }
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = mock_owm_payload
-        mock_resp.raise_for_status.return_value = None
+        def mock_get(url, **kwargs):
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            mock_res.raise_for_status.return_value = None
+            if "openweathermap" in str(url):
+                mock_res.json.return_value = mock_owm_payload
+            else:
+                mock_res.json.return_value = {
+                    "hourly": {
+                        "time": ["2026-09-13T12:00:00+05:30"],
+                        "wave_height": [1.1],
+                        "wave_period": [6.5],
+                        "wave_direction": [180.0],
+                        "swell_wave_height": [0.8],
+                        "swell_wave_period": [6.0],
+                        "ocean_current_velocity": [0.5],
+                        "ocean_current_direction": [180.0],
+                        "wind_speed_10m": [12.0],
+                        "wind_direction_10m": [250.0],
+                        "wind_gusts_10m": [15.0],
+                        "surface_pressure": [1011.0],
+                        "temperature_2m": [27.5],
+                        "relative_humidity_2m": [78.0],
+                    }
+                }
+            return mock_res
 
         with patch.dict(os.environ, {"OPENWEATHER_API_KEY": "fake_test_key_123"}):
-            with patch("httpx.Client.get", return_value=mock_resp):
+            with patch("backend.ingest.live_fetchers._http_get_with_retry", side_effect=mock_get):
                 resp = client.get("/api/weather/current?lat=12.5&lon=74.8")
                 assert resp.status_code == 200
                 data = resp.json()
@@ -172,11 +194,17 @@ class TestCurrentWeatherEndpoint:
             mock_res.status_code = 200
             mock_res.json.return_value = {
                 "hourly": {
+                    "time": ["2026-09-13T12:00:00+05:30"],
                     "wave_height": [1.1],
                     "wave_period": [6.5],
+                    "wave_direction": [180.0],
+                    "swell_wave_height": [0.8],
+                    "swell_wave_period": [6.0],
                     "ocean_current_velocity": [0.5],
+                    "ocean_current_direction": [180.0],
                     "wind_speed_10m": [12.0],
                     "wind_direction_10m": [250.0],
+                    "wind_gusts_10m": [15.0],
                     "surface_pressure": [1011.0],
                     "temperature_2m": [27.5],
                     "relative_humidity_2m": [78.0],
@@ -186,7 +214,7 @@ class TestCurrentWeatherEndpoint:
             return mock_res
 
         with patch.dict(os.environ, {"OPENWEATHER_API_KEY": "test_key"}):
-            with patch("httpx.Client.get", side_effect=mock_get):
+            with patch("backend.ingest.live_fetchers._http_get_with_retry", side_effect=mock_get):
                 resp = client.get("/api/weather/current?lat=10.0&lon=76.0")
                 assert resp.status_code == 200
                 data = resp.json()
@@ -370,3 +398,26 @@ class TestSubagentsCompatibility:
         alert = await danger_agent.fetch_imd_cyclone_alert(9.93, 76.26)
         assert isinstance(alert, dict)
         assert "active" in alert
+
+
+class TestWeatherHistoryEndpoint:
+    """Tests for GET /api/weather/history."""
+
+    def test_weather_history_returns_200_and_days(self, client):
+        resp = client.get("/api/weather/history?lat=9.93&lon=76.26&days=7")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["lat"] == 9.93
+        assert data["lon"] == 76.26
+        assert data["days"] == 7
+        assert len(data["history"]) == 7
+        for entry in data["history"]:
+            assert "date" in entry
+            assert "temperature_c" in entry
+            assert "wind_speed_kt" in entry
+            assert "wave_height_m" in entry
+            assert "safety" in entry
+
+    def test_weather_history_invalid_coordinates(self, client):
+        resp = client.get("/api/weather/history?lat=120.0&lon=76.26")
+        assert resp.status_code == 400

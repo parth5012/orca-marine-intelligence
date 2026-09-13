@@ -412,16 +412,23 @@ def test_endpoint_serves_from_redis(client):
 
 
 # ==============================================================================
-# 6. GET /api/pfz/history Endpoint Tests — T3 PRUNED (Wayfinder map #92)
+# 6. GET /api/pfz/history Endpoint Tests — 7-Day Sliding Window (#146)
 # ==============================================================================
 
 def test_get_pfz_history(client):
-    """Verify GET /api/pfz/history is gone (T3 prune → 404)."""
+    """Verify GET /api/pfz/history returns 7-day sliding window."""
     response = client.get("/api/pfz/history?days=5")
-    assert response.status_code == 404
+    assert response.status_code == 200
+    data = response.json()
+    assert "history" in data
+    assert data["days"] == 5
+    assert len(data["history"]) == 5
 
 
 def test_get_pfz_history_with_sector(client):
-    """Verify historical query with sector filter is gone (T3 prune → 404)."""
+    """Verify historical query with sector filter."""
     response = client.get("/api/pfz/history?days=3&sector=SEC005")
-    assert response.status_code == 404
+    assert response.status_code == 200
+    data = response.json()
+    assert "history" in data
+    assert data["sector"] == "SEC005"

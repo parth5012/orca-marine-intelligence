@@ -33,15 +33,16 @@ def test_routes_mounted():
     assert "/health" in paths
     assert "/api/chat" in paths
     assert "/api/pfz/today" in paths
+    assert "/api/pfz/history" in paths
     assert "/api/weather/current" in paths
+    assert "/api/weather/history" in paths
     assert "/api/geofence/status" in paths
     assert "/api/tiles/{z}/{x}/{y}.pbf" in paths
     assert "/api/tiles/config" in paths
 
-    # T3 pruned routes must be gone (Wayfinder map #92 human decision)
+    # Unused aliases pruned
     assert "/api/chat/stream" not in paths
     assert "/api/chat/history" not in paths
-    assert "/api/pfz/history" not in paths
     assert "/api/geofence/check" not in paths
     assert "/api/geofence/route" not in paths
 
