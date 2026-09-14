@@ -207,9 +207,9 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
                     await save_turn(full_reply)
 
-                    event_name = event.get("type", "message")
-                    data_str = json.dumps(event)
-                    yield f"event: {event_name}\ndata: {data_str}\n\n"
+                event_name = event.get("type", "message")
+                data_str = json.dumps(event)
+                yield f"event: {event_name}\ndata: {data_str}\n\n"
         except Exception as exc:
             logger.error(
                 "Error in orchestrate_stream_via_graph: %s", exc, exc_info=True
