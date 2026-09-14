@@ -52,7 +52,16 @@ except ImportError:
 
 logger = get_logger("orca.api")
 
-DEFAULT_ALLOWED_ORIGINS = "http://localhost:3000,https://cron-system.vercel.app"
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost:3000,"
+    "http://localhost:3001,"
+    "https://cron-system.vercel.app,"
+    "https://orca-marine-intelligence-ten.vercel.app"
+)
+
+# Allow all Vercel preview deployments (unique URL per commit) in addition
+# to the explicit list above. Public read API with no cookie auth, so safe.
+VERCEL_PREVIEW_ORIGIN_REGEX = r"https://.*\.vercel\.app"
 
 _start_time: float = time.time()
 
@@ -217,6 +226,7 @@ if "*" in allowed_origins:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=VERCEL_PREVIEW_ORIGIN_REGEX,
     allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
