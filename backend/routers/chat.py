@@ -193,12 +193,19 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                             else:
                                 event = dict(event)
                                 event["translation_warning"] = "Bhashini translation unavailable — showing English response"
-                        except Exception as ote:
-                            logger.warning("translate_from_english failed: %s", ote)
-                            event = dict(event)
-                            event["translation_warning"] = "Bhashini translation unavailable — showing English response"
+        except Exception as ote:
+            logger.warning("translate_from_english failed: %s", ote)
+            event = dict(event)
+            event["translation_warning"] = "Bhashini translation unavailable; showing English response"
 
-                    await save_turn(full_reply)
+        # Attach dual-gate language metadata before serialization (required by frontend useSSEChat)
+        event = dict(event)
+        event["ui_language"] = user_lang
+        event["response_language"] = effective_lang
+        event["query_is_hindi"] = query_hindi
+        event["language_gated"] = (effective_lang == "hi")
+
+        await save_turn(full_reply)
 
                 event_name = event.get("type", "message")
                 data_str = json.dumps(event)
