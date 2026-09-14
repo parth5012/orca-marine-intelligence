@@ -143,8 +143,8 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
             <button
               type="button"
               data-testid="trace-inspect-payload-button"
-              aria-label="Inspect live SSE payload"
-              onClick={(e) => {
+          aria-label={isHi ? "API पेलोड देखें" : "Inspect live SSE payload"}
+          onClick={(e) => {
                 e.stopPropagation();
                 onInspectPayload();
               }}
@@ -228,12 +228,12 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
               <button
                 type="button"
                 data-testid="trace-inspect-payload-button-mobile"
-                aria-label="Inspect live SSE payload"
-                onClick={onInspectPayload}
-                className="w-full py-2 rounded-xl bg-cyan-700 text-white font-bold text-xs flex items-center justify-center gap-1.5"
-              >
-                <FileCode2 className="w-4 h-4 text-white" />
-                <span>Inspect live SSE payload</span>
+          aria-label={isHi ? "API पेलोड देखें" : "Inspect live SSE payload"}
+          onClick={onInspectPayload}
+          className="w-full py-2 rounded-xl bg-cyan-700 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+        >
+          <FileCode2 className="w-4 h-4 text-white" />
+          <span>{isHi ? "API पेलोड देखें" : "Inspect live SSE payload"}</span>
               </button>
             </div>
           )}

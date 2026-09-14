@@ -177,7 +177,7 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                     if event.get("session_id"):
                         session_id = str(event["session_id"])
 
-                    if user_lang != "en" and full_reply:
+                    if effective_lang != "en" and full_reply:
                         if redis_client is None:
                             try:
                                 redis_client = await get_redis_client()
