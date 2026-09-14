@@ -1169,6 +1169,61 @@ async def decision_agent(state: ORCAState) -> dict:
     citation = combined.get("citation") or "INCOIS TextData"
     explanation = combined.get("explanation") or ""
 
+    # Weather-led reply: when the planner skipped find_fishing_zones
+    # (weather/safety-only query), the combiner still ranks placeholder
+    # rows and renders a fishing template ("ranked #1..."). Answer the
+    # asked question first: lead with wind/waves/safety at the place.
+    # The override also feeds synthesis (via combined) so LLM wording
+    # polishes the weather answer, not the fishing template.
+    _sel_tools = state.get("selected_tools")
+    _fish_skipped = (
+        isinstance(_sel_tools, list)
+        and TOOL_FIND_FISH not in _sel_tools
+        and (TOOL_WEATHER in _sel_tools or TOOL_OCEAN in _sel_tools)
+    )
+    if _fish_skipped:
+        try:
+            _w0 = next((w for w in weather if isinstance(w, dict)), {}) or {}
+            _s0 = next((s for s in sea if isinstance(s, dict)), {}) or {}
+
+            def _real_place(*vals: object) -> str:
+                for _v in vals:
+                    _s = str(_v or "").strip()
+                    if _s and _s.lower() not in ("unknown", "current location"):
+                        return _s
+                return "your area"
+
+            _place = _real_place(_w0.get("place"), _s0.get("place"),
+                                 (best or {}).get("place"))
+            _wkt = _w0.get("wind_kt")
+            if _wkt is None:
+                _wkt = _w0.get("wind_speed_kt")
+            _wvm = _s0.get("wave_height_m")
+
+            def _fmt(_v: object, _unit: str) -> str:
+                try:
+                    return f"{float(_v)} {_unit}"  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    return "unavailable"
+
+            _wstat = str(_w0.get("wind_status") or _w0.get("status") or "unknown").lower()
+            _vstat = str(_s0.get("wave_status") or _s0.get("status") or "unknown").lower()
+            if "danger" in (_wstat, _vstat):
+                _verdict = "DO NOT SAIL"
+            elif "caution" in (_wstat, _vstat):
+                _verdict = "use caution"
+            elif "safe" in (_wstat, _vstat):
+                _verdict = "conditions look safe"
+            else:
+                _verdict = "conditions uncertain — treat with caution"
+            explanation = (
+                f"Current weather around {_place}: "
+                f"wind {_fmt(_wkt, 'kt')}, waves {_fmt(_wvm, 'm')} — {_verdict}."
+            )
+            combined["explanation"] = explanation
+        except Exception as _wle:
+            logger.debug("graph.decision: weather-led reply skipped (%s)", _wle)
+
     # Build payload fragments (mirrors orchestrator._to_geojson_features etc.)
     pfz_features = _to_geojson_features(ranked)
     if best and best.get("lat") is not None:
