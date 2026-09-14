@@ -658,16 +658,6 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                         </div>
                       )}
 
-                      {/* Synth warning — reply exists, polish degraded */}
-                      {msg.warning && (
-                        <div
-                          data-testid="synth-warning"
-                          className="mt-2 text-xs text-slate-400 bg-slate-800/60 p-2 rounded-lg border border-slate-700"
-                        >
-                          LLM polish unavailable — showing verified advisory.
-                        </div>
-                      )}
-
                       {/* Evidence & latency footer */}
                       <div data-testid="evidence-footer" className="mt-3 pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
                         {msg.evidence && msg.evidence.length > 0 && (
