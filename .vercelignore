@@ -2,8 +2,11 @@
 # (Applies to the backend project with Root Directory = repo root.
 # The frontend project uses Root Directory = frontend/ and its own bundle.)
 
-# Frontend source is a separate Vercel project — never ship it in the API bundle
-frontend/
+# NOTE: do NOT exclude frontend/ here. .vercelignore applies repo-wide, so
+# excluding it deletes package.json from the separate frontend project
+# (Root Directory frontend/) and breaks its install. Frontend source is
+# only ~1MB (node_modules is gitignored and never deployed), so shipping
+# it inside the backend bundle is harmless — the Python function never loads it.
 
 # Heavy local-only data (250MB zip + raw packages). Code treats these as
 # optional try/except fallbacks; PostGIS + Redis are primary on hosted.
