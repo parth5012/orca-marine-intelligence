@@ -51,31 +51,31 @@ def dms_to_decimal(dms_string: str) -> Optional[float]:
         s = m_lead.group(2).strip()
     else:
         # Check for trailing direction (e.g. "9°55'52\"N", "9 55 52 N", "9.9311 N", "9d 55m 52s N")
-        m_trail = re.search(r'(?i)(?:\b|(?<=[\d°\'"″′dms]))([NSEW])\s*$', s)
+        m_trail = re.search(r'(?i)(?:\b|(?<=[\d°\ufffd\xb0\'"″′dms]))([NSEW])\s*$', s)
         if m_trail:
             char = m_trail.group(1)
-            # If the char is 'S'/'s', and matches \d+s$ and string has \d+d and \d+m:
+            # If char is 'S'/'s', but matches \d+s$ and string has \d+d and \d+m:
             if char.upper() == 'S' and re.search(r'(?i)\d+d\b.*\d+m\b.*\d+s$', s):
-                # 's' is seconds, not hemisphere
+                # The 's' was seconds, not hemisphere
                 pass
             else:
                 direction = char.upper()
                 s = s[:m_trail.start(1)].strip()
 
-    if direction in ('S', 'W'):
-        is_negative = True
+        if direction in ('S', 'W'):
+            is_negative = True
 
-    # Check leading sign if any
-    if s.startswith('-'):
-        is_negative = not is_negative
-        s = s[1:].strip()
-    elif s.startswith('+'):
-        s = s[1:].strip()
+        # Check for leading sign if any
+        if s.startswith('-'):
+            is_negative = not is_negative
+            s = s[1:].strip()
+        elif s.startswith('+'):
+            s = s[1:].strip()
 
-    # Replace written units with spaces
-    cleaned = re.sub(r'(?i)\b(degrees?|deg|minutes?|min|seconds?|sec)\b', ' ', s)
-    # Replace symbols (°dD'"″′msMS,;) with space
-    cleaned = re.sub(r'[°dD\'"″′msMS,;]', ' ', cleaned)
+        # Replace written units with spaces
+        cleaned = re.sub(r'(?i)\b(degrees?|deg|minutes?|min|seconds?|sec)\b', ' ', s)
+        # Replace symbols (°dD'"″′msMS,;) with space, including encoding artifacts
+        cleaned = re.sub(r'[°\ufffd\xb0ÂdD\'"″′msMS,;]', ' ', cleaned)
 
     # Check for any invalid characters left (only digits, dots, whitespace allowed)
     invalid_chars = re.sub(r'[\d\.\s]', '', cleaned)

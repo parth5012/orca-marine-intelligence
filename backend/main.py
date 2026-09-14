@@ -39,9 +39,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 try:
-    from backend.routers import chat, geofence, officer, pfz, tiles, weather
+    from backend.routers import chat, geofence, officer, pfz, status, tiles, weather
 except ImportError:
-    from routers import chat, geofence, officer, pfz, tiles, weather
+    from routers import chat, geofence, officer, pfz, status, tiles, weather
 
 try:
     from backend.core.logging import get_logger, setup_logging
@@ -229,6 +229,7 @@ app.include_router(weather.router, prefix="/api")
 app.include_router(geofence.router, prefix="/api")
 app.include_router(tiles.router, prefix="/api")
 app.include_router(officer.router, prefix="/api")
+app.include_router(status.router)
 
 
 @app.get("/")
