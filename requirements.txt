@@ -1,0 +1,47 @@
+# Vercel Python deps (backend project, Root Directory = repo root). Pins mirror backend/requirements.txt - update both together.
+# ORCA Marine Intelligence — Backend Dependencies
+# Owner: M6 (Platform)
+
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+# pydantic >=2.11 required: langsmith 0.12.x RunTree fails to resolve its
+# `Path` forward-ref under 2.9 (PydanticUserError: RunTree is not fully
+# defined) — crashes every @traceable LLM call inside the graph.
+# Aligns with backend/uv.lock (pydantic 2.13.5).
+pydantic==2.13.5
+
+# Database
+asyncpg==0.29.0
+sqlalchemy[asyncio]==2.0.35
+geoalchemy2==0.15.0
+
+# Caching
+redis[hiredis]==5.1.0
+
+# Data processing
+geopandas==1.0.1
+shapely==2.0.6
+httpx==0.27.0
+
+# HTML parsing (INCOIS ingest)
+beautifulsoup4==4.12.3
+lxml==5.3.0
+
+# Agentic AI — LangGraph supervisor + sub-agents (SIH26176)
+# Tools remain deterministic; agents decide & call tools via StateGraph + Send()
+langgraph>=0.2.40
+langchain-core>=0.3.0
+groq>=0.9.0
+# Direct imports below were previously missing (only worked on dev hosts
+# where they happened to be installed transitively).
+langsmith>=0.7.0  # planner_service/synthesizer_service @traceable
+# Raw SDK client for planner + synthesizer (Gemini structured output / Groq)
+google-genai>=1.0.0
+
+# NLP / Language
+# bhashini-client  # TODO: Add when Bhashini API key is configured
+
+# Monitoring
+structlog==24.4.0
+python-multipart

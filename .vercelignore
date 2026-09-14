@@ -1,0 +1,30 @@
+# ORCA backend Vercel deployment — keep the serverless function lean.
+# (Applies to the backend project with Root Directory = repo root.
+# The frontend project uses Root Directory = frontend/ and its own bundle.)
+
+# Frontend source is a separate Vercel project — never ship it in the API bundle
+frontend/
+
+# Heavy local-only data (250MB zip + raw packages). Code treats these as
+# optional try/except fallbacks; PostGIS + Redis are primary on hosted.
+data/marine_data_package/
+data/*.zip
+data/*.nc
+data/*.csv
+data/*.parquet
+!data/coastal_point_features.parquet
+
+# Dev-only / docs / scratch — never needed at runtime
+.tmp/
+teach/
+reports/
+diagrams/
+tests/
+infra/
+*.pptx
+.pytest_cache/
+.ruff_cache/
+
+# Local tooling (also gitignored, listed for clarity)
+backend/.venv/
+__pycache__/
