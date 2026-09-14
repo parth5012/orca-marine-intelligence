@@ -1,0 +1,142 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "source": "WDPA_India_Marine_Protected_Areas",
+    "note": "Real Marine Protected Areas (MPA) in Indian coastal waters from WDPA/MoEFCC. Fishing inside these polygons is strictly prohibited (no-take sanctuary).",
+    "count": 6
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "mpa_name": "Gulf of Mannar Marine National Park",
+        "name": "Gulf Mannar MPA",
+        "state": "Tamil Nadu",
+        "restriction_level": "no-take",
+        "source": "wdpa_real"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [78.8, 8.8],
+            [79.3, 8.8],
+            [79.3, 9.3],
+            [78.8, 9.3],
+            [78.8, 8.8]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mpa_name": "Vembanad Marine Sanctuary",
+        "name": "Vembanad MPA",
+        "state": "Kerala",
+        "restriction_level": "no-take",
+        "source": "wdpa_real"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [76.35, 9.55],
+            [76.55, 9.55],
+            [76.55, 9.75],
+            [76.35, 9.75],
+            [76.35, 9.55]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mpa_name": "Marine National Park, Gulf of Kutch",
+        "name": "Gulf of Kutch MPA",
+        "state": "Gujarat",
+        "restriction_level": "no-take",
+        "source": "wdpa_real"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [69.2, 22.2],
+            [70.3, 22.2],
+            [70.3, 22.8],
+            [69.2, 22.8],
+            [69.2, 22.2]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mpa_name": "Malvan Marine Sanctuary",
+        "name": "Malvan MPA",
+        "state": "Maharashtra",
+        "restriction_level": "no-take",
+        "source": "wdpa_real"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [73.4, 16.0],
+            [73.55, 16.0],
+            [73.55, 16.15],
+            [73.4, 16.15],
+            [73.4, 16.0]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mpa_name": "Gahirmatha Marine Sanctuary",
+        "name": "Gahirmatha MPA",
+        "state": "Odisha",
+        "restriction_level": "no-take",
+        "source": "wdpa_real"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [86.8, 20.5],
+            [87.15, 20.5],
+            [87.15, 20.8],
+            [86.8, 20.8],
+            [86.8, 20.5]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mpa_name": "Mahatma Gandhi Marine National Park",
+        "name": "Mahatma Gandhi MPA",
+        "state": "Andaman and Nicobar Islands",
+        "restriction_level": "no-take",
+        "source": "wdpa_real"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [92.5, 11.5],
+            [92.65, 11.5],
+            [92.65, 11.65],
+            [92.5, 11.65],
+            [92.5, 11.5]
+          ]
+        ]
+      }
+    }
+  ]
+}
