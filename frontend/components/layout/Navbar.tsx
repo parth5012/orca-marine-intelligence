@@ -39,6 +39,7 @@ import {
 import { useApp, TabType } from '@/context/AppContext';
 import LanguageSwitch from '@/chat/LanguageSwitch';
 import { SafetyBadge } from '@/map';
+import { SystemStatusBadge } from '@/components/common/SystemStatusBadge';
 
 export interface NavbarSafety {
   waves_m?: number | null;
@@ -245,12 +246,15 @@ export const Navbar: React.FC<NavbarProps> = ({ safety }) => {
                   : 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
               }`}
             >
-              <Radio className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
-              <MapPin className="w-3.5 h-3.5 text-emerald-500" />
-              <span className="font-mono font-semibold text-[11px]">{gpsText}</span>
-            </div>
+            <Radio className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
+            <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+            <span className="font-mono font-semibold text-[11px]">{gpsText}</span>
+          </div>
 
-            {/* Theme Toggle Button */}
+          {/* Live System Health Status Poller */}
+          <SystemStatusBadge />
+
+          {/* Theme Toggle Button */}
             <motion.button
               type="button"
               whileTap={{ scale: 0.9 }}
