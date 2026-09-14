@@ -193,23 +193,23 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                             else:
                                 event = dict(event)
                                 event["translation_warning"] = "Bhashini translation unavailable — showing English response"
-        except Exception as ote:
-            logger.warning("translate_from_english failed: %s", ote)
-            event = dict(event)
-            event["translation_warning"] = "Bhashini translation unavailable; showing English response"
+                        except Exception as ote:
+                            logger.warning("translate_from_english failed: %s", ote)
+                            event = dict(event)
+                            event["translation_warning"] = "Bhashini translation unavailable; showing English response"
 
-        # Attach dual-gate language metadata before serialization (required by frontend useSSEChat)
-        event = dict(event)
-        event["ui_language"] = user_lang
-        event["response_language"] = effective_lang
-        event["query_is_hindi"] = query_hindi
-        event["language_gated"] = (effective_lang == "hi")
+                    # Attach dual-gate language metadata before serialization (required by frontend useSSEChat)
+                    event = dict(event)
+                    event["ui_language"] = user_lang
+                    event["response_language"] = effective_lang
+                    event["query_is_hindi"] = query_hindi
+                    event["language_gated"] = (effective_lang == "hi")
 
-        await save_turn(full_reply)
+                    await save_turn(full_reply)
 
-                event_name = event.get("type", "message")
-                data_str = json.dumps(event)
-                yield f"event: {event_name}\ndata: {data_str}\n\n"
+                    event_name = event.get("type", "message")
+                    data_str = json.dumps(event)
+                    yield f"event: {event_name}\ndata: {data_str}\n\n"
         except Exception as exc:
             logger.error(
                 "Error in orchestrate_stream_via_graph: %s", exc, exc_info=True
