@@ -81,7 +81,8 @@ async def check_database() -> str:
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
 
-        await asyncio.wait_for(_ping(), timeout=1.5)
+        # Neon pooler cold start (TLS + wake) can take 2-5s; allow headroom
+        await asyncio.wait_for(_ping(), timeout=8.0)
         return "connected"
     except Exception as e:
         logger.debug("Database ping error: %s", e)

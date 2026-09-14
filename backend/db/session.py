@@ -21,15 +21,37 @@ RAW_DATABASE_URL = os.getenv(
     "postgresql://orca:orca@localhost:5432/orca_marine"
 )
 
+
+def _normalize_async_url(raw: str) -> tuple[str, dict]:
+    """Strip libpq-only query params (sslmode, channel_binding) that the
+    asyncpg SQLAlchemy driver rejects as connect() kwargs, and translate
+    sslmode=require into connect_args={'ssl': True} for Neon/Upstash TLS.
+    """
+    from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+
+    connect_args: dict = {}
+    try:
+        parts = urlparse(raw)
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        sslmode = query.pop("sslmode", None)
+        query.pop("channel_binding", None)  # asyncpg has no such kwarg
+        stripped = urlunparse(parts._replace(query=urlencode(query)))
+        if sslmode in ("require", "prefer", "allow"):
+            connect_args["ssl"] = True
+    except Exception:
+        stripped = raw
+    if stripped.startswith("postgresql://"):
+        stripped = stripped.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return stripped, connect_args
+
+
 # Normalize URL to asyncpg driver format if needed
-if RAW_DATABASE_URL.startswith("postgresql://"):
-    ASYNC_DATABASE_URL = RAW_DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-else:
-    ASYNC_DATABASE_URL = RAW_DATABASE_URL
+ASYNC_DATABASE_URL, _CONNECT_ARGS = _normalize_async_url(RAW_DATABASE_URL)
 
 # Create async engine for PostgreSQL + PostGIS
 engine = create_async_engine(
     ASYNC_DATABASE_URL,
+    connect_args=_CONNECT_ARGS,
     echo=False,
     pool_size=10,
     max_overflow=20,
