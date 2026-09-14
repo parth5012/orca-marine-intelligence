@@ -31,6 +31,17 @@ if "backend" not in sys.modules:
     _pkg.__path__ = [str(_backend_dir)]
     sys.modules["backend"] = _pkg
 
+# ingest/incois_textdata.py and ingest/copernicus_fallback.py do
+# `from scripts.dms_to_decimal import ...`. Repo-root scripts/ is not
+# deployed (Root Directory = backend/), so vendor a copy at
+# backend/scripts/ and alias it the same way.
+if "scripts" not in sys.modules:
+    _scripts_dir = _backend_dir / "scripts"
+    if _scripts_dir.is_dir():
+        _spkg = types.ModuleType("scripts")
+        _spkg.__path__ = [str(_scripts_dir)]
+        sys.modules["scripts"] = _spkg
+
 from main import app  # noqa: E402
 
 # Vercel looks for `app` (ASGI) or `handler`
