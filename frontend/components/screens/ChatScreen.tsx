@@ -34,6 +34,7 @@ import LanguageSwitch from '@/chat/LanguageSwitch';
 import { SafetyStatus } from '@/components/common/SafetyStatus';
 import { EvidenceCard } from '@/components/common/EvidenceCard';
 import { AgentExecutionTrace } from '@/components/agent/AgentExecutionTrace';
+import { getEffectiveResponseLang } from '@/lib/languageGate';
 import { ProcessingCard } from '@/components/agent/ProcessingCard';
 import { PayloadInspectorModal } from '@/components/agent/PayloadInspector';
 import {
@@ -450,8 +451,21 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           </div>
         )}
 
-        {messages.map((msg) => {
+        {messages.map((msg, msgIdx) => {
           const isUser = msg.role === 'user';
+          // Dual-gate: prefer backend decision, fallback to local gate from
+          // the preceding user query + current UI language.
+          let queryForGate = '';
+          for (let i = msgIdx - 1; i >= 0; i -= 1) {
+            if (messages[i]?.role === 'user') {
+              queryForGate = messages[i].content ?? '';
+              break;
+            }
+          }
+          const effectiveLang =
+            (!isUser && msg.response_language) ||
+            getEffectiveResponseLang(language || currentLanguage, queryForGate);
+          const isHi = !isUser && effectiveLang === 'hi';
           return (
             <div
               key={msg.id}
@@ -502,6 +516,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                         traces={msg.reasoning_steps}
                         confidenceScore={msg.confidence}
                         onInspectPayload={() => openInspectorFor(msg)}
+                        responseLang={effectiveLang}
                       />
                     )}
 
@@ -517,14 +532,16 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                                 <div className="flex-1">
                                   <div className="flex items-center justify-between">
                                     <h4 className="text-xs font-black uppercase tracking-wider text-red-200">
-                                      HIGH RISK ADVISORY: {msg.safety.warning_text || 'DO NOT SAIL'}
+                                      {isHi ? `उच्च जोखिम सलाह: ${msg.safety.warning_text || 'समुद्र में न जाएँ'}` : `HIGH RISK ADVISORY: ${msg.safety.warning_text || 'DO NOT SAIL'}`}
                                     </h4>
                                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-800 text-white">
-                                      DANGER
+                                      {isHi ? 'खतरा' : 'DANGER'}
                                     </span>
                                   </div>
                                   <p className="text-xs text-red-100 font-medium mt-0.5">
-                                    Hazardous sea conditions. Wave height {msg.safety.waves_m ?? '--'}m, wind speed {msg.safety.wind_kts ?? '--'} kts.
+                                    {isHi
+                                      ? `खतरनाक समुद्री स्थिति। लहर ऊँचाई ${msg.safety.waves_m ?? '--'} मी, हवा गति ${msg.safety.wind_kts ?? '--'} नॉट।`
+                                      : `Hazardous sea conditions. Wave height ${msg.safety.waves_m ?? '--'}m, wind speed ${msg.safety.wind_kts ?? '--'} kts.`}
                                   </p>
                                 </div>
                               </div>
@@ -536,14 +553,16 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                                 <div className="flex-1">
                                   <div className="flex items-center justify-between">
                                     <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                                      SEA ADVISORY: CAUTION
+                                      {isHi ? 'समुद्री सलाह: सावधानी' : 'SEA ADVISORY: CAUTION'}
                                     </h4>
                                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-700 text-white">
-                                      CAUTION
+                                      {isHi ? 'सावधानी' : 'CAUTION'}
                                     </span>
                                   </div>
                                   <p className="text-xs text-amber-200/90 mt-0.5">
-                                    Moderate sea conditions. Waves {msg.safety.waves_m ?? '--'}m, winds {msg.safety.wind_kts ?? '--'} kts. Proceed with vigilance.
+                                    {isHi
+                                      ? `मध्यम समुद्री स्थिति। लहरें ${msg.safety.waves_m ?? '--'} मी, हवाएँ ${msg.safety.wind_kts ?? '--'} नॉट। सतर्कता से आगे बढ़ें।`
+                                      : `Moderate sea conditions. Waves ${msg.safety.waves_m ?? '--'}m, winds ${msg.safety.wind_kts ?? '--'} kts. Proceed with vigilance.`}
                                   </p>
                                 </div>
                               </div>
@@ -552,19 +571,21 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                             <div data-testid="safety-banner-safe" className="rounded-xl bg-emerald-950/50 border border-emerald-500/50 px-3 py-2 flex items-center justify-between">
                               <div className="flex items-center gap-2 text-xs text-emerald-300">
                                 <span>✅</span>
-                                <span className="font-semibold">SAFE CONDITIONS</span>
+                                <span className="font-semibold">{isHi ? 'सुरक्षित स्थिति' : 'SAFE CONDITIONS'}</span>
                                 <span className="text-slate-400">
-                                  • Waves: {msg.safety.waves_m ?? '--'}m | Wind: {msg.safety.wind_kts ?? '--'} kts
+                                  {isHi
+                                    ? `• लहरें: ${msg.safety.waves_m ?? '--'} मी | हवा: ${msg.safety.wind_kts ?? '--'} नॉट`
+                                    : `• Waves: ${msg.safety.waves_m ?? '--'}m | Wind: ${msg.safety.wind_kts ?? '--'} kts`}
                                 </span>
                               </div>
                               <span className="text-[10px] font-bold bg-emerald-800 px-1.5 py-0.5 rounded text-white">
-                                SAFE
+                                {isHi ? 'सुरक्षित' : 'SAFE'}
                               </span>
                             </div>
                           )}
                           <div className="flex items-center justify-between mt-2">
-                            <span className={`text-xs font-medium ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Safety Status:</span>
-                            <SafetyStatus status={toSafetyStatus(msg.safety)} size="sm" />
+                            <span className={`text-xs font-medium ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{isHi ? 'सुरक्षा स्थिति:' : 'Safety Status:'}</span>
+                            <SafetyStatus status={toSafetyStatus(msg.safety)} size="sm" responseLang={effectiveLang} />
                           </div>
                         </div>
                       )}
@@ -585,7 +606,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                               isLight ? 'bg-blue-50/60 border-blue-100 text-slate-800' : 'bg-slate-900/80 border-slate-800 text-slate-300'
                             }`}>
                               <Waves className="w-4 h-4 text-blue-600 shrink-0" />
-                              <span className="truncate">Waves {msg.safety.waves_m}m</span>
+                              <span className="truncate">{isHi ? `लहरें ${msg.safety.waves_m} मी` : `Waves ${msg.safety.waves_m}m`}</span>
                             </div>
                           )}
                           {msg.safety.wind_kts != null && (
@@ -593,7 +614,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                               isLight ? 'bg-sky-50/60 border-sky-100 text-slate-800' : 'bg-slate-900/80 border-slate-800 text-slate-300'
                             }`}>
                               <Wind className="w-4 h-4 text-sky-600 shrink-0" />
-                              <span className="truncate">Wind {msg.safety.wind_kts} kts</span>
+                              <span className="truncate">{isHi ? `हवा ${msg.safety.wind_kts} नॉट` : `Wind ${msg.safety.wind_kts} kts`}</span>
                             </div>
                           )}
                         </div>
@@ -601,7 +622,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
                       {/* Evidence from live frames */}
                       {msg.evidence && msg.evidence.length > 0 && (
-                        <EvidenceCard evidence={msg.evidence} confidenceScore={msg.confidence} />
+                        <EvidenceCard evidence={msg.evidence} confidenceScore={msg.confidence} responseLang={effectiveLang} />
                       )}
 
                       {/* Active hazards from live safety frame */}
@@ -611,7 +632,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                         }`}>
                           <div className="font-bold flex items-center gap-1.5 text-rose-600">
                             <ShieldCheck className="w-4 h-4" />
-                            <span>Active Hazards &amp; Advisories</span>
+                            <span>{isHi ? 'सक्रिय खतरे व सलाह' : 'Active Hazards & Advisories'}</span>
                           </div>
                           <div className={`text-[12px] ${isLight ? 'text-rose-800' : 'text-slate-300'}`}>
                             • {msg.safety.message || msg.safety.warning_text}
@@ -651,7 +672,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                       <div data-testid="evidence-footer" className="mt-3 pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
                         {msg.evidence && msg.evidence.length > 0 && (
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-slate-500 font-semibold">Evidence:</span>
+                            <span className="text-slate-500 font-semibold">{isHi ? 'प्रमाण:' : 'Evidence:'}</span>
                             {msg.evidence.map((ev, eIdx) => (
                               <span
                                 key={eIdx}
@@ -676,13 +697,13 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                         }`}>
                           <div>
                             <span className={`text-[10px] font-mono font-bold ${isLight ? 'text-cyan-800' : 'text-cyan-400'}`}>
-                              RECOMMENDED ZONE
+                              {isHi ? 'अनुशंसित क्षेत्र' : 'RECOMMENDED ZONE'}
                             </span>
                             <div className={`font-extrabold text-sm ${isLight ? 'text-slate-900' : 'text-cyan-100'}`}>
                               {msg.zone_cards[0].name}
                             </div>
                             <p className={`text-[11px] ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-                              {msg.zone_cards[0].distance_km != null ? `${msg.zone_cards[0].distance_km} km away` : 'Live PFZ fix'}
+                              {msg.zone_cards[0].distance_km != null ? (isHi ? `${msg.zone_cards[0].distance_km} किमी दूर` : `${msg.zone_cards[0].distance_km} km away`) : (isHi ? 'लाइव PFZ स्थिति' : 'Live PFZ fix')}
                               {msg.zone_cards[0].bearing ? ` • ${msg.zone_cards[0].bearing}` : ''}
                             </p>
                           </div>
@@ -695,7 +716,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                             })}
                             className="px-3 py-1.5 rounded-lg bg-cyan-700 text-white font-extrabold text-xs shadow hover:scale-105 transition-transform"
                           >
-                            View Zone
+                            {isHi ? 'क्षेत्र देखें' : 'View Zone'}
                           </button>
                         </div>
                       )}
@@ -705,9 +726,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                         <div className="space-y-2 pt-1">
                           <div className="flex items-center justify-between px-1">
                             <h4 className="text-xs font-semibold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
-                              <span>🎯</span> Recommended Fishing Zones ({msg.zone_cards.length})
+                              <span>🎯</span> {isHi ? `अनुशंसित मत्स्य क्षेत्र (${msg.zone_cards.length})` : `Recommended Fishing Zones (${msg.zone_cards.length})`}
                             </h4>
-                            <span className="text-[10px] text-slate-400">Click to fly on map</span>
+                            <span className="text-[10px] text-slate-400">{isHi ? 'मैप पर देखने के लिए क्लिक करें' : 'Click to fly on map'}</span>
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

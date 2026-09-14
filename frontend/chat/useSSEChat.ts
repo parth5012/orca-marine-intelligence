@@ -71,6 +71,10 @@ export interface ChatMessage {
   warning?: string;
   fallback?: boolean;
   fallback_message?: string;
+  /** Backend dual-gate decision (chat.py): effective reply language. */
+  response_language?: string;
+  ui_language?: string;
+  language_gated?: boolean;
 }
 
 export interface UseSSEChatOptions {
@@ -669,6 +673,18 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                   updated.isStreaming = false;
                   updated.latency_ms = Date.now() - startTime;
                   updated.confidence = parsed.confidence;
+                  if (typeof parsed.response_language === 'string') {
+                    updated.response_language = parsed.response_language;
+                  }
+                  if (typeof parsed.ui_language === 'string') {
+                    updated.ui_language = parsed.ui_language;
+                  }
+                  if (typeof parsed.language_gated === 'boolean') {
+                    updated.language_gated = parsed.language_gated;
+                  } else if (typeof parsed.language === 'string' && !updated.response_language) {
+                    // Back-compat: older backend only sends `language`.
+                    updated.response_language = parsed.language;
+                  }
                   if (parsed.session_id) {
                     setSessionId(parsed.session_id);
                     if (typeof window !== 'undefined') {

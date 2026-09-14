@@ -18,12 +18,15 @@ interface SafetyStatusProps {
   status: SafetyStatusType | 'MODERATE' | 'UNSUITABLE';
   size?: 'sm' | 'md' | 'lg';
   showText?: boolean;
+  /** Effective reply language — Hindi pill only when 'hi' (dual-gate). */
+  responseLang?: string;
 }
 
 export const SafetyStatus: React.FC<SafetyStatusProps> = ({
   status,
   size = 'md',
   showText = true,
+  responseLang = 'en',
 }) => {
   const { themeMode } = useApp();
   const isLight = themeMode === 'light';
@@ -31,13 +34,14 @@ export const SafetyStatus: React.FC<SafetyStatusProps> = ({
   const isSafe = status === 'SAFE' || status === 'SUITABLE';
   const isCaution = status === 'CAUTION' || status === 'MODERATE';
   const isDanger = status === 'AVOID' || status === 'UNSUITABLE';
+  const isHi = responseLang === 'hi';
 
   let config = {
     bg: isLight
       ? 'bg-emerald-50 text-emerald-900 border-emerald-300 font-bold shadow-sm'
       : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-emerald-950/30',
     icon: CheckCircle2,
-    label: isSafe ? 'SUITABLE FOR FISHING' : status,
+    label: isSafe ? (isHi ? 'मछली पकड़ने के लिए सुरक्षित' : 'SUITABLE FOR FISHING') : status,
     dotColor: 'bg-emerald-500',
   };
 
@@ -47,7 +51,7 @@ export const SafetyStatus: React.FC<SafetyStatusProps> = ({
         ? 'bg-amber-50 text-amber-900 border-amber-300 font-bold shadow-sm'
         : 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-amber-950/30',
       icon: AlertTriangle,
-      label: 'EXERCISE CAUTION',
+      label: isHi ? 'सावधान रहें' : 'EXERCISE CAUTION',
       dotColor: 'bg-amber-500',
     };
   } else if (isDanger) {
@@ -56,7 +60,7 @@ export const SafetyStatus: React.FC<SafetyStatusProps> = ({
         ? 'bg-rose-50 text-rose-900 border-rose-300 font-bold shadow-sm'
         : 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-rose-950/30',
       icon: XCircle,
-      label: 'AVOID / DANGER ZONE',
+      label: isHi ? 'खतरे का क्षेत्र' : 'AVOID / DANGER ZONE',
       dotColor: 'bg-rose-500',
     };
   }

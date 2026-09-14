@@ -42,6 +42,45 @@ logger = logging.getLogger("orca.chat")
 
 router = APIRouter(tags=["chat"])
 
+# ---------------------------------------------------------------------------
+# Hindi dual-gate: Hindi reply ONLY when BOTH UI language == hi AND the
+# user query itself is Hindi. Otherwise respond in English.
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+_HINDI_DEVANAGARI_RE = _re.compile(r"[ऀ-ॿ]")
+_HINDI_HINGLISH_RE = _re.compile(
+    r"\b(kya|kahan|kaise|kab|kyon|kyun|hai|hain|nahi|nahin|nahn|"
+    r"machhli|machhali|machli|samudra|samundra|lahrein|lehren|lahar|hawa|"
+    r"toofan|surakshit|mausam|madad|batao|batayen|mujhe|kripya|kal|subah|"
+    r"safe hai|kharab|achha|accha)\b",
+    _re.IGNORECASE,
+)
+
+
+def _normalize_ui_lang(code: object) -> str:
+    if not code or not isinstance(code, str):
+        return "en"
+    c = code.strip().lower().split("-")[0].split("_")[0]
+    return c if c else "en"
+
+
+def query_is_hindi(text: str) -> bool:
+    if not text or not text.strip():
+        return False
+    if _HINDI_DEVANAGARI_RE.search(text):
+        return True
+    return bool(_HINDI_HINGLISH_RE.search(text))
+
+
+def resolve_response_language(ui_language: object, message: str) -> str:
+    ui = _normalize_ui_lang(ui_language)
+    if ui == "hi":
+        return "hi" if query_is_hindi(message or "") else "en"
+    return ui
+
+
 
 class ChatRequest(BaseModel):
     """Chat advisory request payload."""
@@ -83,31 +122,45 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             if req.lat is not None and req.lon is not None
             else None
         )
-        user_lang = req.language or "en"
+        user_lang = _normalize_ui_lang(req.language)
+        # Dual-gate: Hindi reply only when UI==hi AND query is Hindi.
+        effective_lang = resolve_response_language(user_lang, req.message)
+        query_hindi = query_is_hindi(req.message or "")
         english_query = req.message
         redis_client = None
 
-        if user_lang != "en":
+        # Input translation: use effective_lang when non-English (existing
+        # Bhashini flow). When gated to English but raw query is Hindi
+        # (UI=en + Hindi query), still translate hi->en for retrieval — output stays English.
+        input_source_lang: str | None = None
+        if effective_lang != "en":
+            input_source_lang = effective_lang
+        elif query_hindi:
+            input_source_lang = "hi"
+
+        if input_source_lang is not None:
             try:
                 redis_client = await get_redis_client()
             except Exception as e:
                 logger.warning("Failed to get redis client: %s", e)
             try:
-                result = await translate_to_english(req.message, user_lang, redis_client)
+                result = await translate_to_english(req.message, input_source_lang, redis_client)
                 english_query = result.text
                 if not result.translated:
-                    warning_event = {
+                    # Only warn when actually needed (non-English understanding).
+                    if effective_lang != "en":
+                        warning_event = {
                         "type": "warning",
                         "message": "Bhashini input translation unavailable — processing in original language",
                     }
-                    yield f"event: warning\ndata: {json.dumps(warning_event)}\n\n"
+                        yield f"event: warning\ndata: {json.dumps(warning_event)}\n\n"
             except Exception as te:
                 logger.warning("translate_to_english failed: %s", te)
 
         try:
             async for event in orchestrate_stream_via_graph(
                 query=english_query,
-                language=user_lang,
+                language=effective_lang,
                 location=location,
                 session_id=session_id,
             ):
@@ -124,14 +177,14 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                     if event.get("session_id"):
                         session_id = str(event["session_id"])
 
-                    if user_lang != "en" and full_reply:
+                    if effective_lang != "en" and full_reply:
                         if redis_client is None:
                             try:
                                 redis_client = await get_redis_client()
                             except Exception:
                                 pass
                         try:
-                            t_result = await translate_from_english(full_reply, user_lang, redis_client)
+                            t_result = await translate_from_english(full_reply, effective_lang, redis_client)
                             if t_result.translated:
                                 event = dict(event)
                                 event["reply"] = t_result.text
@@ -140,12 +193,19 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                             else:
                                 event = dict(event)
                                 event["translation_warning"] = "Bhashini translation unavailable — showing English response"
-                        except Exception as ote:
-                            logger.warning("translate_from_english failed: %s", ote)
-                            event = dict(event)
-                            event["translation_warning"] = "Bhashini translation unavailable — showing English response"
+        except Exception as ote:
+            logger.warning("translate_from_english failed: %s", ote)
+            event = dict(event)
+            event["translation_warning"] = "Bhashini translation unavailable; showing English response"
 
-                    await save_turn(full_reply)
+        # Attach dual-gate language metadata before serialization (required by frontend useSSEChat)
+        event = dict(event)
+        event["ui_language"] = user_lang
+        event["response_language"] = effective_lang
+        event["query_is_hindi"] = query_hindi
+        event["language_gated"] = (effective_lang == "hi")
+
+        await save_turn(full_reply)
 
                 event_name = event.get("type", "message")
                 data_str = json.dumps(event)
