@@ -1,0 +1,9 @@
+# ORCA Marine Intelligence — Vercel project config (backend project, Root Directory = repo root)
+#
+# Tells Vercel to load the FastAPI `app` from ./backend/main.py
+# (backend/ is not in Vercel's auto-searched entrypoint locations).
+# Dependencies still come from root requirements.txt; this file carries
+# tooling config only — do NOT add [project] dependencies here.
+
+[tool.vercel]
+entrypoint = "backend.main:app"
