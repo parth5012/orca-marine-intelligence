@@ -38,6 +38,8 @@ interface AgentExecutionTraceProps {
   traces: ReasoningStep[];
   confidenceScore?: number;
   onInspectPayload?: () => void;
+  /** Effective reply language — Hindi header only when 'hi' (dual-gate). */
+  responseLang?: string;
 }
 
 function stateStyle(state: string) {
@@ -64,7 +66,9 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
   traces,
   confidenceScore,
   onInspectPayload,
+  responseLang = 'en',
 }) => {
+  const isHi = responseLang === 'hi';
   const { themeMode } = useApp();
   const isLight = themeMode === 'light';
   const [isOpen, setIsOpen] = useState(false);
@@ -115,7 +119,7 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className={`font-extrabold text-xs sm:text-sm ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                Agentic Pipeline Trace ({traces.length} Sub-Agents)
+                {isHi ? `एजेंटिक पाइपलाइन ट्रेस (${traces.length} उप-एजेंट)` : `Agentic Pipeline Trace (${traces.length} Sub-Agents)`}
               </span>
               {pct != null && (
                 <span
@@ -123,13 +127,13 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
                     isLight ? 'bg-cyan-100 text-cyan-900 border-cyan-300' : 'bg-cyan-950 text-cyan-300 border-cyan-800'
                   }`}
                 >
-                  {pct}% Confidence
+                  {isHi ? `${pct}% विश्वास` : `${pct}% Confidence`}
                 </span>
               )}
             </div>
             <p className={`text-[11px] font-medium flex items-center gap-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
               <Clock className="w-3 h-3 text-cyan-600 inline" />
-              Total Execution Time: <span className="font-mono font-bold text-cyan-700">{totalTimeMs}ms</span>
+              {isHi ? 'कुल निष्पादन समय:' : 'Total Execution Time:'} <span className="font-mono font-bold text-cyan-700">{totalTimeMs}ms</span>
             </p>
           </div>
         </div>
@@ -152,7 +156,7 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
               title="Inspect live SSE request + frames"
             >
               <FileCode2 className="w-3.5 h-3.5 text-cyan-600" />
-              <span>API Payload</span>
+              <span>{isHi ? 'API पेलोड' : 'API Payload'}</span>
             </button>
           )}
 
@@ -164,7 +168,7 @@ export const AgentExecutionTrace: React.FC<AgentExecutionTraceProps> = ({
       {isOpen && (
         <div className={`p-3.5 pt-1 border-t space-y-2 text-xs ${isLight ? 'border-sky-200/80 bg-white/70' : 'border-slate-800 bg-slate-950/90'}`}>
           <div className={`text-[11px] font-semibold mb-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-            Live multi-agent workflow steps (SSE status frames):
+            {isHi ? 'लाइव मल्टी-एजेंट वर्कफ़्लो चरण (SSE स्थिति फ्रेम):' : 'Live multi-agent workflow steps (SSE status frames):'}
           </div>
 
           <div className="space-y-2 relative before:absolute before:left-4 before:top-3 before:bottom-3 before:w-0.5 before:bg-cyan-500/30">

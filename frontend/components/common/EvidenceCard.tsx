@@ -26,14 +26,24 @@ interface EvidenceCardProps {
   answeredSources?: string[];
   /** Show the SAFETY VALIDATED footer badge only when the caller confirms live validation. */
   validated?: boolean;
+  /** Effective reply language ('hi' only when UI==hi AND query Hindi). */
+  responseLang?: string;
 }
 
-const DATA_SOURCES = [
+const DATA_SOURCES_EN = [
   'PFZ Advisory',
   'Ocean Conditions',
   'Weather Forecast',
   'Hazard Alerts',
   'Geospatial Constraints',
+];
+
+const DATA_SOURCES_HI = [
+  'PFZ सलाह',
+  'समुद्री स्थिति',
+  'मौसम पूर्वानुमान',
+  'खतरा अलर्ट',
+  'भू-स्थानिक सीमाएँ',
 ];
 
 const listContainer = {
@@ -60,15 +70,23 @@ function toPercent(confidence?: number): number | null {
 
 export const EvidenceCard: React.FC<EvidenceCardProps> = ({
   evidence,
-  title = 'WHY ORCA RECOMMENDS THIS',
-  sourceText = 'Validated by INCOIS Marine Oceanography & IMD Weather Models',
+  title,
+  sourceText,
   confidenceScore,
-  lastUpdated = 'Live advisory stream',
+  lastUpdated,
   answeredSources,
   validated = true,
+  responseLang = 'en',
 }) => {
   const { themeMode } = useApp();
   const isLight = themeMode === 'light';
+  const isHi = responseLang === 'hi';
+  const DATA_SOURCES = isHi ? DATA_SOURCES_HI : DATA_SOURCES_EN;
+  const resolvedTitle = title ?? (isHi ? 'ORCA यह क्षेत्र क्यों सुझाता है' : 'WHY ORCA RECOMMENDS THIS');
+  const resolvedSource = sourceText ?? (isHi
+    ? 'INCOIS समुद्री विज्ञान व IMD मौसम मॉडल द्वारा सत्यापित'
+    : 'Validated by INCOIS Marine Oceanography & IMD Weather Models');
+  const resolvedUpdated = lastUpdated ?? (isHi ? 'लाइव सलाह स्ट्रीम' : 'Live advisory stream');
   const answered = answeredSources ?? DATA_SOURCES;
   const pct = toPercent(confidenceScore);
 
@@ -88,7 +106,7 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
         <div className="flex items-center gap-2">
           <ShieldCheck className={`w-5 h-5 ${isLight ? 'text-cyan-700' : 'text-cyan-400'}`} />
           <h4 className={`font-extrabold text-sm uppercase tracking-wider ${isLight ? 'text-slate-900' : 'text-white'}`}>
-            {title}
+            {resolvedTitle}
           </h4>
         </div>
 
@@ -97,13 +115,13 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
             <span className={`px-2.5 py-0.5 rounded-full font-bold border ${
               isLight ? 'bg-emerald-50 text-emerald-900 border-emerald-300' : 'bg-emerald-950 text-emerald-300 border-emerald-800'
             }`}>
-              Confidence: {pct}%
+              {isHi ? `विश्वास: ${pct}%` : `Confidence: ${pct}%`}
             </span>
           )}
           <span className={`hidden sm:inline-block px-2 py-0.5 rounded border text-[10px] ${
             isLight ? 'bg-cyan-50 text-cyan-900 border-cyan-200' : 'bg-cyan-950 text-cyan-300 border-cyan-800'
           }`}>
-            Updated: {lastUpdated}
+            {isHi ? `अपडेट: ${resolvedUpdated}` : `Updated: ${resolvedUpdated}`}
           </span>
         </div>
       </div>
@@ -114,7 +132,7 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
           isLight ? 'text-slate-500' : 'text-slate-400'
         }`}>
           <Database className="w-3.5 h-3.5 text-cyan-600" />
-          <span>Data Sources Fused:</span>
+          <span>{isHi ? 'संयोजित डेटा स्रोत:' : 'Data Sources Fused:'}</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {DATA_SOURCES.map((ds, idx) => (
@@ -147,18 +165,18 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
         ))}
       </motion.ul>
 
-      {sourceText && (
+      {resolvedSource && (
         <div className={`mt-4 pt-2.5 border-t flex items-center justify-between text-[11px] ${
           isLight ? 'border-slate-100 text-slate-500' : 'border-slate-800/80 text-slate-400'
         }`}>
           <div className="flex items-center gap-1.5">
             <Info className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
-            <span>Source: {sourceText}</span>
+            <span>{isHi ? `स्रोत: ${resolvedSource}` : `Source: ${resolvedSource}`}</span>
           </div>
           {validated && (
             <span className="font-mono text-[10px] text-emerald-500 font-bold flex items-center gap-1">
               <ShieldCheck className="w-3 h-3 text-emerald-400" />
-              SAFETY VALIDATED ✓
+              {isHi ? 'सुरक्षा सत्यापित ✓' : 'SAFETY VALIDATED ✓'}
             </span>
           )}
         </div>
