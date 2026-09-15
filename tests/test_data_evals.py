@@ -68,7 +68,7 @@ class TestMarineDataPackageFallbacks:
     @pytest.mark.asyncio
     async def test_weather_agent_wind_parquet_fallback(self):
         """When live weather fetcher fails, Weather Agent reads wind from parquet."""
-        with patch("backend.ingest.live_fetchers.fetch_live_weather", side_effect=RuntimeError("Meteo down")):
+        with patch("backend.agents.subagents.weather_agent.fetch_imd_wind", side_effect=RuntimeError("Meteo down")):
             lat, lon = 9.93, 76.26
             wind_kt, wind_dir, wind_deg, source = await get_wind(lat, lon, "SEC001_Kochi", 0)
             assert source == "marine_data_package"
