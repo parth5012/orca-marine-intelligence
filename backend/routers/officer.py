@@ -86,6 +86,18 @@ ROLE_WATCH = "watch"
 DEFAULT_PORT_TOKEN = "test-port-token"
 DEFAULT_WATCH_TOKEN = "test-watch-token"
 
+# T4 go-no-go kill switch (issue #174): ORCA_ENABLE_GONOGO=false hides the
+# frontend card (no weather fetch from it). Default true. Backend keeps
+# serving overrides regardless (flag is display-only, documented in
+# .env.example); this helper exists so tests + ops can assert the default.
+GONOGO_FLAG = "ORCA_ENABLE_GONOGO"
+
+
+def is_gonogo_enabled() -> bool:
+    """Return True unless ORCA_ENABLE_GONOGO is an explicit falsy value. Pure."""
+    raw = os.getenv(GONOGO_FLAG, "true")
+    return (raw or "true").strip().lower() not in ("false", "0", "no", "off")
+
 # In-memory runtime stores (module-level; Postgres schema in prod).
 # Rows never carry computed fields (overdue_* added at read time only).
 _departures: List[Dict[str, Any]] = []
@@ -251,12 +263,15 @@ async def create_override(
     """Record a GO/HOLD override; by_role derived from the token (never client)."""
     role = require_officer_role(x_officer_token)
     validate_port_id(body.port_id)
+    if not (body.reason or "").strip():
+        # T4 #174: a reason is mandatory (esp. when overriding the auto-suggest).
+        raise HTTPException(status_code=400, detail="reason is required (non-empty).")
     row = {
         "id": str(uuid.uuid4()),
         "port_id": body.port_id.strip().lower(),
         "date": body.date.isoformat(),
         "decision": body.decision,
-        "reason": body.reason,
+        "reason": body.reason.strip(),
         "by_role": role,
         "created_at": _now_iso(),
     }

@@ -18,6 +18,7 @@ import { useSearchParams } from 'next/navigation';
 import OfficerTopBar, { OfficerRole } from '@/officer/OfficerTopBar';
 import SafetyBanner from '@/officer/SafetyBanner';
 import OfficerMiniMap from '@/officer/OfficerMiniMap';
+import GoNoGoCard from '@/officer/GoNoGoCard';
 import { PORTS, INDIA_CENTER, PORT_ZOOM, WATCH_ZOOM, getPortById } from '@/officer/ports';
 
 function readCookie(name: string): string | null {
@@ -42,7 +43,7 @@ function OfficerShell() {
   const role = resolveRole(searchParams.get('role'));
   const watch = role === 'watch';
   const port = getPortById(searchParams.get('port'));
-  const gonogoEnabled = process.env.NEXT_PUBLIC_ORCA_ENABLE_GONOGO !== 'false';
+  const gonogoEnabled = !/^(false|0|no|off)$/i.test(process.env.NEXT_PUBLIC_ORCA_ENABLE_GONOGO ?? 'true');
   const states = new Set(PORTS.map((p) => p.state)).size;
 
   const center: [number, number] = watch ? INDIA_CENTER : [port.lat, port.lon];
@@ -59,9 +60,7 @@ function OfficerShell() {
       )}
       <main className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-[280px_1fr_320px]">
         <div id="gonogo" data-testid="slot-gonogo" className={gonogoEnabled ? '' : 'hidden'}>
-          <p className="rounded-xl border border-slate-800 p-3 text-xs text-slate-500">
-            Go-No-Go card plugs in here (T4).
-          </p>
+          {gonogoEnabled ? <GoNoGoCard port={port} role={role} /> : null}
         </div>
         <section className="flex flex-col gap-4">
           <OfficerMiniMap center={center} zoom={zoom} sector={watch ? undefined : port.incois_sector} />
