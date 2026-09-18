@@ -27,6 +27,13 @@
 | 7 | `GET` | `/api/weather/current` | `weather` | `MapInner.tsx:227` direct · `backend/routers/weather.py:79` | P1 |
 | 8 | `GET` | `/api/weather/cyclone` | `weather` | `DangerAgent` internal only (no UI caller, T3) · `backend/routers/weather.py:170` | P2 |
 | 9 | `GET` | `/api/geofence/status` | `geofence` | `frontend/app/map/page.tsx:94` direct · `backend/routers/geofence.py:58` | P1 |
+| 10 | `GET` | `/api/officer/overview` | `officer` | `/officer` command view (RBAC `X-User-Role: official`) · `backend/routers/officer.py` | P1 |
+| 11 | `POST` | `/api/officer/departures` | `officer` | `/officer` register form · `backend/routers/officer.py` | P1 |
+| 12 | `GET` | `/api/officer/departures` | `officer` | `/officer` register table + overdue alerts · `backend/routers/officer.py` | P1 |
+| 13 | `POST` | `/api/officer/overrides` | `officer` | `/officer` go-no-go override · `backend/routers/officer.py` | P1 |
+| 14 | `GET` | `/api/officer/overrides` | `officer` | `/officer` override log · `backend/routers/officer.py` | P1 |
+| 15 | `POST` | `/api/officer/broadcasts` | `officer` | `/officer` broadcast composer · `backend/routers/officer.py` | P1 |
+| 16 | `GET` | `/api/officer/broadcasts` | `officer` | `/officer` broadcast history · `backend/routers/officer.py` | P1 |
 
 P0 = app broken without it. P1 = safety/UX degraded. P2 = deferred/internal.
 
@@ -418,6 +425,58 @@ Active Marine Protected Areas, sovereign EEZ zones, and IMBL buffer thresholds w
 ```
 
 **Frontend:** `frontend/app/map/page.tsx:94` fetches direct (fire-and-forget; backend offline keeps local boundaries). Per-point checks and route validation were deleted in T3 — the drawer shows static clearance copy.
+
+---
+
+## Officer Register (Map #170 T2)
+
+Manual departure register, GO/HOLD overrides, and advisory broadcasts for `/officer`. **File:** `backend/routers/officer.py` (mounted `backend/main.py`, same `/api` prefix + CORS as all routers). Runtime store is in-memory (green without Postgres); prod tables in `backend/db/schema.sql` §7 + `backend/db/models.py` §6. Identical under `ORCA_DATA_SOURCE` live/mock (local-first, no upstream fetch).
+
+**Auth:** shared tokens, no user table. `PORT_TOKEN` = port-officer role (every read must scope `?port_id=`; writes must include `port_id`). `WATCH_TOKEN` = enforcement/watch role (read-all; writes allowed with `by_role: "watch"`). Sent as `X-Officer-Token` header (the Next.js password screen keeps `officer_role` in an httpOnly cookie — see `OFFICER_COOKIE` in `.env.example` — and the proxy forwards it as the header). `port_id` is validated against `data/ports.json` via `backend/core/ports.py`; unknown ids return 400.
+
+**`401` shape (missing/wrong token, all 6 endpoints):**
+
+```json
+{ "detail": "Invalid or missing X-Officer-Token." }
+```
+
+**`400` shapes:** `{ "detail": "port_id query param required for port role." }` (port role read without `?port_id=`), `{ "detail": "Unknown port_id: <id>." }`.
+
+### POST /api/officer/departures
+
+```json
+{ "port_id": "kochi", "boat_id": "KL-07-MM-1234", "crew": 5, "time_out": "2026-09-18T06:00:00+00:00", "expected_in": "2026-09-18T14:00:00+00:00", "dest_lat": 9.5, "dest_lon": 76.0, "dest_zone": "SEC005", "status": "at_sea" }
+```
+
+Response `200`: created row (`id`, `created_at`) plus computed `overdue_mins` (int) and `overdue_status` (`none`/`amber` >120min/`red` >360min).
+
+### GET /api/officer/departures?port_id=kochi
+
+Response `200`: `{ "count": 1, "departures": [{ ...row, "overdue_mins": 0, "overdue_status": "none" }] }`. `overdue_*` is computed per read, never stored. Watch role may omit `port_id` (returns all ports).
+
+### POST /api/officer/overrides
+
+```json
+{ "port_id": "kochi", "date": "2026-09-18", "decision": "GO", "reason": "Seas calm, PFZ active" }
+```
+
+`decision` is `GO`/`HOLD` (else 422). `by_role` is derived from the token, never the client. Response `200`: created row with `id`, `by_role`, `created_at`.
+
+### GET /api/officer/overrides?port_id=kochi&date=2026-09-18
+
+Both filters optional for watch (`port_id` required for port role). Response `200`: `{ "count": 1, "overrides": [...] }`.
+
+### POST /api/officer/broadcasts
+
+```json
+{ "port_id": "kochi", "text_en": "Stay within 12nm today", "text_local": "ഇന്ന് 12 നോട്ടിക്കൽ മൈലിനുള്ളിൽ", "lang": "ml" }
+```
+
+Response `200`: created row with `id`, `created_at`.
+
+### GET /api/officer/broadcasts?port_id=kochi
+
+Response `200`: `{ "count": 1, "broadcasts": [...] }`. Watch role may omit `port_id` (returns all ports).
 
 ---
 

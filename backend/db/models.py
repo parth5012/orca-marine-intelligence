@@ -9,6 +9,7 @@ coastal ports, geofencing boundaries, and multi-turn chat sessions.
 
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any
+import uuid
 from sqlalchemy import (
     String, Integer, Float, Boolean, Text, Date, DateTime,
     ForeignKey, Index, func
@@ -226,3 +227,62 @@ class IngestRun(Base):
 
     def __repr__(self) -> str:
         return f"<IngestRun {self.id}: {self.source} - {self.status} ({self.feature_count} features)>"
+
+
+def _new_uuid() -> str:
+    return str(uuid.uuid4())
+
+
+# ==============================================================================
+# 6. Officer Register — Departures / Overrides / Broadcasts (Map #170 T2)
+# ==============================================================================
+class Departure(Base):
+    """Manual boat departure register per port (in-memory at runtime,
+    Postgres table in prod via schema.sql §7). overdue_* computed, never stored."""
+    __tablename__ = "departures"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    port_id: Mapped[str] = mapped_column(Text, index=True, nullable=False)
+    boat_id: Mapped[str] = mapped_column(Text, nullable=False)
+    crew: Mapped[int] = mapped_column(Integer, nullable=False)
+    time_out: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expected_in: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    dest_lat: Mapped[float] = mapped_column(Float, nullable=False)
+    dest_lon: Mapped[float] = mapped_column(Float, nullable=False)
+    dest_zone: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="at_sea")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<Departure {self.id}: {self.boat_id} @ {self.port_id}>"
+
+
+class OfficerOverride(Base):
+    """Port officer GO/HOLD decision overriding the go-no-go card."""
+    __tablename__ = "overrides"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    port_id: Mapped[str] = mapped_column(Text, index=True, nullable=False)
+    date: Mapped[Any] = mapped_column(Date, index=True, nullable=False)
+    decision: Mapped[str] = mapped_column(String(8), nullable=False)  # GO / HOLD
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    by_role: Mapped[str] = mapped_column(String(16), nullable=False)  # port / watch
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<OfficerOverride {self.id}: {self.decision} @ {self.port_id} {self.date}>"
+
+
+class Broadcast(Base):
+    """Officer advisory broadcast per port (English + local language)."""
+    __tablename__ = "broadcasts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    port_id: Mapped[str] = mapped_column(Text, index=True, nullable=False)
+    text_en: Mapped[str] = mapped_column(Text, nullable=False)
+    text_local: Mapped[Optional[str]] = mapped_column(Text)
+    lang: Mapped[str] = mapped_column(String(8), default="en")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<Broadcast {self.id} @ {self.port_id}>"
