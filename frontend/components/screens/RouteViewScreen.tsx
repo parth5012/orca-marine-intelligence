@@ -28,7 +28,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { MapView } from '@/map';
+import { MPA_GEOJSON } from '@/map/boundaries';
 import {
+  buildSafeRoute,
   classifySea,
   computeLiveRoute,
   getBackendBaseUrl,
@@ -36,6 +38,7 @@ import {
   pfzItemToFeature,
   toPFZItem,
   type LiveRouteInfo,
+  type PFZItem,
 } from '@/lib/pfz';
 import {
   Navigation,
@@ -148,17 +151,64 @@ export const RouteViewScreen: React.FC = () => {
     void loadSafety(true);
   }, [loadSafety]);
 
-  const route: LiveRouteInfo | null = useMemo(() => {
+  const [backendRoute, setBackendRoute] = useState<LiveRouteInfo | null>(null);
+  const [isBackendLive, setIsBackendLive] = useState<boolean>(false);
+
+  useEffect(() => {
+    const currentDest = dest;
+    if (!currentDest) return;
+    let cancelled = false;
+    async function fetchBackendRoute(target: PFZItem) {
+      try {
+        const params = new URLSearchParams({
+          olat: String(userLocation.lat),
+          olon: String(userLocation.lon),
+          dlat: String(target.coordinates[0]),
+          dlon: String(target.coordinates[1]),
+        });
+        const res = await fetch(`/api/route?${params.toString()}`);
+        if (!res.ok) throw new Error('route failed');
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.waypoints && data.distance_km != null) {
+          setBackendRoute({
+            originName: userLocation.name || 'Current GPS Location',
+            destinationName: `${target.code} (${target.name})`,
+            totalDistanceKm: data.distance_km,
+            totalDistanceNm: data.distance_nm,
+            bearing: data.bearing,
+            bearingDegrees: data.bearing_deg ?? 0,
+            estimatedTimeMinutes: data.eta_min,
+            safetyIndexPercent: data.safety_index,
+            safetyLabel: data.safety_label,
+            waypoints: data.waypoints,
+            hazardWarnings: data.hazards || [],
+            detourOccurred: data.waypoints.length > 2,
+            offlineCalculated: data.source !== 'backend_live',
+          });
+          setIsBackendLive(data.source === 'backend_live');
+        }
+      } catch {
+        if (cancelled) return;
+        setIsBackendLive(false);
+      }
+    }
+    void fetchBackendRoute(currentDest);
+    return () => {
+      cancelled = true;
+    };
+  }, [dest?.coordinates?.[0], dest?.coordinates?.[1], userLocation.lat, userLocation.lon, userLocation.name]);
+
+  const clientSafeRoute: LiveRouteInfo | null = useMemo(() => {
     if (!dest) return null;
-    return computeLiveRoute(
-      userLocation.lat,
-      userLocation.lon,
-      userLocation.name,
+    return buildSafeRoute(
+      { lat: userLocation.lat, lon: userLocation.lon, name: userLocation.name },
       dest,
-      seaLevel,
-      hazards
+      { mpa: MPA_GEOJSON, imblBufferKm: 2.0, seaLevel }
     );
-  }, [dest, userLocation.lat, userLocation.lon, userLocation.name, seaLevel, hazards]);
+  }, [dest, userLocation.lat, userLocation.lon, userLocation.name, seaLevel]);
+
+  const route: LiveRouteInfo | null = backendRoute ?? clientSafeRoute;
 
   const destFeature = useMemo(
     () => (dest ? (pfzItemToFeature(selectedPFZ) ?? pfzItemToFeature(dest)) : null),
@@ -466,6 +516,7 @@ export const RouteViewScreen: React.FC = () => {
             zoom={9}
             highlightFeatures={destFeature ? [destFeature] : []}
             userLocation={{ lat: userLocation.lat, lon: userLocation.lon }}
+            route={route.waypoints}
             onSelectZone={() => undefined}
           />
         </div>
@@ -492,7 +543,9 @@ export const RouteViewScreen: React.FC = () => {
                       ? `Origin: ${route.originName}`
                       : idx === route.waypoints.length - 1
                         ? `Destination: ${dest.code}`
-                        : `Safe Channel Waypoint ${idx}`}
+                        : route.detourOccurred
+                          ? `Detour Waypoint ${idx} (Avoidance)`
+                          : `Safe Channel Waypoint ${idx}`}
                   </div>
                   <div className="text-[11px] font-mono text-slate-400">
                     Lat: {wp[0].toFixed(3)}° N, Lng: {wp[1].toFixed(3)}° E
