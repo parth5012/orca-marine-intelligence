@@ -5,6 +5,8 @@ import {
   buildSafeRoute,
   computeLiveRoute,
   haversineKm,
+  polylineToPolylineDistanceKm,
+  pointToPolylineDistanceKm,
   type PFZItem,
 } from '../lib/pfz';
 import { MPA_GEOJSON, IMBL_COORDINATES } from '../map/boundaries';
@@ -90,6 +92,12 @@ describe('Route Math Library (T5 #164)', () => {
     expect(route.detourOccurred).toBe(true);
     expect(route.hazardWarnings.length).toBeGreaterThan(0);
     expect(route.hazardWarnings.some(w => w.includes('Marine Protected Area'))).toBe(true);
+
+    const ring = MPA_GEOJSON.features[0].geometry.coordinates[0];
+    const poly: [number, number][] = ring.map((pt: [number, number]) => [pt[1], pt[0]]);
+    for (let i = 0; i < route.waypoints.length - 1; i++) {
+      expect(segmentCrossesPolygon(route.waypoints[i], route.waypoints[i + 1], poly)).toBe(false);
+    }
   });
 
   it('buildSafeRoute flags IMBL proximity warning within 2km buffer', () => {
@@ -107,6 +115,17 @@ describe('Route Math Library (T5 #164)', () => {
     });
 
     expect(route.hazardWarnings.some(w => w.includes('International Maritime Boundary Line'))).toBe(true);
+  });
+
+  it('polylineToPolylineDistanceKm is zero when a leg crosses the border line', () => {
+    // Vertical route leg crosses a horizontal border segment; both endpoints
+    // sit ~5.5 km from the border, but the intervening leg intersects it.
+    const route: [number, number][] = [[8.95, 79.55], [9.05, 79.55]];
+    const border: [number, number][] = [[9.0, 79.5], [9.0, 79.6]];
+    for (const pt of route) {
+      expect(pointToPolylineDistanceKm(pt, border)).toBeGreaterThan(2.0);
+    }
+    expect(polylineToPolylineDistanceKm(route, border)).toBe(0);
   });
 
   it('buildSafeRoute keeps computeLiveRoute as fallback when no obstacles', () => {

@@ -53,6 +53,7 @@ class SafeRouteResponse(BaseModel):
     safety_index: int
     safety_label: str
     hazards: List[str]
+    detour_occurred: bool = False
     cost_breakdown: CostBreakdown
 
 
@@ -145,6 +146,46 @@ def _point_to_polyline_distance_km(
     return min_dist
 
 
+def _route_legs_clear(
+    waypoints: List[Tuple[float, float]], poly: List[Tuple[float, float]]
+) -> bool:
+    """True when no leg of the waypoint polyline crosses the polygon."""
+    for i in range(len(waypoints) - 1):
+        if _segment_crosses_polygon(waypoints[i], waypoints[i + 1], poly):
+            return False
+    return True
+
+
+def _seg_seg_distance_km(
+    a1: Tuple[float, float],
+    a2: Tuple[float, float],
+    b1: Tuple[float, float],
+    b2: Tuple[float, float],
+) -> float:
+    """Minimum distance between segments a1-a2 and b1-b2 in km (0 when intersecting)."""
+    if _segments_intersect(a1, a2, b1, b2):
+        return 0.0
+    return min(
+        _point_to_segment_distance_km(a1, b1, b2),
+        _point_to_segment_distance_km(a2, b1, b2),
+        _point_to_segment_distance_km(b1, a1, a2),
+        _point_to_segment_distance_km(b2, a1, a2),
+    )
+
+
+def _polyline_to_polyline_distance_km(
+    route: List[Tuple[float, float]], other: List[Tuple[float, float]]
+) -> float:
+    """Minimum distance between two polylines in km, evaluated leg-by-leg."""
+    min_dist = float("inf")
+    for i in range(len(route) - 1):
+        for j in range(len(other) - 1):
+            d = _seg_seg_distance_km(route[i], route[i + 1], other[j], other[j + 1])
+            if d < min_dist:
+                min_dist = d
+    return min_dist
+
+
 @router.get("/route/safe", response_model=SafeRouteResponse)
 async def get_safe_route(
     olat: float = Query(..., ge=-90.0, le=90.0, description="Origin latitude"),
@@ -164,10 +205,13 @@ async def get_safe_route(
     mpa_features = get_mpa_boundaries()
     hazards: List[str] = []
     detour_occurred = False
-    detour_wp: Optional[Tuple[float, float]] = None
-    crossed_mpa_name: Optional[str] = None
+    detour_waypoints: List[Tuple[float, float]] = []
+    unavoided_mpa_name: Optional[str] = None
 
-    # 1. MPA intersection check
+    # 1. MPA intersection check with corner-based detour.
+    # A single midpoint waypoint can leave legs crossing the polygon, so route
+    # around the buffered bbox corners, validate every leg, and keep the
+    # shortest fully-clear side (both corner orders evaluated).
     for feat in mpa_features:
         geom = feat.get("geometry", {})
         if geom.get("type") != "Polygon":
@@ -177,47 +221,71 @@ async def get_safe_route(
             continue
         # GeoJSON is [lon, lat] -> convert to (lat, lon)
         poly = [(pt[1], pt[0]) for pt in coords[0] if len(pt) >= 2]
-        if _segment_crosses_polygon(start_pt, end_pt, poly):
+        if not _segment_crosses_polygon(start_pt, end_pt, poly):
+            continue
+        crossed_mpa_name = (
+            feat.get("properties", {}).get("mpa_name")
+            or feat.get("properties", {}).get("name")
+            or "Marine Protected Area"
+        )
+
+        min_lat = min(p[0] for p in poly)
+        max_lat = max(p[0] for p in poly)
+        min_lon = min(p[1] for p in poly)
+        max_lon = max(p[1] for p in poly)
+        buf = 0.02  # ~2.2 km buffer
+
+        sw = (round(min_lat - buf, 4), round(min_lon - buf, 4))
+        nw = (round(max_lat + buf, 4), round(min_lon - buf, 4))
+        se = (round(min_lat - buf, 4), round(max_lon + buf, 4))
+        ne = (round(max_lat + buf, 4), round(max_lon + buf, 4))
+        sides = ((sw, nw), (se, ne), (sw, se), (nw, ne))
+
+        best: Optional[List[Tuple[float, float]]] = None
+        best_dist = float("inf")
+        for corner_a, corner_b in sides:
+            for ordered in ((corner_a, corner_b), (corner_b, corner_a)):
+                candidate = [start_pt, ordered[0], ordered[1], end_pt]
+                if not _route_legs_clear(candidate, poly):
+                    continue
+                leg_dist = sum(
+                    haversine_km(
+                        candidate[i][0],
+                        candidate[i][1],
+                        candidate[i + 1][0],
+                        candidate[i + 1][1],
+                    )
+                    for i in range(len(candidate) - 1)
+                )
+                if leg_dist < best_dist:
+                    best_dist = leg_dist
+                    best = [ordered[0], ordered[1]]
+
+        if best is not None:
             detour_occurred = True
-            crossed_mpa_name = (
-                feat.get("properties", {}).get("mpa_name")
-                or feat.get("properties", {}).get("name")
-                or "Marine Protected Area"
+            detour_waypoints = best
+            hazards.append(
+                f"Route passes through Marine Protected Area: {crossed_mpa_name}. Detour applied around protected zone."
             )
-
-            # Calculate detour tangent waypoint (+0.02 deg ~ 2.2 km buffer)
-            min_lat = min(p[0] for p in poly)
-            max_lat = max(p[0] for p in poly)
-            min_lon = min(p[1] for p in poly)
-            max_lon = max(p[1] for p in poly)
-            buf = 0.02
-
-            c1 = (round((min_lat + max_lat) / 2.0, 4), round(min_lon - buf, 4))
-            c2 = (round((min_lat + max_lat) / 2.0, 4), round(max_lon + buf, 4))
-
-            d1 = haversine_km(olat, olon, c1[0], c1[1]) + haversine_km(c1[0], c1[1], dlat, dlon)
-            d2 = haversine_km(olat, olon, c2[0], c2[1]) + haversine_km(c2[0], c2[1], dlat, dlon)
-            detour_wp = c1 if d1 <= d2 else c2
-            break
+        else:
+            unavoided_mpa_name = crossed_mpa_name
+            hazards.append(
+                f"Route passes through Marine Protected Area: {crossed_mpa_name}. No safe detour available — avoid entry."
+            )
+        break
 
     waypoints: List[List[float]] = [[olat, olon]]
-    if detour_occurred and detour_wp and crossed_mpa_name:
-        waypoints.append([detour_wp[0], detour_wp[1]])
-        hazards.append(
-            f"Route passes through Marine Protected Area: {crossed_mpa_name}. Detour applied around protected zone."
-        )
+    if detour_occurred and detour_waypoints:
+        for wp in detour_waypoints:
+            waypoints.append([wp[0], wp[1]])
     else:
         # Standard midpoint
         waypoints.append([round((olat + dlat) / 2.0, 4), round((olon + dlon) / 2.0, 4)])
     waypoints.append([dlat, dlon])
 
-    # 2. IMBL proximity check
-    min_imbl_dist = float("inf")
-    pts_to_check = [start_pt, end_pt] + ([detour_wp] if detour_wp else [])
-    for pt in pts_to_check:
-        d = _point_to_polyline_distance_km(pt, CANONICAL_IMBL_POINTS)
-        if d < min_imbl_dist:
-            min_imbl_dist = d
+    # 2. IMBL proximity check across the full route polyline, leg-by-leg.
+    route_pts: List[Tuple[float, float]] = [(wp[0], wp[1]) for wp in waypoints]
+    min_imbl_dist = _polyline_to_polyline_distance_km(route_pts, CANONICAL_IMBL_POINTS)
 
     near_imbl = min_imbl_dist <= IMBL_BUFFER_KM
     if near_imbl:
@@ -240,7 +308,10 @@ async def get_safe_route(
     # Safety index and label
     safety_label = "SAFE"
     safety_index = 85
-    if near_imbl:
+    if unavoided_mpa_name is not None:
+        safety_label = "AVOID"
+        safety_index = 30
+    elif near_imbl:
         safety_label = "CAUTION"
         safety_index = 50
     elif detour_occurred:
@@ -250,7 +321,9 @@ async def get_safe_route(
     # 4. Cost model per T3 lock: distance * (1.0 + wave*0.5 + wind*0.3 + forbidden_penalty)
     wave_penalty = round(wave_height_m * 0.5, 3)
     wind_penalty = round((wind_speed_kt / 50.0) * 0.3, 3)
-    forbidden_penalty = 1000.0 if (detour_occurred or near_imbl) else 0.0
+    forbidden_penalty = (
+        1000.0 if (detour_occurred or near_imbl or unavoided_mpa_name) else 0.0
+    )
     total_cost = round(
         total_dist_km * (1.0 + wave_penalty + wind_penalty + forbidden_penalty), 2
     )
@@ -274,5 +347,6 @@ async def get_safe_route(
         safety_index=safety_index,
         safety_label=safety_label,
         hazards=hazards,
+        detour_occurred=detour_occurred,
         cost_breakdown=cost_breakdown,
     )
