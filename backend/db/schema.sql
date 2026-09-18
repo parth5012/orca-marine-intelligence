@@ -4,6 +4,8 @@
 
 -- Enable PostGIS spatial extension
 CREATE EXTENSION IF NOT EXISTS postgis;
+-- pgcrypto for gen_random_uuid() defaults on officer tables (§7)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================
 -- 1. PFZ Zones — Daily potential fishing zone features (INCOIS)
@@ -113,3 +115,51 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
     started_at      TIMESTAMPTZ DEFAULT NOW(),
     completed_at    TIMESTAMPTZ
 );
+
+-- ============================================================
+-- 7. Officer Register — Departures / Overrides / Broadcasts (Map #170 T2)
+-- Idempotent additive migration (IF NOT EXISTS). Port ids reference
+-- data/ports.json ids (validated in backend/core/ports.py), not a
+-- Postgres FK, so file-registry and DB stay in sync without coupling.
+-- Runtime uses in-memory stores with this Postgres schema for prod
+-- (see backend/routers/officer.py + backend/db/models.py).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS departures (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    port_id         TEXT NOT NULL,                  -- data/ports.json id (kochi, chennai, ...)
+    boat_id         TEXT NOT NULL,
+    crew            INT NOT NULL,
+    time_out        TIMESTAMPTZ NOT NULL,
+    expected_in     TIMESTAMPTZ NOT NULL,
+    dest_lat        FLOAT NOT NULL,
+    dest_lon        FLOAT NOT NULL,
+    dest_zone       TEXT,
+    status          TEXT DEFAULT 'at_sea',          -- at_sea / returned / overdue
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_departures_port ON departures (port_id);
+CREATE INDEX IF NOT EXISTS idx_departures_expected ON departures (expected_in);
+
+CREATE TABLE IF NOT EXISTS overrides (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    port_id         TEXT NOT NULL,
+    date            DATE NOT NULL,
+    decision        TEXT NOT NULL,                  -- GO / HOLD
+    reason          TEXT NOT NULL,
+    by_role         TEXT NOT NULL,                  -- port / watch
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_overrides_port_date ON overrides (port_id, date);
+
+CREATE TABLE IF NOT EXISTS broadcasts (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    port_id         TEXT NOT NULL,
+    text_en         TEXT NOT NULL,
+    text_local      TEXT,
+    lang            TEXT DEFAULT 'en',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_broadcasts_port ON broadcasts (port_id);
