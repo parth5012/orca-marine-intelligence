@@ -31,6 +31,7 @@ import React, {
   useState,
 } from 'react';
 import { TRANSLATIONS } from '@/lib/translations';
+import { toPFZItem, buildSafeRoute, type LiveRouteInfo } from '@/lib/pfz';
 
 export type TabType =
   | 'home'
@@ -213,6 +214,7 @@ interface AppContextType {
   setActiveLayers: (layers: ActiveLayers) => void;
   toggleLayer: (key: MapLayerKey) => void;
   activeRoute: [number, number][] | number[][] | null;
+  activeRouteInfo: LiveRouteInfo | null;
   setActiveRoute: (route: [number, number][] | number[][] | null) => void;
   // Auth passthrough — always authenticated (overlay forced authenticated).
   authStep: AuthStep;
@@ -255,6 +257,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeLayers, setActiveLayers] =
     useState<ActiveLayers>(DEFAULT_ACTIVE_LAYERS);
   const [activeRoute, setActiveRoute] = useState<[number, number][] | number[][] | null>(null);
+
+  // Single activeRoute producer (T7 #166): f(userLocation, selectedPFZ)
+  const activeRouteInfo = useMemo<LiveRouteInfo | null>(() => {
+    if (!selectedPFZ) return null;
+    const origin = userLocation || KOCHI_FALLBACK;
+    const item = toPFZItem(selectedPFZ, origin.lat, origin.lon);
+    if (!item || !Array.isArray(item.coordinates) || item.coordinates.length < 2) {
+      return null;
+    }
+    return buildSafeRoute(
+      { lat: origin.lat, lon: origin.lon, name: origin.name || 'Current GPS Location' },
+      item
+    );
+  }, [selectedPFZ, userLocation]);
+
+  useEffect(() => {
+    if (activeRouteInfo) {
+      setActiveRoute(activeRouteInfo.waypoints);
+    } else {
+      setActiveRoute(null);
+    }
+  }, [activeRouteInfo]);
 
   // Hydrate theme + language from localStorage (layout init script owns .dark pre-paint).
   useEffect(() => {
@@ -440,6 +464,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setActiveLayers,
       toggleLayer,
       activeRoute,
+      activeRouteInfo,
       setActiveRoute,
         authStep,
         setAuthStep,

@@ -204,9 +204,12 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
     (feature: any) => {
       setSelectedZone(feature);
       setDrawerOpen(true);
+      if (ctx?.setSelectedPFZ) {
+        ctx.setSelectedPFZ(feature);
+      }
       onSelectZone?.(feature);
     },
-    [onSelectZone]
+    [onSelectZone, ctx]
   );
 
   // Live Find-Nearest: nearest live PFZ feature to GPS/center (no mocks).
