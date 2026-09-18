@@ -34,6 +34,7 @@
 | 14 | `GET` | `/api/officer/overrides` | `officer` | `/officer` override log · `backend/routers/officer.py` | P1 |
 | 15 | `POST` | `/api/officer/broadcasts` | `officer` | `/officer` broadcast composer · `backend/routers/officer.py` | P1 |
 | 16 | `GET` | `/api/officer/broadcasts` | `officer` | `/officer` broadcast history · `backend/routers/officer.py` | P1 |
+| 17 | `GET` | `/api/officer/dayclose` | `officer` | `/officer` day-close audit (JSON + CSV) · `backend/routers/officer.py` | P1 |
 
 P0 = app broken without it. P1 = safety/UX degraded. P2 = deferred/internal.
 
@@ -476,7 +477,36 @@ Response `200`: created row with `id`, `created_at`.
 
 ### GET /api/officer/broadcasts?port_id=kochi
 
-Response `200`: `{ "count": 1, "broadcasts": [...] }`. Watch role may omit `port_id` (returns all ports).
+Response `200`: `{ "count": 1, "broadcasts": [...] }`. Watch role may omit `port_id` (returns all ports). History returns the 20 latest (newest first); `count` is the total. Postgres is the source of truth (no Redis history, no auto-send).
+
+### GET /api/officer/dayclose?port_id=kochi&date=2026-09-18
+
+Per-port per-date audit summary for the `/officer` day-close card (T6 #176). **File:** `backend/routers/officer.py`. Auth is the same `X-Officer-Token` scheme (port role requires `?port_id=`; watch may omit it and gets `port_id: "all"` aggregated). `date` defaults to today (UTC); invalid `YYYY-MM-DD` returns 400.
+
+Response `200` (`application/json`, locked keys — CSV header is exactly these):
+
+```json
+{
+  "port_id": "kochi",
+  "date": "2026-09-18",
+  "departures": 2,
+  "holds": 1,
+  "overdues_resolved": 1,
+  "mpa_hits": 0,
+  "broadcasts": 1
+}
+```
+
+Semantics: `departures` counts rows whose `time_out` falls on `date`; `holds` counts overrides with `decision: HOLD` on `date`; `overdues_resolved` counts in-scope departures with `status: returned`; `mpa_hits` reuses the T5 `compute_geofence_flag` helper (`mpa` priority); `broadcasts` counts broadcasts created on `date`.
+
+`?format=csv` returns the same summary as `text/csv` (header row + one data row, EN header, `Content-Disposition: attachment`):
+
+```csv
+port_id,date,departures,holds,overdues_resolved,mpa_hits,broadcasts
+kochi,2026-09-18,2,1,1,0,1
+```
+
+**Status Codes:** `200` (JSON or CSV) · `400` (port role without `?port_id=`, unknown `port_id`, invalid `date`) · `401` (`{ "detail": "Invalid or missing X-Officer-Token." }`).
 
 ---
 

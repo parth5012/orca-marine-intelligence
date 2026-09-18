@@ -17,14 +17,16 @@ define the Postgres tables for prod. No PostGIS needed (lat/lon floats).
 Local-first register: identical behaviour under ORCA_DATA_SOURCE live/mock.
 """
 
+import csv
 import hmac
+import io
 import logging
 import os
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 try:
@@ -476,4 +478,146 @@ async def list_broadcasts(
     role = require_officer_role(x_officer_token)
     scoped = _require_scoped_port(role, port_id)
     rows = [r for r in _broadcasts if not scoped or r["port_id"] == scoped.lower()]
-    return {"count": len(rows), "broadcasts": rows}
+    return {"count": len(rows), "broadcasts": rows[-20:][::-1]}
+
+
+# ---------------------------------------------------------------------------
+# T6 broadcast draft + day-close audit (issue #176)
+# ---------------------------------------------------------------------------
+# Locked day-close columns (map Not-yet-specified decision): JSON keys and
+# CSV header are EXACTLY DAYCLOSE_COLUMNS, in order. Postgres stays source
+# of truth for history (no Redis broadcast_history); the in-memory stores
+# below back the schema.sql §7 tables in tests/degraded mode.
+# overdues_resolved = departures in scope whose status == "returned"
+# (documented simplification: the store has no was-overdue flag).
+# mpa_hits reuses the T5 compute_geofence_flag helper (mpa priority).
+# History shows the 20 latest broadcasts. No auto-send, no SMS gateway.
+# Translation: officer has no server translate endpoint, so build_broadcast_
+# local falls back to EN + translation_warning (mirrors the chat
+# POST /api/chat language field + Redis 1h cache fallback shape); the
+# officer edits the textarea manually.
+
+DAYCLOSE_COLUMNS = [
+    "port_id",
+    "date",
+    "departures",
+    "holds",
+    "overdues_resolved",
+    "mpa_hits",
+    "broadcasts",
+]
+
+
+def build_broadcast_draft(
+    decision: str,
+    port_name: str,
+    date_str: str,
+    sea_status: str = "unknown",
+    place: str = "-",
+    bearing: str = "-",
+    distance: str = "-",
+    sector: str = "-",
+) -> str:
+    """Render the EN broadcast draft from go-no-go + PFZ top zone. Pure."""
+    dec = (decision or "HOLD").strip().upper()
+    if dec not in ("GO", "HOLD"):
+        dec = "HOLD"
+    return (
+        f"{dec}: {(port_name or '').strip()} {(date_str or '').strip()}. "
+        f"Sea {(sea_status or 'unknown').strip()}. "
+        f"PFZ {(place or '-').strip()} {(bearing or '-').strip()}° "
+        f"{(distance or '-').strip()} (INCOIS {(sector or '-').strip()})."
+    )
+
+
+def build_broadcast_local(draft_en: str, lang: str) -> Dict[str, Any]:
+    """Local draft: EN passthrough + fallback flag (no translate API). Pure."""
+    code = (lang or "en").strip().lower()
+    if code in ("", "en"):
+        return {"text_local": draft_en, "translation_warning": False}
+    return {"text_local": draft_en, "translation_warning": True}
+
+
+def _iso_date(value: Any) -> Optional[str]:
+    """Return the YYYY-MM-DD date part of an ISO datetime, else None. Pure."""
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.date().isoformat()
+
+
+def compute_dayclose(port_id: str, date_str: str) -> Dict[str, Any]:
+    """Aggregate one per-port per-date summary from the T2 stores. Pure."""
+    scope = (port_id or "").strip().lower()
+    day = (date_str or "").strip()
+    deps = [
+        r for r in _departures
+        if (not scope or scope == "all" or r["port_id"] == scope)
+        and _iso_date(r.get("time_out")) == day
+    ]
+    holds = sum(
+        1 for r in _overrides
+        if (not scope or scope == "all" or r["port_id"] == scope)
+        and r.get("date") == day
+        and (r.get("decision") or "").strip().upper() == "HOLD"
+    )
+    resolved = sum(1 for r in deps if (r.get("status") or "").strip().lower() == "returned")
+    mpa_hits = 0
+    for r in deps:
+        try:
+            flag = compute_geofence_flag(float(r["dest_lat"]), float(r["dest_lon"]))
+        except (TypeError, ValueError, KeyError):
+            flag = GEOFENCE_NONE
+        if flag == GEOFENCE_MPA:
+            mpa_hits += 1
+    casts = sum(
+        1 for r in _broadcasts
+        if (not scope or scope == "all" or r["port_id"] == scope)
+        and _iso_date(r.get("created_at")) == day
+    )
+    return {
+        "port_id": scope or "all",
+        "date": day,
+        "departures": len(deps),
+        "holds": holds,
+        "overdues_resolved": resolved,
+        "mpa_hits": mpa_hits,
+        "broadcasts": casts,
+    }
+
+
+def dayclose_csv(summary: Dict[str, Any]) -> str:
+    """Render a day-close summary as CSV (header == JSON keys). Pure."""
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(DAYCLOSE_COLUMNS)
+    writer.writerow([summary[k] for k in DAYCLOSE_COLUMNS])
+    return buf.getvalue()
+
+
+@router.get("/dayclose")
+async def get_dayclose(
+    port_id: Optional[str] = Query(None),
+    date_: Optional[str] = Query(None, alias="date"),
+    format_: str = Query("json", alias="format"),
+    x_officer_token: Optional[str] = Header(None, alias="X-Officer-Token"),
+) -> Any:
+    """Per-port per-date audit summary as JSON, or text/csv with ?format=csv."""
+    role = require_officer_role(x_officer_token)
+    scoped = _require_scoped_port(role, port_id)
+    day = (date_ or "").strip() or datetime.now(timezone.utc).date().isoformat()
+    try:
+        date.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid date (YYYY-MM-DD): {day}.")
+    summary = compute_dayclose(scoped or "all", day)
+    if (format_ or "json").strip().lower() == "csv":
+        return Response(
+            content=dayclose_csv(summary),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=dayclose-{summary['port_id']}-{day}.csv"},
+        )
+    return summary

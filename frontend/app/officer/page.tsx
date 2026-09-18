@@ -21,6 +21,8 @@ import OfficerMiniMap from '@/officer/OfficerMiniMap';
 import GoNoGoCard from '@/officer/GoNoGoCard';
 import RegisterTable from '@/officer/RegisterTable';
 import AlertsFeed from '@/officer/AlertsFeed';
+import BroadcastBox from '@/officer/BroadcastBox';
+import DayClose from '@/officer/DayClose';
 import { PORTS, INDIA_CENTER, PORT_ZOOM, WATCH_ZOOM, getPortById } from '@/officer/ports';
 
 function readCookie(name: string): string | null {
@@ -73,9 +75,8 @@ function OfficerShell() {
         </section>
         <div id="alerts" data-testid="slot-alerts" className="flex flex-col gap-4">
           <AlertsFeed portId={watch ? undefined : port.id} role={role} onSelect={setHighlightId} />
-          <p className="rounded-xl border border-slate-800 p-3 text-xs text-slate-500">
-            Broadcast composer plugs in here (T6).
-          </p>
+          <BroadcastBox port={port} role={role} />
+          <DayClose port={port} role={role} />
         </div>
       </main>
     </div>
