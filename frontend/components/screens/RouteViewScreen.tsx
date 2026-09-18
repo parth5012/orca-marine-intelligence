@@ -93,9 +93,7 @@ export const RouteViewScreen: React.FC = () => {
   // Live safety + hazards at the destination (direct backend calls).
   // Shared by the mount effect and the Recalculate handler so both paths
   // update seaLevel, hazards, and feedOffline identically.
-  const loadSafety = useCallback(async (
-    bailOnCancel = true
-  ): Promise<'safe' | 'caution' | 'danger' | null> => {
+  const loadSafety = useCallback(async (): Promise<'safe' | 'caution' | 'danger' | null> => {
     if (!dest) return null;
     const seq = (safetySeqRef.current += 1);
     const isCurrent = (): boolean => seq === safetySeqRef.current;
@@ -106,7 +104,7 @@ export const RouteViewScreen: React.FC = () => {
         fetch(`${base}/api/weather/current?lat=${dLat}&lon=${dLon}`),
         fetch(`${base}/api/geofence/status`),
       ]);
-      if ((!mountedRef.current || !isCurrent()) && bailOnCancel) return null;
+      if (!mountedRef.current || !isCurrent()) return null;
         let level: 'safe' | 'caution' | 'danger' = 'safe';
         const hz: string[] = [];
         let weatherOk = false;
@@ -138,13 +136,13 @@ export const RouteViewScreen: React.FC = () => {
               : 'Route checked against monitored EEZ/MPA/IMBL boundaries'
           );
         }
-        if ((!mountedRef.current || !isCurrent()) && bailOnCancel) return null;
+        if (!mountedRef.current || !isCurrent()) return null;
         setSeaLevel(level);
         setHazards(hz);
         setFeedOffline(!weatherOk && !geoOk);
         return level;
       } catch {
-        if ((!mountedRef.current || !isCurrent()) && bailOnCancel) return null;
+        if (!mountedRef.current || !isCurrent()) return null;
         setSeaLevel('safe');
         setHazards([]);
         setFeedOffline(true);
@@ -154,7 +152,7 @@ export const RouteViewScreen: React.FC = () => {
 
   // Initial load at the destination.
   useEffect(() => {
-    void loadSafety(true);
+    void loadSafety();
   }, [loadSafety]);
 
   const [backendRoute, setBackendRoute] = useState<LiveRouteInfo | null>(null);
@@ -509,8 +507,9 @@ export const RouteViewScreen: React.FC = () => {
               data-testid="route-recalc"
               onClick={() => {
                 setRecalcNote('Re-checking live weather + geofence…');
-                void loadSafety(false).then((level) => {
-                  if (!mountedRef.current) return;
+                const requestSeq = safetySeqRef.current + 1;
+                void loadSafety().then((level) => {
+                  if (!mountedRef.current || requestSeq !== safetySeqRef.current) return;
                   if (level == null) {
                     setRecalcNote('Live feed unreachable — holding last known route.');
                   } else if (level === 'danger') {
