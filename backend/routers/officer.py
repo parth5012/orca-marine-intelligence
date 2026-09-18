@@ -22,7 +22,7 @@ import logging
 import os
 import uuid
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -31,6 +31,38 @@ try:
     from backend.core.ports import get_port
 except ImportError:  # pragma: no cover - alternate import root
     from core.ports import get_port
+
+try:
+    from backend.ingest.boundaries import (
+        IMBL_BUFFER_KM,
+        check_point_in_eez,
+        check_point_in_mpa,
+        distance_to_imbl_km,
+    )
+except ImportError:  # pragma: no cover - alternate import root
+    try:
+        from ingest.boundaries import (  # type: ignore
+            IMBL_BUFFER_KM,  # type: ignore
+            check_point_in_eez,  # type: ignore
+            check_point_in_mpa,  # type: ignore
+            distance_to_imbl_km,  # type: ignore
+        )
+    except ImportError:  # pragma: no cover - degraded: boundary data absent
+        # Duplicated from backend/ingest/boundaries.py + geofence.py:58.
+        # No new values invented; used only if the ingest module is absent.
+        IMBL_BUFFER_KM = 2.0
+
+
+        def check_point_in_eez(lat: float, lon: float):  # type: ignore
+            return False, float("inf")
+
+
+        def check_point_in_mpa(lat: float, lon: float):  # type: ignore
+            return False, None, float("inf")
+
+
+        def distance_to_imbl_km(lat: float, lon: float) -> float:  # type: ignore
+            return float("inf")
 
 logger = logging.getLogger("orca.officer")
 
@@ -159,6 +191,119 @@ def with_overdue(row: Dict[str, Any], now: datetime) -> Dict[str, Any]:
     return {**row, "overdue_mins": mins, "overdue_status": band}
 
 
+# ---------------------------------------------------------------------------
+# T5 register alerts (issue #175): computed geofence + weather flags per row
+# ---------------------------------------------------------------------------
+# All thresholds reused, none invented:
+# - overdue amber>120 / red>360 mins: compute_overdue above (T2).
+# - geofence IMBL 2km buffer: IMBL_BUFFER_KM from ingest/boundaries.py
+#   (surfaced at geofence.py:58 as imbl_buffer_km).
+# - weather red rule: wind>25kt or wave>2.5m or current>2.5kt or
+#   pressure<995hPa, mirroring weather.py:136.
+# Backend stores no history, so weather_flag compares the officer-logged
+# status at departure (weather_at_log, optional POST field) against a
+# current dest status supplied by the caller or DEST_STATUS_PROVIDER.
+# Default provider is None (no network I/O in the departures path, so the
+# existing suite stays fast/offline); a live deployment may wire a cached
+# weather lookup. Unknown either side -> "none" (never invent a flip).
+
+GEOFENCE_NONE = "none"
+GEOFENCE_MPA = "mpa"
+GEOFENCE_IMBL = "imbl"
+GEOFENCE_OUTSIDE_EEZ = "outside_eez"
+WEATHER_NONE = "none"
+WEATHER_FLIP = "flip"
+_WEATHER_KNOWN = ("safe", "caution", "danger")
+
+# Optional hook: (dest_lat, dest_lon) -> "safe"|"caution"|"danger"|None.
+# Tests inject a fake; prod may wire a cached lookup. Default None = no I/O.
+DEST_STATUS_PROVIDER: Optional[Callable[[float, float], Optional[str]]] = None
+
+
+def classify_geofence(mpa_hit: bool, imbl_km: float, inside_eez: bool) -> str:
+    """Pure geofence flag from precomputed checks. Priority: mpa > imbl > outside_eez."""
+    if mpa_hit:
+        return GEOFENCE_MPA
+    try:
+        near_imbl = float(imbl_km) < float(IMBL_BUFFER_KM)
+    except (TypeError, ValueError):
+        near_imbl = False
+    if near_imbl:
+        return GEOFENCE_IMBL
+    if not inside_eez:
+        return GEOFENCE_OUTSIDE_EEZ
+    return GEOFENCE_NONE
+
+
+def compute_geofence_flag(dest_lat: float, dest_lon: float) -> str:
+    """Live flag for a destination via ingest boundary data. Never raises (degraded -> none)."""
+    try:
+        mpa_hit, _, _ = check_point_in_mpa(dest_lat, dest_lon)
+        imbl_km = distance_to_imbl_km(dest_lat, dest_lon)
+        inside_eez, _ = check_point_in_eez(dest_lat, dest_lon)
+    except Exception as exc:
+        logger.warning("geofence flag degraded for (%s, %s): %s", dest_lat, dest_lon, exc)
+        return GEOFENCE_NONE
+    return classify_geofence(bool(mpa_hit), imbl_km, bool(inside_eez))
+
+
+def is_danger_sea_state(
+    wind_kt: float = 0.0,
+    wave_m: float = 0.0,
+    current_kt: float = 0.0,
+    pressure_hpa: float = 1013.0,
+) -> bool:
+    """True when the weather.py:136 red rule fires. Pure, same thresholds."""
+    try:
+        return (
+            float(wind_kt) > 25.0
+            or float(wave_m) > 2.5
+            or float(current_kt) > 2.5
+            or float(pressure_hpa) < 995.0
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def compute_weather_flag(status_at_log: Optional[str], status_now: Optional[str]) -> str:
+    """Flip iff a boat logged under safe/caution now faces danger. Pure."""
+    if (status_now or "").strip().lower() == "danger" and (
+        status_at_log or ""
+    ).strip().lower() in ("safe", "caution"):
+        return WEATHER_FLIP
+    return WEATHER_NONE
+
+
+def normalize_weather_status(value: Optional[str]) -> Optional[str]:
+    """Lowercase known sea statuses, else None. Pure."""
+    candidate = (value or "").strip().lower()
+    return candidate if candidate in _WEATHER_KNOWN else None
+
+
+def with_alerts(
+    row: Dict[str, Any],
+    now: datetime,
+    dest_status_now: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return a copy of a departure row plus computed alerts (never stored). Pure except provider."""
+    out = with_overdue(row, now)
+    try:
+        out["geofence_flag"] = compute_geofence_flag(float(row["dest_lat"]), float(row["dest_lon"]))
+    except (TypeError, ValueError, KeyError):
+        out["geofence_flag"] = GEOFENCE_NONE
+    status_now = normalize_weather_status(dest_status_now)
+    if status_now is None and DEST_STATUS_PROVIDER is not None:
+        try:
+            status_now = normalize_weather_status(
+                DEST_STATUS_PROVIDER(float(row["dest_lat"]), float(row["dest_lon"]))
+            )
+        except Exception as exc:
+            logger.warning("dest status provider failed for row %s: %s", row.get("id"), exc)
+            status_now = None
+    out["weather_flag"] = compute_weather_flag(row.get("weather_at_log"), status_now)
+    return out
+
+
 def clear_officer_stores() -> None:
     """Reset in-memory stores (tests + local dev only)."""
     _departures.clear()
@@ -193,6 +338,9 @@ class DepartureCreate(BaseModel):
     dest_lon: float
     dest_zone: Optional[str] = None
     status: str = "at_sea"
+    # T5 #175: sea status the officer saw at log time (safe|caution|danger).
+    # Optional baseline for the weather-flip rule; omitted -> weather_flag none.
+    weather_at_log: Optional[str] = None
 
 
 class OverrideCreate(BaseModel):
@@ -232,10 +380,11 @@ async def create_departure(
         "dest_lon": body.dest_lon,
         "dest_zone": body.dest_zone,
         "status": body.status or "at_sea",
+        "weather_at_log": normalize_weather_status(body.weather_at_log),
         "created_at": _now_iso(),
     }
     _departures.append(row)
-    return with_overdue(row, datetime.now(timezone.utc))
+    return with_alerts(row, datetime.now(timezone.utc))
 
 
 @router.get("/departures")
@@ -248,7 +397,7 @@ async def list_departures(
     scoped = _require_scoped_port(role, port_id)
     now = datetime.now(timezone.utc)
     rows = [r for r in _departures if not scoped or r["port_id"] == scoped.lower()]
-    return {"count": len(rows), "departures": [with_overdue(r, now) for r in rows]}
+    return {"count": len(rows), "departures": [with_alerts(r, now) for r in rows]}
 
 
 # ---------------------------------------------------------------------------

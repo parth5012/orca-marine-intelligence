@@ -13,12 +13,14 @@
 
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import OfficerTopBar, { OfficerRole } from '@/officer/OfficerTopBar';
 import SafetyBanner from '@/officer/SafetyBanner';
 import OfficerMiniMap from '@/officer/OfficerMiniMap';
 import GoNoGoCard from '@/officer/GoNoGoCard';
+import RegisterTable from '@/officer/RegisterTable';
+import AlertsFeed from '@/officer/AlertsFeed';
 import { PORTS, INDIA_CENTER, PORT_ZOOM, WATCH_ZOOM, getPortById } from '@/officer/ports';
 
 function readCookie(name: string): string | null {
@@ -48,6 +50,7 @@ function OfficerShell() {
 
   const center: [number, number] = watch ? INDIA_CENTER : [port.lat, port.lon];
   const zoom = watch ? WATCH_ZOOM : PORT_ZOOM;
+  const [highlightId, setHighlightId] = useState<string | null>(null);
 
   return (
     <div className="min-h-screen bg-slate-950 font-sans text-slate-100">
@@ -65,14 +68,13 @@ function OfficerShell() {
         <section className="flex flex-col gap-4">
           <OfficerMiniMap center={center} zoom={zoom} sector={watch ? undefined : port.incois_sector} />
           <div id="register" data-testid="slot-register">
-            <p className="rounded-xl border border-slate-800 p-3 text-xs text-slate-500">
-              Departure register plugs in here (T5).
-            </p>
+            <RegisterTable port={port} role={role} highlightId={highlightId} />
           </div>
         </section>
-        <div id="alerts" data-testid="slot-alerts">
+        <div id="alerts" data-testid="slot-alerts" className="flex flex-col gap-4">
+          <AlertsFeed portId={watch ? undefined : port.id} role={role} onSelect={setHighlightId} />
           <p className="rounded-xl border border-slate-800 p-3 text-xs text-slate-500">
-            Alerts + broadcast plug in here (T5/T6).
+            Broadcast composer plugs in here (T6).
           </p>
         </div>
       </main>
