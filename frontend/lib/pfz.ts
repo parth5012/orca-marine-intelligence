@@ -10,6 +10,8 @@
  * empty states, never synthetic zones.
  */
 
+import { MPA_GEOJSON, IMBL_COORDINATES, type GeoJSONFeatureCollection } from '../map/boundaries';
+
 export interface PFZItem {
   id: string;
   name: string;
@@ -47,6 +49,15 @@ export interface LiveRouteInfo {
   safetyLabel: 'SAFE' | 'CAUTION' | 'AVOID';
   waypoints: [number, number][]; // [lat, lon]
   hazardWarnings: string[];
+  detourOccurred?: boolean;
+  detourWaypoints?: [number, number][];
+  offlineCalculated?: boolean;
+}
+
+export interface SafeRouteOptions {
+  mpa?: GeoJSONFeatureCollection;
+  imblBufferKm?: number;
+  seaLevel?: 'safe' | 'caution' | 'danger';
 }
 
 export const KT_TO_KMH = 1.852;
@@ -365,5 +376,291 @@ export function computeLiveRoute(
       [dLat, dLon],
     ],
     hazardWarnings,
+  };
+}
+
+/**
+ * Great-circle spherical interpolation between two [lat, lon] points.
+ */
+export function interpolateGreatCircle(
+  start: [number, number],
+  end: [number, number],
+  numPoints: number = 5
+): [number, number][] {
+  if (numPoints <= 2) return [start, end];
+
+  const toRad = Math.PI / 180;
+  const toDeg = 180 / Math.PI;
+
+  const lat1 = start[0] * toRad;
+  const lon1 = start[1] * toRad;
+  const lat2 = end[0] * toRad;
+  const lon2 = end[1] * toRad;
+
+  const dLat = lat2 - lat1;
+  const dLon = lon2 - lon1;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const d = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  if (d < 1e-6) {
+    return Array(numPoints).fill(start);
+  }
+
+  const points: [number, number][] = [];
+  for (let i = 0; i < numPoints; i++) {
+    const f = i / (numPoints - 1);
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+
+    const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+    const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+    const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+
+    const lat = Math.atan2(z, Math.sqrt(x * x + y * y)) * toDeg;
+    const lon = Math.atan2(y, x) * toDeg;
+    points.push([Number(lat.toFixed(5)), Number(lon.toFixed(5))]);
+  }
+  return points;
+}
+
+/**
+ * Checks if 2D line segments (p1-p2) and (p3-p4) intersect. Points are [lat, lon].
+ */
+export function segmentsIntersect(
+  p1: [number, number],
+  p2: [number, number],
+  p3: [number, number],
+  p4: [number, number]
+): boolean {
+  const ccw = (A: [number, number], B: [number, number], C: [number, number]): boolean => {
+    return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0]);
+  };
+  return (
+    ccw(p1, p3, p4) !== ccw(p2, p3, p4) &&
+    ccw(p1, p2, p3) !== ccw(p1, p2, p4)
+  );
+}
+
+/**
+ * Checks if a point [lat, lon] is inside a polygon [[lat, lon], ...] (Ray-casting).
+ */
+export function pointInPolygon(
+  point: [number, number],
+  polygon: [number, number][]
+): boolean {
+  const [lat, lon] = point;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    const intersect =
+      yi > lon !== yj > lon && lat < ((xj - xi) * (lon - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Checks if a segment [lat, lon]->[lat, lon] crosses a polygon boundary or passes through it.
+ */
+export function segmentCrossesPolygon(
+  p1: [number, number],
+  p2: [number, number],
+  polygon: [number, number][]
+): boolean {
+  if (polygon.length < 3) return false;
+  for (let i = 0; i < polygon.length; i++) {
+    const nextIdx = (i + 1) % polygon.length;
+    if (segmentsIntersect(p1, p2, polygon[i], polygon[nextIdx])) {
+      return true;
+    }
+  }
+  const mid: [number, number] = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
+  return pointInPolygon(p1, polygon) || pointInPolygon(p2, polygon) || pointInPolygon(mid, polygon);
+}
+
+/**
+ * Distance from a point [lat, lon] to the closest point on segment s1-s2 in kilometers.
+ */
+export function pointToSegmentDistanceKm(
+  pt: [number, number],
+  s1: [number, number],
+  s2: [number, number]
+): number {
+  const dTotal = haversineKm(s1[0], s1[1], s2[0], s2[1]);
+  if (dTotal === 0) return haversineKm(pt[0], pt[1], s1[0], s1[1]);
+
+  const denom = (s2[0] - s1[0]) ** 2 + (s2[1] - s1[1]) ** 2;
+  if (denom === 0) return haversineKm(pt[0], pt[1], s1[0], s1[1]);
+
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((pt[0] - s1[0]) * (s2[0] - s1[0]) + (pt[1] - s1[1]) * (s2[1] - s1[1])) / denom
+    )
+  );
+  const projLat = s1[0] + t * (s2[0] - s1[0]);
+  const projLon = s1[1] + t * (s2[1] - s1[1]);
+  return haversineKm(pt[0], pt[1], projLat, projLon);
+}
+
+/**
+ * Minimum distance from a point to a polyline in kilometers.
+ */
+export function pointToPolylineDistanceKm(
+  pt: [number, number],
+  polyline: [number, number][]
+): number {
+  let minD = Infinity;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const d = pointToSegmentDistanceKm(pt, polyline[i], polyline[i + 1]);
+    if (d < minD) minD = d;
+  }
+  return minD;
+}
+
+/**
+ * Safe marine route calculator (T5 #164).
+ * Calculates direct great-circle route with MPA polygon avoidance and IMBL proximity checks.
+ */
+export function buildSafeRoute(
+  origin: { lat: number; lon: number; name?: string },
+  dest: PFZItem,
+  options: SafeRouteOptions = {}
+): LiveRouteInfo {
+  const originLat = origin.lat;
+  const originLon = origin.lon;
+  const originName = origin.name || 'Current GPS Location';
+  const [dLat, dLon] = dest.coordinates;
+  const seaLevel = options.seaLevel || 'safe';
+  const imblBufferKm = options.imblBufferKm ?? 2.0;
+
+  const mpaCollection = options.mpa || MPA_GEOJSON;
+  const warnings: string[] = [];
+  let detourOccurred = false;
+  let detourWaypoints: [number, number][] = [];
+
+  const startPt: [number, number] = [originLat, originLon];
+  const endPt: [number, number] = [dLat, dLon];
+
+  // 1. Check for MPA intersection
+  let mpaCrossedName: string | null = null;
+  let detourWP: [number, number] | null = null;
+
+  for (const feature of mpaCollection.features) {
+    if (feature.geometry.type !== 'Polygon') continue;
+    const ring = feature.geometry.coordinates[0];
+    // GeoJSON coordinates are [lon, lat] -> convert to [lat, lon]
+    const polyLatLon: [number, number][] = ring.map((pt: [number, number]) => [pt[1], pt[0]]);
+
+    if (segmentCrossesPolygon(startPt, endPt, polyLatLon)) {
+      mpaCrossedName = feature.properties.mpa_name || 'Protected Marine Reserve';
+
+      // Compute detour around bounding box
+      let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+      for (const [pLat, pLon] of polyLatLon) {
+        if (pLat < minLat) minLat = pLat;
+        if (pLat > maxLat) maxLat = pLat;
+        if (pLon < minLon) minLon = pLon;
+        if (pLon > maxLon) maxLon = pLon;
+      }
+
+      // Buffer offset in degrees (~2.2 km)
+      const bufDeg = 0.02;
+      const candidate1: [number, number] = [
+        Number(((minLat + maxLat) / 2).toFixed(4)),
+        Number((minLon - bufDeg).toFixed(4)),
+      ];
+      const candidate2: [number, number] = [
+        Number(((minLat + maxLat) / 2).toFixed(4)),
+        Number((maxLon + bufDeg).toFixed(4)),
+      ];
+
+      const dist1 = haversineKm(originLat, originLon, candidate1[0], candidate1[1]) +
+                    haversineKm(candidate1[0], candidate1[1], dLat, dLon);
+      const dist2 = haversineKm(originLat, originLon, candidate2[0], candidate2[1]) +
+                    haversineKm(candidate2[0], candidate2[1], dLat, dLon);
+
+      detourWP = dist1 <= dist2 ? candidate1 : candidate2;
+      break;
+    }
+  }
+
+  const waypoints: [number, number][] = [];
+  waypoints.push(startPt);
+
+  if (detourWP && mpaCrossedName) {
+    detourOccurred = true;
+    detourWaypoints = [detourWP];
+    waypoints.push(detourWP);
+    warnings.push(`Route passes through Marine Protected Area: ${mpaCrossedName}. Detour applied around protected zone.`);
+  } else {
+    // Standard mid waypoint
+    const mid: [number, number] = [
+      Number(((originLat + dLat) / 2).toFixed(4)),
+      Number(((originLon + dLon) / 2).toFixed(4)),
+    ];
+    waypoints.push(mid);
+  }
+  waypoints.push(endPt);
+
+  // 2. Check IMBL proximity
+  let minImblDist = Infinity;
+  for (const pt of [startPt, ...detourWaypoints, endPt]) {
+    const d = pointToPolylineDistanceKm(pt, IMBL_COORDINATES);
+    if (d < minImblDist) minImblDist = d;
+  }
+
+  let safetyLabel: 'SAFE' | 'CAUTION' | 'AVOID' = 'SAFE';
+  let { percent } = safetyIndexFromSea(seaLevel);
+
+  if (minImblDist <= imblBufferKm) {
+    warnings.push(
+      `Warning: Proximity to International Maritime Boundary Line (<${imblBufferKm}km). Risk of border crossing.`
+    );
+    safetyLabel = 'CAUTION';
+    percent = Math.min(percent, 55);
+  }
+
+  if (detourOccurred) {
+    if (safetyLabel === 'SAFE') safetyLabel = 'CAUTION';
+    percent = Math.min(percent, 70);
+  }
+
+  // Calculate total route distance across waypoints
+  let totalDistKm = 0;
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    totalDistKm += haversineKm(waypoints[i][0], waypoints[i][1], waypoints[i + 1][0], waypoints[i + 1][1]);
+  }
+  totalDistKm = Number(totalDistKm.toFixed(1));
+
+  const y = Math.sin(((dLon - originLon) * Math.PI) / 180) * Math.cos((dLat * Math.PI) / 180);
+  const x =
+    Math.cos((originLat * Math.PI) / 180) * Math.sin((dLat * Math.PI) / 180) -
+    Math.sin((originLat * Math.PI) / 180) *
+      Math.cos((dLat * Math.PI) / 180) *
+      Math.cos(((dLon - originLon) * Math.PI) / 180);
+  const bearingDegrees = Math.round((((Math.atan2(y, x) * 180) / Math.PI + 360) % 360) * 10) / 10;
+  const bearingLabel = `${compassFromDegrees(bearingDegrees)} ${String(Math.round(bearingDegrees)).padStart(3, '0')}°`;
+
+  return {
+    originName,
+    destinationName: `${dest.code} (${dest.name})`,
+    totalDistanceKm: totalDistKm,
+    totalDistanceNm: Number((totalDistKm / KM_TO_NM).toFixed(1)),
+    bearing: bearingLabel,
+    bearingDegrees,
+    estimatedTimeMinutes: Math.max(5, Math.round((totalDistKm / CRUISE_KMH) * 60)),
+    safetyIndexPercent: percent,
+    safetyLabel,
+    waypoints,
+    hazardWarnings: warnings,
+    detourOccurred,
+    detourWaypoints,
+    offlineCalculated: true,
   };
 }
