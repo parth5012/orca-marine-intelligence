@@ -51,6 +51,7 @@ import {
   ESRI_DARK_ATTRIBUTION,
 } from './carto';
 import { useThemeModeOptional } from '@/context/AppContext';
+import { haversineKm, segmentCrossesPolygon } from '@/lib/pfz';
 
 export interface MapLayerToggles {
   pfz?: boolean;
@@ -226,6 +227,59 @@ export default function MapInner({
     }
     return validPoints.length >= 2 ? validPoints : null;
   }, [route]);
+
+  const routeStats = useMemo(() => {
+    if (!routePositions || routePositions.length < 2) return null;
+    let distKm = 0;
+    for (let i = 0; i < routePositions.length - 1; i++) {
+      distKm += haversineKm(
+        routePositions[i][0],
+        routePositions[i][1],
+        routePositions[i + 1][0],
+        routePositions[i + 1][1]
+      );
+    }
+    const distNm = distKm / 1.852;
+    const start = routePositions[0];
+    const end = routePositions[routePositions.length - 1];
+    const b = bearing(start[0], start[1], end[0], end[1]);
+    const compass = getCompassDirection(b);
+    const etaMin = Math.max(5, Math.round((distKm / 25) * 60));
+
+    // Check if any segment crosses an MPA polygon
+    let crossesMPA = false;
+    let crossedMpaName = '';
+    for (const feat of MPA_GEOJSON.features) {
+      if (feat.geometry.type !== 'Polygon') continue;
+      const ring = feat.geometry.coordinates[0];
+      const polyLatLon: [number, number][] = ring.map((pt: [number, number]) => [pt[1], pt[0]]);
+      for (let i = 0; i < routePositions.length - 1; i++) {
+        if (segmentCrossesPolygon(routePositions[i], routePositions[i + 1], polyLatLon)) {
+          crossesMPA = true;
+          crossedMpaName = feat.properties.mpa_name || 'Protected Marine Reserve';
+          break;
+        }
+      }
+      if (crossesMPA) break;
+    }
+
+    const hasDetour = routePositions.length > 2;
+    const safeColor = isLight ? '#059669' : '#10b981';
+    const detourColor = isLight ? '#d97706' : '#f59e0b';
+    const dangerColor = isLight ? '#dc2626' : '#ef4444';
+
+    return {
+      distKm: Number(distKm.toFixed(1)),
+      distNm: Number(distNm.toFixed(1)),
+      bearingDeg: Math.round(b),
+      bearingLabel: `${compass} ${Math.round(b)}°`,
+      etaMin,
+      crossesMPA,
+      crossedMpaName,
+      hasDetour,
+      color: crossesMPA ? dangerColor : hasDetour ? detourColor : safeColor,
+    };
+  }, [routePositions, isLight]);
 
   // UI-MIG-T5 visual-only flags (missing => true so legacy 5-key bags are unchanged).
   const ext = layers as Record<string, boolean | undefined>;
@@ -840,18 +894,86 @@ export default function MapInner({
           </>
         )}
 
-          {/* 5b. Green route polyline from user GPS to recommended zone (T4 #119) */}
-          {routePositions && routePositions.length >= 2 && (userLocation || activeLocation) && (
-          <Polyline
-            key={`route-${routePositions[0][0]}-${routePositions[0][1]}`}
-            positions={routePositions}
-            pathOptions={{
-              color: '#22c55e',
-              weight: 3,
-              dashArray: '8, 6',
-              opacity: 0.85,
-            }}
-          />
+        {/* 5b. Safe route polyline & detour waypoints from user GPS to recommended zone (T6 #165) */}
+        {routePositions && routePositions.length >= 2 && (userLocation || activeLocation) && routeStats && (
+          <>
+            <Polyline
+              key={`route-${routePositions[0][0]}-${routePositions[0][1]}`}
+              positions={routePositions}
+              pathOptions={{
+                color: routeStats.color,
+                weight: 3.5,
+                dashArray: routeStats.crossesMPA ? '4, 4' : '8, 6',
+                opacity: 0.9,
+              }}
+            >
+              <Tooltip sticky direction="top" opacity={0.95}>
+                <div className={`p-1.5 font-sans ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-bold text-xs">
+                      {routeStats.hasDetour ? 'Safe Detour Route' : 'Direct Marine Route'}
+                    </span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                        routeStats.crossesMPA
+                          ? 'bg-red-500/20 text-red-500 border border-red-500'
+                          : routeStats.hasDetour
+                          ? 'bg-amber-500/20 text-amber-500 border border-amber-500'
+                          : 'bg-emerald-500/20 text-emerald-500 border border-emerald-500'
+                      }`}
+                    >
+                      {routeStats.crossesMPA ? 'AVOID' : routeStats.hasDetour ? 'CAUTION' : 'SAFE'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] grid grid-cols-3 gap-2">
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wider text-slate-400">Dist</div>
+                      <div className="font-semibold">{routeStats.distKm} km ({routeStats.distNm} nm)</div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wider text-slate-400">Bearing</div>
+                      <div className="font-semibold">{routeStats.bearingLabel}</div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wider text-slate-400">ETA</div>
+                      <div className="font-semibold">{routeStats.etaMin} min</div>
+                    </div>
+                  </div>
+                  {routeStats.crossesMPA && (
+                    <div className="mt-1 text-[10px] text-red-400 font-medium">
+                      ⚠️ Passes through {routeStats.crossedMpaName}
+                    </div>
+                  )}
+                  {routeStats.hasDetour && !routeStats.crossesMPA && (
+                    <div className="mt-1 text-[10px] text-amber-400 font-medium">
+                      ⚡ Avoidance detour active around hazard
+                    </div>
+                  )}
+                </div>
+              </Tooltip>
+            </Polyline>
+
+            {/* Intermediate detour waypoint markers (T6 #165) */}
+            {routePositions.slice(1, -1).map((wp, idx) => (
+              <CircleMarker
+                key={`wp-${idx}-${wp[0]}-${wp[1]}`}
+                center={wp}
+                radius={5}
+                pathOptions={{
+                  color: '#ffffff',
+                  weight: 2,
+                  fillColor: isLight ? '#0891b2' : '#06b6d4',
+                  fillOpacity: 0.95,
+                }}
+              >
+                <Tooltip direction="top" offset={[0, -6]}>
+                  <div className="text-[11px] font-semibold text-cyan-500">
+                    Waypoint {idx + 1} (Detour)
+                  </div>
+                </Tooltip>
+              </CircleMarker>
+            ))}
+          </>
         )}
 
         {/* 6. User GPS Blue Dot Marker (T6 #121) */}
