@@ -481,6 +481,14 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
             highlightFeatures={highlightFeatures}
             userLocation={userLocation}
             route={ctx?.activeRoute}
+            routeMeta={
+              ctx?.activeRouteInfo
+                ? {
+                    detourOccurred: ctx.activeRouteInfo.detourOccurred,
+                    safetyLabel: ctx.activeRouteInfo.safetyLabel,
+                  }
+                : null
+            }
             themeMode={themeMode}
             initialBasemapStyle={initialBasemapStyle}
             onSelectZone={handleMarkerSelect}
