@@ -83,6 +83,7 @@ export const HomeScreen: React.FC = () => {
     themeMode,
     t,
     activeRoute,
+    activeRouteInfo,
     mapFocusFeature,
     mapFocusNonce,
   } = useApp();
@@ -488,6 +489,14 @@ export const HomeScreen: React.FC = () => {
             highlightFeatures={highlightFeatures}
             userLocation={{ lat: userLocation.lat, lon: userLocation.lon }}
             route={activeRoute}
+            routeMeta={
+              activeRouteInfo
+                ? {
+                    detourOccurred: activeRouteInfo.detourOccurred,
+                    safetyLabel: activeRouteInfo.safetyLabel,
+                  }
+                : null
+            }
             onSelectZone={(feature) => openPFZDetail(feature)}
           />
         </div>

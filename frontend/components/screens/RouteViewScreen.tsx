@@ -78,6 +78,10 @@ export const RouteViewScreen: React.FC = () => {
   const navTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   // Guards async safety loads against post-unmount setState.
   const mountedRef = useRef(true);
+  // Monotonic request sequence: only the latest loadSafety invocation may
+  // commit results, so a slow earlier request can never overwrite the
+  // current destination's seaLevel/hazards/feedOffline.
+  const safetySeqRef = useRef(0);
   useEffect(() => () => {
     mountedRef.current = false;
     if (navTimer.current) {
@@ -93,6 +97,8 @@ export const RouteViewScreen: React.FC = () => {
     bailOnCancel = true
   ): Promise<'safe' | 'caution' | 'danger' | null> => {
     if (!dest) return null;
+    const seq = (safetySeqRef.current += 1);
+    const isCurrent = (): boolean => seq === safetySeqRef.current;
     const base = getBackendBaseUrl();
     const [dLat, dLon] = dest.coordinates;
     try {
@@ -100,7 +106,7 @@ export const RouteViewScreen: React.FC = () => {
         fetch(`${base}/api/weather/current?lat=${dLat}&lon=${dLon}`),
         fetch(`${base}/api/geofence/status`),
       ]);
-      if (!mountedRef.current && bailOnCancel) return null;
+      if ((!mountedRef.current || !isCurrent()) && bailOnCancel) return null;
         let level: 'safe' | 'caution' | 'danger' = 'safe';
         const hz: string[] = [];
         let weatherOk = false;
@@ -132,13 +138,13 @@ export const RouteViewScreen: React.FC = () => {
               : 'Route checked against monitored EEZ/MPA/IMBL boundaries'
           );
         }
-        if (!mountedRef.current && bailOnCancel) return null;
+        if ((!mountedRef.current || !isCurrent()) && bailOnCancel) return null;
         setSeaLevel(level);
         setHazards(hz);
         setFeedOffline(!weatherOk && !geoOk);
         return level;
       } catch {
-        if (!mountedRef.current && bailOnCancel) return null;
+        if ((!mountedRef.current || !isCurrent()) && bailOnCancel) return null;
         setSeaLevel('safe');
         setHazards([]);
         setFeedOffline(true);
@@ -286,9 +292,21 @@ export const RouteViewScreen: React.FC = () => {
     );
   }
 
-  const geofenceActive = seaLevel === 'danger' || hazards.some((h) =>
-    /strong|high waves|low pressure/i.test(h)
-  );
+  // Route-level safety participates in the alert state: an AVOID route (or
+  // one carrying MPA/IMBL warnings) must never render a "safe" callout.
+  const routeBlocking =
+    route.safetyLabel === 'AVOID' ||
+    route.hazardWarnings.some((h) => /marine protected area|international maritime boundary/i.test(h));
+
+  const geofenceActive =
+    seaLevel === 'danger' ||
+    hazards.some((h) => /strong|high waves|low pressure/i.test(h)) ||
+    routeBlocking;
+
+  const calloutWarnings =
+    routeBlocking && route.hazardWarnings.length > 0
+      ? [...route.hazardWarnings, ...hazards.filter((h) => !route.hazardWarnings.includes(h))]
+      : hazards;
 
   return (
     <div data-testid="route-screen" className="max-w-5xl mx-auto space-y-6 pb-16">
@@ -460,11 +478,11 @@ export const RouteViewScreen: React.FC = () => {
                 </span>
               </div>
               <p className="text-xs font-bold mt-0.5 text-slate-800 dark:text-slate-100">
-                {hazards.length > 0 ? hazards[0] : 'Live feeds show no blocking hazard on this route.'}
+                {calloutWarnings.length > 0 ? calloutWarnings[0] : 'Live feeds show no blocking hazard on this route.'}
               </p>
               <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 font-medium">
-                {hazards.length > 1
-                  ? hazards.slice(1).join(' • ')
+                {calloutWarnings.length > 1
+                  ? calloutWarnings.slice(1).join(' • ')
                   : 'Hazards from live /api/weather/current + /api/geofence/status.'}
               </div>
               {recalcNote && (
