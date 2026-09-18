@@ -524,6 +524,56 @@ export function pointToPolylineDistanceKm(
 }
 
 /**
+ * True when no leg of the waypoint polyline crosses the polygon.
+ */
+export function routeLegsClear(
+  waypoints: [number, number][],
+  polygon: [number, number][]
+): boolean {
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    if (segmentCrossesPolygon(waypoints[i], waypoints[i + 1], polygon)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Minimum distance between segments a1-a2 and b1-b2 in km (0 when intersecting).
+ */
+export function segSegDistanceKm(
+  a1: [number, number],
+  a2: [number, number],
+  b1: [number, number],
+  b2: [number, number]
+): number {
+  if (segmentsIntersect(a1, a2, b1, b2)) return 0;
+  return Math.min(
+    pointToSegmentDistanceKm(a1, b1, b2),
+    pointToSegmentDistanceKm(a2, b1, b2),
+    pointToSegmentDistanceKm(b1, a1, a2),
+    pointToSegmentDistanceKm(b2, a1, a2)
+  );
+}
+
+/**
+ * Minimum distance between two polylines in km, evaluated leg-by-leg.
+ */
+export function polylineToPolylineDistanceKm(
+  route: [number, number][],
+  other: [number, number][]
+): number {
+  let minD = Infinity;
+  for (let i = 0; i < route.length - 1; i++) {
+    for (let j = 0; j < other.length - 1; j++) {
+      const d = segSegDistanceKm(route[i], route[i + 1], other[j], other[j + 1]);
+      if (d < minD) minD = d;
+    }
+  }
+  return minD;
+}
+
+/**
  * Safe marine route calculator (T5 #164).
  * Calculates direct great-circle route with MPA polygon avoidance and IMBL proximity checks.
  */
@@ -547,9 +597,11 @@ export function buildSafeRoute(
   const startPt: [number, number] = [originLat, originLon];
   const endPt: [number, number] = [dLat, dLon];
 
-  // 1. Check for MPA intersection
-  let mpaCrossedName: string | null = null;
-  let detourWP: [number, number] | null = null;
+  // 1. Check for MPA intersection with corner-based detour.
+  // A single midpoint waypoint can leave legs crossing the polygon, so route
+  // around the buffered bbox corners, validate every leg, and keep the
+  // shortest fully-clear side (both corner orders evaluated).
+  let unavoidedMpaName: string | null = null;
 
   for (const feature of mpaCollection.features) {
     if (feature.geometry.type !== 'Polygon') continue;
@@ -557,47 +609,64 @@ export function buildSafeRoute(
     // GeoJSON coordinates are [lon, lat] -> convert to [lat, lon]
     const polyLatLon: [number, number][] = ring.map((pt: [number, number]) => [pt[1], pt[0]]);
 
-    if (segmentCrossesPolygon(startPt, endPt, polyLatLon)) {
-      mpaCrossedName = feature.properties.mpa_name || 'Protected Marine Reserve';
+    if (!segmentCrossesPolygon(startPt, endPt, polyLatLon)) continue;
+    const crossedName = feature.properties.mpa_name || 'Protected Marine Reserve';
 
-      // Compute detour around bounding box
-      let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
-      for (const [pLat, pLon] of polyLatLon) {
-        if (pLat < minLat) minLat = pLat;
-        if (pLat > maxLat) maxLat = pLat;
-        if (pLon < minLon) minLon = pLon;
-        if (pLon > maxLon) maxLon = pLon;
-      }
-
-      // Buffer offset in degrees (~2.2 km)
-      const bufDeg = 0.02;
-      const candidate1: [number, number] = [
-        Number(((minLat + maxLat) / 2).toFixed(4)),
-        Number((minLon - bufDeg).toFixed(4)),
-      ];
-      const candidate2: [number, number] = [
-        Number(((minLat + maxLat) / 2).toFixed(4)),
-        Number((maxLon + bufDeg).toFixed(4)),
-      ];
-
-      const dist1 = haversineKm(originLat, originLon, candidate1[0], candidate1[1]) +
-                    haversineKm(candidate1[0], candidate1[1], dLat, dLon);
-      const dist2 = haversineKm(originLat, originLon, candidate2[0], candidate2[1]) +
-                    haversineKm(candidate2[0], candidate2[1], dLat, dLon);
-
-      detourWP = dist1 <= dist2 ? candidate1 : candidate2;
-      break;
+    let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+    for (const [pLat, pLon] of polyLatLon) {
+      if (pLat < minLat) minLat = pLat;
+      if (pLat > maxLat) maxLat = pLat;
+      if (pLon < minLon) minLon = pLon;
+      if (pLon > maxLon) maxLon = pLon;
     }
+
+    // Buffer offset in degrees (~2.2 km)
+    const bufDeg = 0.02;
+    const r4 = (v: number): number => Number(v.toFixed(4));
+    const sw: [number, number] = [r4(minLat - bufDeg), r4(minLon - bufDeg)];
+    const nw: [number, number] = [r4(maxLat + bufDeg), r4(minLon - bufDeg)];
+    const se: [number, number] = [r4(minLat - bufDeg), r4(maxLon + bufDeg)];
+    const ne: [number, number] = [r4(maxLat + bufDeg), r4(maxLon + bufDeg)];
+    const sides: [number, number][][] = [[sw, nw], [se, ne], [sw, se], [nw, ne]];
+
+    const routeLen = (pts: [number, number][]): number => {
+      let total = 0;
+      for (let i = 0; i < pts.length - 1; i++) {
+        total += haversineKm(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+      }
+      return total;
+    };
+
+    let best: [number, number][] | null = null;
+    let bestDist = Infinity;
+    for (const [cornerA, cornerB] of sides) {
+      for (const ordered of [[cornerA, cornerB], [cornerB, cornerA]]) {
+        const candidate: [number, number][] = [startPt, ordered[0], ordered[1], endPt];
+        if (!routeLegsClear(candidate, polyLatLon)) continue;
+        const legDist = routeLen(candidate);
+        if (legDist < bestDist) {
+          bestDist = legDist;
+          best = [ordered[0], ordered[1]];
+        }
+      }
+    }
+
+    if (best) {
+      detourOccurred = true;
+      detourWaypoints = best;
+      warnings.push(`Route passes through Marine Protected Area: ${crossedName}. Detour applied around protected zone.`);
+    } else {
+      unavoidedMpaName = crossedName;
+      warnings.push(`Route passes through Marine Protected Area: ${crossedName}. No safe detour available — avoid entry.`);
+    }
+    break;
   }
 
   const waypoints: [number, number][] = [];
   waypoints.push(startPt);
 
-  if (detourWP && mpaCrossedName) {
-    detourOccurred = true;
-    detourWaypoints = [detourWP];
-    waypoints.push(detourWP);
-    warnings.push(`Route passes through Marine Protected Area: ${mpaCrossedName}. Detour applied around protected zone.`);
+  if (detourOccurred && detourWaypoints.length > 0) {
+    for (const wp of detourWaypoints) waypoints.push(wp);
   } else {
     // Standard mid waypoint
     const mid: [number, number] = [
@@ -608,26 +677,23 @@ export function buildSafeRoute(
   }
   waypoints.push(endPt);
 
-  // 2. Check IMBL proximity
-  let minImblDist = Infinity;
-  for (const pt of [startPt, ...detourWaypoints, endPt]) {
-    const d = pointToPolylineDistanceKm(pt, IMBL_COORDINATES);
-    if (d < minImblDist) minImblDist = d;
-  }
+  // 2. Check IMBL proximity across the full route polyline, leg-by-leg.
+  const minImblDist = polylineToPolylineDistanceKm(waypoints, IMBL_COORDINATES);
 
   let safetyLabel: 'SAFE' | 'CAUTION' | 'AVOID' = 'SAFE';
   let { percent } = safetyIndexFromSea(seaLevel);
 
-  if (minImblDist <= imblBufferKm) {
+  if (unavoidedMpaName) {
+    safetyLabel = 'AVOID';
+    percent = Math.min(percent, 30);
+  } else if (minImblDist <= imblBufferKm) {
     warnings.push(
       `Warning: Proximity to International Maritime Boundary Line (<${imblBufferKm}km). Risk of border crossing.`
     );
     safetyLabel = 'CAUTION';
     percent = Math.min(percent, 55);
-  }
-
-  if (detourOccurred) {
-    if (safetyLabel === 'SAFE') safetyLabel = 'CAUTION';
+  } else if (detourOccurred) {
+    safetyLabel = 'CAUTION';
     percent = Math.min(percent, 70);
   }
 

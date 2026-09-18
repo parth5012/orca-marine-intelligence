@@ -158,6 +158,8 @@ export const RouteViewScreen: React.FC = () => {
     const currentDest = dest;
     if (!currentDest) return;
     let cancelled = false;
+    setBackendRoute(null);
+    setIsBackendLive(false);
     async function fetchBackendRoute(target: PFZItem) {
       try {
         const params = new URLSearchParams({
@@ -183,7 +185,10 @@ export const RouteViewScreen: React.FC = () => {
             safetyLabel: data.safety_label,
             waypoints: data.waypoints,
             hazardWarnings: data.hazards || [],
-            detourOccurred: data.waypoints.length > 2,
+            detourOccurred:
+              data.detour_occurred ??
+              (Array.isArray(data.hazards) &&
+                data.hazards.some((h: string) => h.includes('Marine Protected Area'))),
             offlineCalculated: data.source !== 'backend_live',
           });
           setIsBackendLive(data.source === 'backend_live');
@@ -517,6 +522,7 @@ export const RouteViewScreen: React.FC = () => {
             highlightFeatures={destFeature ? [destFeature] : []}
             userLocation={{ lat: userLocation.lat, lon: userLocation.lon }}
             route={route.waypoints}
+            routeMeta={{ detourOccurred: route.detourOccurred, safetyLabel: route.safetyLabel }}
             onSelectZone={() => undefined}
           />
         </div>

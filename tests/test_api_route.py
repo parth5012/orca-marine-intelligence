@@ -53,8 +53,39 @@ def test_safe_route_direct(client):
 
 
 def test_safe_route_mpa_detour(client):
-    """Route cutting through Vembanad MPA triggers detour waypoint and warning."""
-    # South of Vembanad to North of Vembanad
+    """Route cutting through Vembanad MPA triggers corner detour with clear legs."""
+    # South of Vembanad to North of Vembanad (strictly outside the polygon)
+    response = client.get(
+        "/api/route/safe",
+        params={
+            "olat": 9.5000,
+            "olon": 76.4500,
+            "dlat": 9.8000,
+            "dlon": 76.4500,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["waypoints"]) > 2
+    assert data["detour_occurred"] is True
+    assert data["safety_label"] == "CAUTION"
+    assert any("Marine Protected Area" in h for h in data["hazards"])
+    # Every detour leg must avoid the Vembanad polygon (backend geometry)
+    vembanad = [(9.55, 76.35), (9.55, 76.55), (9.75, 76.55), (9.75, 76.35), (9.55, 76.35)]
+    wps = [tuple(w) for w in data["waypoints"]]
+    for i in range(len(wps) - 1):
+        assert not _leg_crosses(wps[i], wps[i + 1], vembanad)
+
+
+def _leg_crosses(p1, p2, poly) -> bool:
+    """Local segment-vs-polygon check mirroring backend/routers/route.py."""
+    from backend.routers.route import _segment_crosses_polygon
+
+    return _segment_crosses_polygon(p1, p2, poly)
+
+
+def test_safe_route_mpa_unavoidable(client):
+    """Origin on the MPA boundary admits no clear detour → AVOID fallback."""
     response = client.get(
         "/api/route/safe",
         params={
@@ -66,7 +97,8 @@ def test_safe_route_mpa_detour(client):
     )
     assert response.status_code == 200
     data = response.json()
-    assert len(data["waypoints"]) > 2
+    assert data["detour_occurred"] is False
+    assert data["safety_label"] == "AVOID"
     assert any("Marine Protected Area" in h for h in data["hazards"])
 
 

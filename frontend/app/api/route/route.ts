@@ -26,10 +26,13 @@ export async function GET(request: NextRequest) {
   const waveStr = searchParams.get('wave_height_m') || '1.0';
   const windStr = searchParams.get('wind_speed_kt') || '15.0';
 
-  const olat = Number(olatStr);
-  const olon = Number(olonStr);
-  const dlat = Number(dlatStr);
-  const dlon = Number(dlonStr);
+  const parseCoord = (raw: string | null): number =>
+    raw === null || raw.trim() === '' ? NaN : Number(raw);
+
+  const olat = parseCoord(olatStr);
+  const olon = parseCoord(olonStr);
+  const dlat = parseCoord(dlatStr);
+  const dlon = parseCoord(dlonStr);
 
   if (
     !Number.isFinite(olat) ||
@@ -140,6 +143,7 @@ export async function GET(request: NextRequest) {
     safety_index: safeRoute.safetyIndexPercent,
     safety_label: safeRoute.safetyLabel,
     hazards: safeRoute.hazardWarnings,
+    detour_occurred: safeRoute.detourOccurred ?? false,
     cost_breakdown: {
       distance_base: safeRoute.totalDistanceKm,
       wave_penalty: wavePenalty,

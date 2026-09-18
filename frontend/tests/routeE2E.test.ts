@@ -23,12 +23,13 @@ describe('PFZ Routing End-to-End API & Integration Verification (T9 #168)', () =
 
   it('E2E-2: Route crossing Vembanad MPA triggers safe detour and warning', async () => {
     const res = await fetch(
-      `${BASE_URL}/api/route?olat=9.5500&olon=76.4500&dlat=9.7500&dlon=76.4500`
+      `${BASE_URL}/api/route?olat=9.5000&olon=76.4500&dlat=9.8000&dlon=76.4500`
     );
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('ok');
     expect(data.waypoints.length).toBeGreaterThan(2);
+    expect(data.detour_occurred).toBe(true);
     expect(data.safety_label).toBe('CAUTION');
     expect(data.hazards.length).toBeGreaterThan(0);
     expect(data.hazards.some((h: string) => h.includes('Marine Protected Area'))).toBe(true);

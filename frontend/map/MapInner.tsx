@@ -86,6 +86,10 @@ export interface MapInnerProps {
   onCenterChange?: (center: [number, number]) => void;
   initialBasemapStyle?: BasemapStyle;
   route?: [number, number][] | number[][] | null;
+  routeMeta?: {
+    detourOccurred?: boolean;
+    safetyLabel?: 'SAFE' | 'CAUTION' | 'AVOID';
+  } | null;
   themeMode?: 'light' | 'dark';
 }
 
@@ -165,6 +169,7 @@ export default function MapInner({
   onCenterChange,
   initialBasemapStyle,
   route,
+  routeMeta,
   themeMode,
 }: MapInnerProps) {
   const autoTheme = useThemeModeOptional();
@@ -263,7 +268,12 @@ export default function MapInner({
       if (crossesMPA) break;
     }
 
-    const hasDetour = routePositions.length > 2;
+    // Prefer authoritative route metadata when the caller passes it:
+    // buildSafeRoute adds a plain midpoint to every direct route, so
+    // waypoint count alone mislabels normal SAFE routes as detours.
+    const hasDetour = routeMeta?.detourOccurred ?? routePositions.length > 2;
+    const safety: 'SAFE' | 'CAUTION' | 'AVOID' =
+      routeMeta?.safetyLabel ?? (crossesMPA ? 'AVOID' : hasDetour ? 'CAUTION' : 'SAFE');
     const safeColor = isLight ? '#059669' : '#10b981';
     const detourColor = isLight ? '#d97706' : '#f59e0b';
     const dangerColor = isLight ? '#dc2626' : '#ef4444';
@@ -277,9 +287,10 @@ export default function MapInner({
       crossesMPA,
       crossedMpaName,
       hasDetour,
-      color: crossesMPA ? dangerColor : hasDetour ? detourColor : safeColor,
+      safety,
+      color: safety === 'AVOID' ? dangerColor : safety === 'CAUTION' ? detourColor : safeColor,
     };
-  }, [routePositions, isLight]);
+  }, [routePositions, isLight, routeMeta]);
 
   // UI-MIG-T5 visual-only flags (missing => true so legacy 5-key bags are unchanged).
   const ext = layers as Record<string, boolean | undefined>;
@@ -915,14 +926,14 @@ export default function MapInner({
                     </span>
                     <span
                       className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                        routeStats.crossesMPA
+                        routeStats.safety === 'AVOID'
                           ? 'bg-red-500/20 text-red-500 border border-red-500'
-                          : routeStats.hasDetour
+                          : routeStats.safety === 'CAUTION'
                           ? 'bg-amber-500/20 text-amber-500 border border-amber-500'
                           : 'bg-emerald-500/20 text-emerald-500 border border-emerald-500'
                       }`}
                     >
-                      {routeStats.crossesMPA ? 'AVOID' : routeStats.hasDetour ? 'CAUTION' : 'SAFE'}
+                      {routeStats.safety}
                     </span>
                   </div>
                   <div className="text-[11px] grid grid-cols-3 gap-2">
@@ -954,25 +965,26 @@ export default function MapInner({
             </Polyline>
 
             {/* Intermediate detour waypoint markers (T6 #165) */}
-            {routePositions.slice(1, -1).map((wp, idx) => (
-              <CircleMarker
-                key={`wp-${idx}-${wp[0]}-${wp[1]}`}
-                center={wp}
-                radius={5}
-                pathOptions={{
-                  color: '#ffffff',
-                  weight: 2,
-                  fillColor: isLight ? '#0891b2' : '#06b6d4',
-                  fillOpacity: 0.95,
-                }}
-              >
-                <Tooltip direction="top" offset={[0, -6]}>
-                  <div className="text-[11px] font-semibold text-cyan-500">
-                    Waypoint {idx + 1} (Detour)
-                  </div>
-                </Tooltip>
-              </CircleMarker>
-            ))}
+            {routeStats.hasDetour &&
+              routePositions.slice(1, -1).map((wp, idx) => (
+                <CircleMarker
+                  key={`wp-${idx}-${wp[0]}-${wp[1]}`}
+                  center={wp}
+                  radius={5}
+                  pathOptions={{
+                    color: '#ffffff',
+                    weight: 2,
+                    fillColor: isLight ? '#0891b2' : '#06b6d4',
+                    fillOpacity: 0.95,
+                  }}
+                >
+                  <Tooltip direction="top" offset={[0, -6]}>
+                    <div className="text-[11px] font-semibold text-cyan-500">
+                      Waypoint {idx + 1} (Detour)
+                    </div>
+                  </Tooltip>
+                </CircleMarker>
+              ))}
           </>
         )}
 
