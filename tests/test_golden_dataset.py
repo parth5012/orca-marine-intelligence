@@ -35,7 +35,7 @@ def test_marine_eval_example_multilingual_defaults():
 
 def test_load_marine_eval_dataset_returns_english_defaults():
     dataset = load_marine_eval_dataset()
-    assert len(dataset) == 14
+    assert len(dataset) >= 80
     for ex in dataset:
         assert ex.language == "en"
         assert ex.frozen_reply == ""
@@ -73,7 +73,7 @@ def test_load_golden_v1_fallback_when_missing():
     # If file doesn't exist, must log warning and fall back to load_marine_eval_dataset()
     with patch("backend.evals.dataset.Path.exists", return_value=False):
         examples = load_golden_v1("non_existent_golden.json")
-        assert len(examples) == 14
+        assert len(examples) >= 80
         assert examples[0].language == "en"
 
 
@@ -107,5 +107,38 @@ def test_load_golden_v1_fallback_when_corrupted(tmp_path: Path):
     corrupt_file = tmp_path / "corrupted_golden.json"
     corrupt_file.write_text("{ invalid json ...", encoding="utf-8")
     examples = load_golden_v1(str(corrupt_file))
-    assert len(examples) == 14
+    assert len(examples) >= 80
     assert examples[0].language == "en"
+
+
+def test_load_marine_eval_dataset_exhaustive_english_seed():
+    dataset = load_marine_eval_dataset()
+    assert len(dataset) >= 80
+
+    required_buckets = {
+        "pfz",
+        "sea",
+        "weather",
+        "geofence_veto",
+        "intent_split",
+        "numerals",
+        "adversarial",
+        "resilience",
+        "temporal_forecast",
+        "sst_chlorophyll",
+        "species_depth",
+        "multi_turn_session",
+        "lang_gate_voice_typo",
+        "data_freshness",
+    }
+    categories = {ex.metadata.get("category") for ex in dataset}
+    for b in required_buckets:
+        assert b in categories, f"Missing category bucket: {b}"
+
+    for ex in dataset:
+        ref = ex.reference
+        assert "expected_safety_tier" in ref
+        assert "mandate_do_not_sail" in ref
+        assert "min_score" in ref
+        assert "max_score" in ref
+        assert ex.metadata.get("category")
