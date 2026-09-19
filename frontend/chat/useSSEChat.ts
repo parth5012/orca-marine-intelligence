@@ -183,6 +183,100 @@ function toSafety(props: any): 'safe' | 'caution' | 'danger' | 'unknown' {
   return 'unknown';
 }
 
+// ---------------------------------------------------------------------------
+// Trace UX (#193) — human-readable evidence allowlist (mirrors
+// backend/agents/graph.py::is_human_evidence). Mobile chat reads as
+// advisory, not a debug log: multi-agent reasoning stays in
+// `reasoning_steps` (Workflow modal) while `evidence` carries only the
+// INCOIS citation, Wave/Wind human labels, geofence verdict, and
+// forecast window. Raw internals (planner SELECT/SKIP lines, auto-filler
+// completion lines, open_meteo source ids, selected_* fields, __M*__
+// mask spans) are dropped here as defense-in-depth even though the
+// backend already filters before streaming.
+// ---------------------------------------------------------------------------
+
+const INTERNAL_TRACE_MARKERS = [
+  'trace line auto-added',
+  'trace completion',
+  'planner gave no justification',
+  'llm gave no explicit justification',
+];
+
+const TRACE_PREFIXES = ['SELECT ', 'SKIP '];
+
+const TRACE_TOOL_PREFIXES = [
+  'find_fishing_zones',
+  'check_ocean_state',
+  'check_weather',
+  'check_geofence',
+];
+
+// Geofence/safety verdict vocabulary (danger_agent warnings are spelled
+// out — "Exclusive Economic Zone", "Marine Protected Area" — so match
+// words, not just the EEZ/MPA abbreviations). Mirrors backend
+// graph.py::_GEOFENCE_TOKENS.
+const GEOFENCE_TOKENS = [
+  'eez',
+  'mpa',
+  'violation',
+  'warning',
+  'banned',
+  'not permitted',
+  'protected area',
+  'exclusive economic zone',
+  'boundary',
+  'imbl',
+  'geofence',
+  'cyclone',
+  'lightning',
+];
+
+export function isHumanEvidence(item: unknown): boolean {
+  if (typeof item !== 'string' || !item.trim()) return false;
+  const s = item.trim();
+  const lowered = s.toLowerCase();
+  // Raw internals never pass, even inside otherwise-valid lines.
+  if (s.includes('__M') || s.includes('open_meteo') || lowered.includes('selected_')) {
+    return false;
+  }
+  if (INTERNAL_TRACE_MARKERS.some((m) => lowered.includes(m))) return false;
+  if (TRACE_PREFIXES.some((p) => s.startsWith(p))) return false;
+  if (lowered.startsWith('fuzzy port match:')) return false;
+  if (TRACE_TOOL_PREFIXES.some((t) => lowered.startsWith(t))) return false;
+  // System lines for non-advisory turns stay verbatim.
+  if (
+    lowered.includes('conversational reply') ||
+    lowered.includes('clarification requested') ||
+    lowered.includes('location not provided')
+  ) {
+    return true;
+  }
+  // Advisory allowlist: INCOIS citation, Wave/Wind labels,
+  // geofence verdict, forecast window.
+  if (s.startsWith('INCOIS')) return true;
+  if (s.startsWith('Wave:') || s.startsWith('Wind:')) {
+    // Reject raw source ids (marine_data_package, mock_heuristic,
+    // open_meteo_live) — only human labels pass (no underscores).
+    const value = s.slice(5);
+    if (value.includes('_')) return false;
+    return true;
+  }
+  if (GEOFENCE_TOKENS.some((t) => lowered.includes(t))) return true;
+  if (lowered.includes('forecast')) return true;
+  return false;
+}
+
+export function filterHumanEvidence(items: unknown): string[] {
+  const list = Array.isArray(items) ? items : typeof items === 'string' ? [items] : [];
+  const out: string[] = [];
+  for (const e of list) {
+    if (typeof e === 'string' && e.trim() && isHumanEvidence(e) && !out.includes(e)) {
+      out.push(e);
+    }
+  }
+  return out;
+}
+
 export function useSSEChat(options: UseSSEChatOptions = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -613,8 +707,8 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                     typeof windRaw === 'number' && Number.isFinite(windRaw)
                       ? Number(windRaw.toFixed(1))
                       : windRaw;
-                  const danger = parsed.danger || parsed.safety || 'none';
-                  const badge = parsed.badge || (danger === 'none' ? 'green' : 'amber');
+                  const danger = parsed.danger || parsed.safety || 'unknown';
+                  const badge = parsed.badge || (danger === 'safe' ? 'green' : 'amber');
 
                   let warningText = 'SAFE';
                   const isHighDanger =
@@ -662,8 +756,12 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                     : parsed.item
                     ? [parsed.item]
                     : [];
+                  // Ticket #193: allowlisted human pills only — raw trace /
+                  // internals never enter chat state (Workflow modal keeps
+                  // the full trace via reasoning_steps).
+                  const humanItems = filterHumanEvidence(items);
                   const combined = Array.from(
-                    new Set([...(updated.evidence || []), ...items])
+                    new Set([...(updated.evidence || []), ...humanItems])
                   );
                   updated.evidence = combined;
                   break;
