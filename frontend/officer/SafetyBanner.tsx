@@ -15,8 +15,8 @@ import { useEffect, useState } from 'react';
 import SafetyBadge from '@/map/SafetyBadge';
 
 interface Weather {
-  waves: number;
-  wind: number;
+  waves: number | null;
+  wind: number | null;
   danger: string;
   badge: string;
   status: string;
@@ -27,7 +27,8 @@ interface Props {
   lon: number;
 }
 
-const FALLBACK: Weather = { waves: 0.8, wind: 10, danger: 'none', badge: 'amber', status: 'Sea state unavailable (backend offline)' };
+// Ticket #195: backend-down reads UNKNOWN (amber), never SAFE-looking numbers.
+const FALLBACK: Weather = { waves: null, wind: null, danger: 'unknown', badge: 'amber', status: 'Sea state unavailable (backend offline)' };
 
 export default function SafetyBanner({ lat, lon }: Props) {
   const [w, setW] = useState<Weather>(FALLBACK);

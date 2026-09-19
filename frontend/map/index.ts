@@ -13,7 +13,9 @@ export { default } from './MapView';
 export type { MapViewProps, MapLayerToggles } from './MapView';
 
 export { default as SafetyBadge } from './SafetyBadge';
-export type { SafetyBadgeProps } from './SafetyBadge';
+export type { SafetyBadgeProps, SeaStatus } from './SafetyBadge';
+export { resolveSeaStatus } from './SafetyBadge';
+export * from './drawerHonesty';
 
 export { default as LayerControl } from './LayerControl';
 export { default as MarineMap } from './MarineMap';

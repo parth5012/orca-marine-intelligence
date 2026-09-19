@@ -275,13 +275,15 @@ export const Navbar: React.FC<NavbarProps> = ({ safety }) => {
               )}
             </motion.button>
 
-            {/* Live SafetyBadge slot (SSE-driven via page shell) */}
+            {/* Live SafetyBadge slot (SSE-driven via page shell).
+                Ticket #195: missing telemetry passes through as null so the
+                badge reads UNKNOWN (amber), never a hardcoded SAFE. */}
             {safety && (
               <SafetyBadge
-                waves={safety.waves_m ?? 0.8}
-                wind={safety.wind_kts ?? 12}
-                danger={safety.danger ?? 'none'}
-                badge={safety.badge ?? 'green'}
+                waves={safety.waves_m ?? null}
+                wind={safety.wind_kts ?? null}
+                danger={safety.danger ?? 'unknown'}
+                badge={safety.badge ?? 'amber'}
                 language={selectedLanguage}
                 compact
               />
