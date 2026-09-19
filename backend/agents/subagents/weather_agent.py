@@ -35,23 +35,31 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Thresholds
+# Thresholds — SINGLE SOURCE OF TRUTH is
+# backend/agents/safety_thresholds.py (wayfinder #196). Aliases below keep
+# legacy import paths working; classification delegates to the canonical
+# bands (wind 15/25kt, cyclone 500km).
 # ---------------------------------------------------------------------------
-WIND_SAFE_MAX = 15.0  # kt, <15 safe
-WIND_CAUTION_MAX = 25.0  # kt, 15-25 caution, >25 danger
-CYCLONE_RADIUS_KM = 500.0
+from backend.agents.safety_thresholds import (
+    CYCLONE_RADIUS_KM as CYCLONE_RADIUS_KM,
+)
+from backend.agents.safety_thresholds import (
+    WIND_DANGER_MIN_KT as WIND_CAUTION_MAX,
+)
+from backend.agents.safety_thresholds import (
+    WIND_SAFE_MAX_KT as WIND_SAFE_MAX,
+)
+from backend.agents.safety_thresholds import (
+    classify_wind as _canonical_wind,
+)
 _SEVERITY_RANK = {"safe": 0, "caution": 1, "danger": 2}
 
 _COMPASS_8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 
 def _classify_wind(wind_kt: float) -> str:
-    """Classify wind: <15 safe, 15-25 caution, >25 danger."""
-    if wind_kt < WIND_SAFE_MAX:
-        return "safe"
-    if wind_kt <= WIND_CAUTION_MAX:
-        return "caution"
-    return "danger"
+    """Classify wind: <15 safe, 15-25 caution, >25 danger (canonical)."""
+    return _canonical_wind(wind_kt)
 
 
 def _overall_status(wind_status: str, cyclone_danger: bool) -> str:

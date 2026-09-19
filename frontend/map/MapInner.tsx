@@ -398,11 +398,25 @@ export default function MapInner({
         const data = await res.json();
         // Ticket #195: missing fields propagate as unknown — only finite
         // live measurements can clear UNKNOWN, never default to SAFE.
+        // #196: backend status is authoritative (verbatim); the numeric
+        // check below is fallback only (canonical 2.5m / 25kt bands).
         const waveM = toFiniteNumber(data.wave_height_m);
         const windKt = toFiniteNumber(data.wind_speed_kt);
         const tempC = toFiniteNumber(data.temperature_c);
         const known = waveM != null && windKt != null;
-        const dangerHit = known && (waveM > 2.5 || windKt > 30);
+        const backendStatus = String(data.status || '').toLowerCase();
+        const dangerHit =
+          backendStatus === 'danger' ||
+          (backendStatus !== 'safe' &&
+            backendStatus !== 'caution' &&
+            known &&
+            (waveM > 2.5 || windKt > 25));
+        const cautionHit =
+          backendStatus === 'caution' ||
+          (backendStatus !== 'safe' &&
+            backendStatus !== 'danger' &&
+            known &&
+            (waveM >= 1.5 || windKt >= 15));
         setWeatherState({
           lat,
           lon,
@@ -410,8 +424,8 @@ export default function MapInner({
           wind_speed_kt: windKt ?? undefined,
           wave_height_m: waveM ?? undefined,
           status: data.status || (known ? 'Normal conditions' : 'Sea state unavailable'),
-          danger: dangerHit ? 'danger' : known ? 'none' : 'unknown',
-          badge: dangerHit ? 'red' : known ? 'green' : 'amber',
+          danger: dangerHit ? 'danger' : cautionHit ? 'caution' : known ? 'none' : 'unknown',
+          badge: dangerHit ? 'red' : cautionHit || !known ? 'amber' : 'green',
           source: data.source || 'live_api',
           loading: false,
         });

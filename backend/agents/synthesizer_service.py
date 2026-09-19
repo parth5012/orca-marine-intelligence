@@ -255,7 +255,7 @@ def build_zone_context(
     "wave","wind","zone_line"}`` where ``expected_tier`` is the
     ``derive_safety_tier()`` ground truth (Code Trumps LLM).
     """
-    from backend.agents.lexical_mask import derive_safety_tier
+    from backend.agents.safety_thresholds import derive_safety_tier
 
     combined = combined or {}
     best = combined.get("best") if isinstance(combined.get("best"), dict) else None
@@ -268,9 +268,14 @@ def build_zone_context(
     if best:
         _wk = best.get("wind_kt")
         wind: Any = _wk if _wk is not None else best.get("wind_speed_kt")
+        _ck = best.get("current_kt")
+        current: Any = _ck if _ck is not None else best.get("current_speed_kt")
+        cyclone: Any = bool(best.get("cyclone_alert", best.get("cyclone", False)))
     else:
         wind = None
-    expected_tier = derive_safety_tier(wave, wind, all_unsafe, banned)
+        current = None
+        cyclone = False
+    expected_tier = derive_safety_tier(wave, wind, all_unsafe, banned, current, cyclone)
     if best is not None:
         # CORR-03: no raw numbers in zone_line — LLM must use placeholders.
         # Keep only place, direction, inside_eez/inside_mpa (+ tier flags).
@@ -289,6 +294,8 @@ def build_zone_context(
         "expected_tier": expected_tier,
         "wave": wave,
         "wind": wind,
+        "current": current,
+        "cyclone": cyclone,
         "zone_line": zone_line,
     }
 
@@ -310,16 +317,11 @@ def build_synthesizer_prompt(
     all_unsafe = bool(ctx.get("all_unsafe", False))
     banned = bool(ctx.get("banned", False))
     citation = str(ctx.get("citation") or "INCOIS TextData")
-    # CORR-02: veto parity — recompute tier via derive_safety_tier so a
-    # wave/wind DANGER without flags still activates the veto.
-    from backend.agents.lexical_mask import derive_safety_tier as _tier
-
-    try:
-        expected_tier = str(
-            _tier(ctx.get("wave"), ctx.get("wind"), all_unsafe, banned)
-        )
-    except Exception:
-        expected_tier = str(ctx.get("expected_tier") or "UNKNOWN")
+    # #196 canonical: use build_zone_context's expected_tier directly —
+    # it already folds wave/wind/current/cyclone + flags via
+    # derive_safety_tier. Recomputing here without current/cyclone
+    # would silently downgrade a current/cyclone DANGER to CAUTION.
+    expected_tier = str(ctx.get("expected_tier") or "UNKNOWN")
     zone_line = str(ctx.get("zone_line") or "place=None")
     veto_active = (expected_tier == "DANGER")
     veto_line = (
@@ -357,6 +359,8 @@ def validate_synthesized_text(
     all_unsafe: bool,
     banned: bool,
     table: dict[str, str] | None = None,
+    current: Any = None,
+    cyclone: Any = False,
 ) -> str:
     """Post-validate LLM wording against deterministic ground truth.
 
@@ -432,7 +436,7 @@ def validate_synthesized_text(
         raise SynthesizerAPIError(
             "synthesizer omitted INCOIS citation (citation must be verbatim)"
         )
-    expected_tier = derive_safety_tier(wave, wind, all_unsafe, banned)
+    expected_tier = derive_safety_tier(wave, wind, all_unsafe, banned, current, cyclone)
     vetoed = "do not sail" in unmasked_text.lower()
     if expected_tier == "DANGER" and not vetoed:
         raise SynthesizerAPIError(
@@ -712,6 +716,8 @@ async def synthesize_advisory(
         all_unsafe=ctx["all_unsafe"],
         banned=ctx["banned"],
         table=table,
+        current=ctx.get("current"),
+        cyclone=ctx.get("cyclone", False),
     )
 
     return {
