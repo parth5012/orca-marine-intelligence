@@ -35,6 +35,45 @@ HTTP_TIMEOUT_S = 6.0
 OWM_TIMEOUT_S = 3.0
 OWM_RETRIES = 1
 
+# ---------------------------------------------------------------------------
+# Shared pooled HTTP client (Ticket #198 — perf hardening)
+# ---------------------------------------------------------------------------
+# Per-zone live fetchers (5 zones x marine+weather) previously built a new
+# httpx.Client per call (10+ TLS handshakes per chat). A single module-level
+# pooled client reuses keep-alive connections across calls in the process.
+# The factory-identity guard keeps `patch("httpx.Client")` based tests
+# working: if the class is swapped (mock), the pooled instance is rebuilt.
+_SHARED_CLIENT: httpx.Client | None = None
+_SHARED_CLIENT_FACTORY: Any = None
+
+
+def _get_shared_client() -> httpx.Client:
+    """Return the process-wide pooled httpx client (keep-alive)."""
+    global _SHARED_CLIENT, _SHARED_CLIENT_FACTORY
+    if _SHARED_CLIENT is None or _SHARED_CLIENT_FACTORY is not httpx.Client:
+        try:
+            if _SHARED_CLIENT is not None:
+                _SHARED_CLIENT.close()
+        except Exception:
+            pass
+        _SHARED_CLIENT = httpx.Client(
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=20),
+        )
+        _SHARED_CLIENT_FACTORY = httpx.Client
+    return _SHARED_CLIENT
+
+
+def _close_shared_client() -> None:
+    """Close and drop the pooled client (tests / shutdown)."""
+    global _SHARED_CLIENT, _SHARED_CLIENT_FACTORY
+    try:
+        if _SHARED_CLIENT is not None:
+            _SHARED_CLIENT.close()
+    except Exception:
+        pass
+    _SHARED_CLIENT = None
+    _SHARED_CLIENT_FACTORY = None
+
 # Paths
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = ROOT_DIR / "data"
@@ -118,36 +157,44 @@ def _http_get_with_retry(
     url: str,
     params: dict[str, Any] | None = None,
     timeout_s: float = HTTP_TIMEOUT_S,
-    max_retries: int = 3,
-    backoff_factor: float = 0.5,
+    max_retries: int = 1,
+    backoff_factor: float = 0.0,
 ) -> httpx.Response:
-    """Execute HTTP GET with bounded retries and exponential backoff.
+    """Execute HTTP GET, fail-fast by default (Ticket #198).
 
-    Handles transient connection resets, TLS handshakes, and timeouts.
-    Never returns mock data; raises RuntimeError if all retries are exhausted.
+    Hot path is single-try over the shared keep-alive pool: no per-call
+    TLS handshake, no blocking ``time.sleep`` retries. Callers needing
+    retries pass ``max_retries > 1`` explicitly (legacy context-manager
+    path, preserved for ``patch("httpx.Client")`` test compatibility).
+    Never returns mock data; raises RuntimeError if all tries are exhausted.
     """
     last_exc: Exception | None = None
-    for attempt in range(1, max_retries + 1):
+    attempts = max(1, int(max_retries))
+    for attempt in range(1, attempts + 1):
         try:
-            with httpx.Client(timeout=timeout_s) as client:
-                resp = client.get(url, params=params)
-                resp.raise_for_status()
-                return resp
+            if attempts == 1:
+                resp = _get_shared_client().get(url, params=params, timeout=timeout_s)
+            else:
+                with httpx.Client(timeout=timeout_s) as client:
+                    resp = client.get(url, params=params)
+            resp.raise_for_status()
+            return resp
         except (httpx.HTTPError, OSError) as exc:
             last_exc = exc
-            if attempt < max_retries:
+            if attempt < attempts:
                 sleep_s = backoff_factor * (2 ** (attempt - 1))
-                logger.warning(
-                    "HTTP GET to %s failed (attempt %d/%d): %s. Retrying in %.2fs...",
-                    url, attempt, max_retries, exc, sleep_s,
-                )
-                time.sleep(sleep_s)
+                if sleep_s > 0:
+                    logger.warning(
+                        "HTTP GET to %s failed (attempt %d/%d): %s. Retrying in %.2fs...",
+                        url, attempt, attempts, exc, sleep_s,
+                    )
+                    time.sleep(sleep_s)
             else:
                 logger.error(
-                    "HTTP GET to %s failed after %d attempts: %s",
-                    url, max_retries, exc,
+                    "HTTP GET to %s failed after %d attempt(s): %s",
+                    url, attempts, exc,
                 )
-    raise RuntimeError(f"Live fetch failed for {url} after {max_retries} retries: {last_exc}") from last_exc
+    raise RuntimeError(f"Live fetch failed for {url} after {attempts} retries: {last_exc}") from last_exc
 
 
 # ---------------------------------------------------------------------------

@@ -314,6 +314,38 @@ def _geojson_fallback(
     return candidates[:limit]
 
 
+def _geojson_fallback_staged(
+    lat: float,
+    lon: float,
+    radii_km: list[float],
+    limit: int,
+    sector: str | None,
+) -> list[dict]:
+    """Single-scan staged GeoJSON fallback (Ticket #198 — perf hardening).
+
+    Scans the local GeoJSON ONCE at the widest radius, then picks the
+    smallest stage with results. ``_geojson_fallback`` returns zones sorted
+    by ascending distance, so filtering the widest top-``limit`` to a
+    smaller radius yields exactly the sequential per-radius result without
+    rescanning the file 2-3x per request. Pure, no behavior change.
+    """
+    if not radii_km:
+        return []
+    widest = max(float(r) for r in radii_km)
+    wide_zones = _geojson_fallback(lat=lat, lon=lon, radius_km=widest, limit=limit, sector=sector)
+    if not wide_zones:
+        return []
+    for radius in sorted(set(float(r) for r in radii_km)):
+        staged = [
+            z
+            for z in wide_zones
+            if float(z.get("distance_from_user_km", 0.0)) <= radius + 1e-9
+        ]
+        if staged:
+            return staged[:limit]
+    return []
+
+
 async def find_fishing_zones(
     lat: float,
     lon: float,
@@ -372,7 +404,10 @@ async def find_fishing_zones(
     use_fallback = False
     last_error: Exception | None = None
 
-    # Fast-check PostGIS circuit breaker & ping before entering query loop (Ticket #76)
+    # Fast-check PostGIS circuit breaker & ping ONCE per request (Ticket #76).
+    # The single ping result covers all expansion stages below — no per-radius
+    # re-ping. GeoJSON fallback is a single max-radius scan with staged
+    # selection (Ticket #198), not one scan per radius.
     if is_db_degraded():
         logger.warning(
             "fish_finder: PostGIS in degraded state (circuit-breaker open), fast-failing to GeoJSON fallback"
@@ -395,61 +430,69 @@ async def find_fishing_zones(
             set_db_degraded(True)
             use_fallback = True
 
-    for radius in radii_to_try:
-        if not use_fallback:
-            try:
-                from backend.db.postgis import find_pfz_near  # local import for testability
-
-                res = find_pfz_near(lat=lat, lon=lon, radius_km=radius, limit=limit)
-                if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
-                    zones: list[dict] = await asyncio.wait_for(
-                        res,
-                        timeout=_DB_QUERY_TIMEOUT_SECONDS,
-                    )
-                else:
-                    zones = res
-                # PostGIS does not filter by sector — apply here
-                zones = _apply_sector_filter(zones)
-                # find_pfz_near already returns normalized objects sorted by distance
-                # Defense-in-depth: dedup again (sector filter + legacy rows)
-                try:
-                    from backend.agents.zone_dedup import dedup_zones as _dedup_zones2
-
-                    zones = _dedup_zones2(zones)
-                except Exception:
-                    pass
-                # If sector filter emptied results, treat as 0 and expand
-                if zones:
-                    set_db_degraded(False)
-                    return zones[:limit]
-                # else: 0 zones at this radius -> try next expansion stage
-                continue
-            except Exception as exc:
-                # DB unreachable or query failed - fallback to GeoJSON
-                last_error = exc
-                use_fallback = True
-                set_db_degraded(True)
-                logger.warning(
-                    "fish_finder: PostGIS find_pfz_near failed at radius %.1fkm (%r), falling back to GeoJSON",
-                    radius,
-                    exc,
-                )
-                # Fall through to GeoJSON for same radius
-
-        # Fallback path (either DB failed or we are already in fallback mode)
+    if use_fallback:
+        # Single-scan staged fallback — one GeoJSON pass at the widest radius.
         try:
-            zones = _geojson_fallback(lat=lat, lon=lon, radius_km=radius, limit=limit, sector=sector_filter)
-            if zones:
-                return zones
-            # No zones at this radius via fallback -> expand
+            return _geojson_fallback_staged(
+                lat=lat, lon=lon, radii_km=radii_to_try, limit=limit, sector=sector_filter
+            )
         except Exception as exc:
-            logger.warning("fish_finder: GeoJSON fallback failed at radius %.1fkm: %s", radius, exc)
+            logger.warning("fish_finder: GeoJSON fallback failed: %s", exc)
             last_error = exc
+            return []
+
+    # PostGIS staged expansion 80->120->160km (spec; call pattern pinned by
+    # tests/test_agents.py). On mid-loop DB failure, fall back ONCE via the
+    # single-scan staged helper instead of rescanning per radius.
+    for radius in radii_to_try:
+        try:
+            from backend.db.postgis import find_pfz_near  # local import for testability
+
+            res = find_pfz_near(lat=lat, lon=lon, radius_km=radius, limit=limit)
+            if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                zones: list[dict] = await asyncio.wait_for(
+                    res,
+                    timeout=_DB_QUERY_TIMEOUT_SECONDS,
+                )
+            else:
+                zones = res
+            # PostGIS does not filter by sector — apply here
+            zones = _apply_sector_filter(zones)
+            # find_pfz_near already returns normalized objects sorted by distance
+            # Defense-in-depth: dedup again (sector filter + legacy rows)
+            try:
+                from backend.agents.zone_dedup import dedup_zones as _dedup_zones2
+
+                zones = _dedup_zones2(zones)
+            except Exception:
+                pass
+            # If sector filter emptied results, treat as 0 and expand
+            if zones:
+                set_db_degraded(False)
+                return zones[:limit]
+            # else: 0 zones at this radius -> try next expansion stage
             continue
+        except Exception as exc:
+            # DB unreachable or query failed - single-scan GeoJSON fallback
+            last_error = exc
+            set_db_degraded(True)
+            logger.warning(
+                "fish_finder: PostGIS find_pfz_near failed at radius %.1fkm (%r), falling back to GeoJSON",
+                radius,
+                exc,
+            )
+            try:
+                return _geojson_fallback_staged(
+                    lat=lat, lon=lon, radii_km=radii_to_try, limit=limit, sector=sector_filter
+                )
+            except Exception as exc2:
+                logger.warning("fish_finder: GeoJSON fallback failed: %s", exc2)
+                last_error = exc2
+                return []
 
     # All stages exhausted
-    if last_error and use_fallback:
-        logger.info("fish_finder: 0 zones found within %dkm (fallback, last_error=%s)", radii_to_try[-1], last_error)
+    if last_error:
+        logger.info("fish_finder: 0 zones found within %dkm (last_error=%s)", radii_to_try[-1], last_error)
     return []
 
 
@@ -571,25 +614,54 @@ def _enrich_with_satellite_data(zones: list[dict], lat: float = 0.0, lon: float 
         chlo_lons = lons[chlo_mask] if chlo_mask is not None and chlos is not None else None
         chlo_vals = chlos[chlo_mask] if chlo_mask is not None and chlos is not None else None
 
+        # Vectorized nearest-neighbour (Ticket #198): one broadcast distance
+        # matrix per variable for ALL zones instead of a full-array argmin per
+        # zone (O(ZxN) with a single pass, same argmin semantics).
+        z_lats_list: list[float] = []
+        z_lons_list: list[float] = []
         for z in zones:
             if not isinstance(z, dict):
+                z_lats_list.append(float("nan"))
+                z_lons_list.append(float("nan"))
                 continue
-            z_lat = float(z.get("lat") if z.get("lat") is not None else lat)
-            z_lon = float(z.get("lon") if z.get("lon") is not None else lon)
+            try:
+                z_lats_list.append(float(z.get("lat") if z.get("lat") is not None else lat))
+                z_lons_list.append(float(z.get("lon") if z.get("lon") is not None else lon))
+            except (TypeError, ValueError):
+                z_lats_list.append(float("nan"))
+                z_lons_list.append(float("nan"))
+        z_lats = np.asarray(z_lats_list, dtype=float)
+        z_lons = np.asarray(z_lons_list, dtype=float)
 
-            if sst_vals is not None and len(sst_vals) > 0 and z.get("sst_c") is None:
-                d_sq_s = (sst_lats - z_lat) ** 2 + (sst_lons - z_lon) ** 2
-                idx_s = int(d_sq_s.argmin())
-                if d_sq_s[idx_s] <= _MAX_SATELLITE_DISTANCE_DEG_SQ:
-                    val_s = sst_vals[idx_s]
+        sst_idx: Any = None
+        sst_d2: Any = None
+        if sst_vals is not None and len(sst_vals) > 0:
+            _d2_s = (sst_lats[None, :] - z_lats[:, None]) ** 2 + (sst_lons[None, :] - z_lons[:, None]) ** 2
+            sst_idx = _d2_s.argmin(axis=1)
+            sst_d2 = _d2_s[np.arange(len(zones)), sst_idx]
+
+        chlo_idx: Any = None
+        chlo_d2: Any = None
+        if chlo_vals is not None and len(chlo_vals) > 0:
+            _d2_c = (chlo_lats[None, :] - z_lats[:, None]) ** 2 + (chlo_lons[None, :] - z_lons[:, None]) ** 2
+            chlo_idx = _d2_c.argmin(axis=1)
+            chlo_d2 = _d2_c[np.arange(len(zones)), chlo_idx]
+
+        for i, z in enumerate(zones):
+            if not isinstance(z, dict):
+                continue
+            if np.isnan(z_lats[i]) or np.isnan(z_lons[i]):
+                continue
+
+            if sst_idx is not None and z.get("sst_c") is None:
+                if sst_d2[i] <= _MAX_SATELLITE_DISTANCE_DEG_SQ:
+                    val_s = sst_vals[int(sst_idx[i])]
                     if not (np.isnan(val_s) if hasattr(val_s, "dtype") else False):
                         z["sst_c"] = round(float(val_s), 1)
 
-            if chlo_vals is not None and len(chlo_vals) > 0 and z.get("chlorophyll_mg_m3") is None:
-                d_sq_c = (chlo_lats - z_lat) ** 2 + (chlo_lons - z_lon) ** 2
-                idx_c = int(d_sq_c.argmin())
-                if d_sq_c[idx_c] <= _MAX_SATELLITE_DISTANCE_DEG_SQ:
-                    val_c = chlo_vals[idx_c]
+            if chlo_idx is not None and z.get("chlorophyll_mg_m3") is None:
+                if chlo_d2[i] <= _MAX_SATELLITE_DISTANCE_DEG_SQ:
+                    val_c = chlo_vals[int(chlo_idx[i])]
                     if not (np.isnan(val_c) if hasattr(val_c, "dtype") else False):
                         z["chlorophyll_mg_m3"] = round(float(val_c), 2)
     except Exception as exc:

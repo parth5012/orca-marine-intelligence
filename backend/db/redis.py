@@ -173,6 +173,35 @@ async def append_message(session_id: str, role: str, content: str):
         raise
 
 
+async def save_turn_batch(session_id: str, user_content: str, assistant_content: str):
+    """Persist a full chat turn with ONE read + ONE write (Ticket #198).
+
+    Replaces two ``append_message`` calls (2 gets + 2 sets) on batch-safe
+    paths with a single get + single set. Message shape matches
+    ``append_message`` exactly (role/content/ts, last-20 cap). Raises on
+    failure like ``append_message``.
+    """
+    try:
+        sess = await get_session(session_id)
+        if sess is None:
+            sess = {}
+        history = sess.get("turn_history") or sess.get("history") or []
+        if not isinstance(history, list):
+            history = []
+        now = time.time()
+        history.append({"role": "user", "content": user_content, "ts": now})
+        history.append({"role": "assistant", "content": assistant_content, "ts": now})
+        history = history[-20:]
+        sess["turn_history"] = history
+        import datetime
+
+        sess["updated_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+        await save_session(session_id, sess)
+    except Exception as e:
+        logger.warning("save_turn_batch failed for %s: %s", session_id, e)
+        raise
+
+
 async def get_history(session_id: str, limit: int = 10) -> list:
     """Get recent conversation history for a session."""
     try:

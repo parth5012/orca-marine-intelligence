@@ -37,10 +37,14 @@ Refs:
 from __future__ import annotations
 
 import asyncio
+import copy
 import datetime
+import hashlib
+import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from typing import Any, TypedDict, Annotated
@@ -135,6 +139,136 @@ PER_AGENT_TIMEOUT_S = float(os.getenv("ORCA_PER_AGENT_TIMEOUT_S", "6.0"))
 # {lat: 9.93, lon: 76.26} when no location resolves.
 PLANNER_CALL_TIMEOUT_S = float(os.getenv("ORCA_PLANNER_TIMEOUT_MS", "5000")) / 1000.0
 KOCHI_FALLBACK_LOCATION = {"lat": 9.93, "lon": 76.26}
+
+# ---------------------------------------------------------------------------
+# Perf hardening (Ticket #198): combiner-once + per-node latency telemetry
+# ---------------------------------------------------------------------------
+# The streaming path scored zones TWICE with identical inputs: once for the
+# provisional ``safety`` event at parallel_analysis end, once in
+# ``decision_agent``. The provisional result is cached here keyed by a hash
+# of all combiner inputs; ``decision_agent`` reuses it (deep copy — decision
+# mutates the veto fields) instead of rescoring. Hash mismatch (or no
+# provisional, e.g. non-streaming path) falls back to a fresh combine call,
+# so behavior is identical with or without the cache.
+_PROVISIONAL_COMBINED: dict[str, Any] = {"hash": None, "combined": None}
+
+
+def _combined_inputs_hash(
+    fish: Any,
+    sea: Any,
+    weather: Any,
+    danger: Any,
+    user_location: Any,
+    language: Any = None,
+    forecast: Any = None,
+) -> str:
+    """Stable md5 over the full combiner input set (JSON, key-sorted)."""
+    try:
+        raw = json.dumps(
+            [fish, sea, weather, danger, user_location, language, forecast],
+            sort_keys=True,
+            default=str,
+        )
+    except Exception:
+        raw = repr((
+            len(fish or []) if hasattr(fish or [], "__len__") else 0,
+            len(sea or []) if hasattr(sea or [], "__len__") else 0,
+            time.time_ns(),
+        ))
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+def _store_provisional_combined(inputs_hash: str, combined: dict) -> None:
+    """Cache the provisional combine result for decision_agent reuse."""
+    try:
+        _PROVISIONAL_COMBINED["hash"] = inputs_hash
+        _PROVISIONAL_COMBINED["combined"] = combined
+    except Exception:
+        pass
+
+
+def _take_provisional_combined(inputs_hash: str) -> dict | None:
+    """Return a deep copy of the cached result on exact input match, else None."""
+    try:
+        if _PROVISIONAL_COMBINED.get("hash") == inputs_hash and isinstance(
+            _PROVISIONAL_COMBINED.get("combined"), dict
+        ):
+            return copy.deepcopy(_PROVISIONAL_COMBINED["combined"])
+    except Exception:
+        pass
+    return None
+
+
+def _clear_provisional_combined() -> None:
+    """Clear the provisional combine cache (tests)."""
+    try:
+        _PROVISIONAL_COMBINED["hash"] = None
+        _PROVISIONAL_COMBINED["combined"] = None
+    except Exception:
+        pass
+
+
+# Per-node latency samples for P50/P95 telemetry (Ticket #198). Recorded on
+# every streamed node end; bounded ring per node; lock-guarded for the async
+# server. Exposed via get_node_latency_stats() — no SSE contract change.
+_NODE_TIMINGS: dict[str, list[float]] = {}
+_NODE_TIMINGS_LOCK = threading.Lock()
+_MAX_SAMPLES_PER_NODE = 200
+
+
+def record_node_timing(node: str, elapsed_s: float) -> None:
+    """Append one node latency sample (seconds). Never raises."""
+    try:
+        with _NODE_TIMINGS_LOCK:
+            samples = _NODE_TIMINGS.setdefault(str(node), [])
+            samples.append(float(elapsed_s))
+            if len(samples) > _MAX_SAMPLES_PER_NODE:
+                del samples[: len(samples) - _MAX_SAMPLES_PER_NODE]
+    except Exception:
+        pass
+
+
+def get_node_latency_stats() -> dict[str, dict[str, float]]:
+    """Return per-node {count, p50_s, p95_s, max_s} over recent samples."""
+    try:
+        with _NODE_TIMINGS_LOCK:
+            snapshot = {k: sorted(v) for k, v in _NODE_TIMINGS.items() if v}
+    except Exception:
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    for node, vals in snapshot.items():
+        try:
+            n = len(vals)
+            if n == 1:
+                p50 = p95 = vals[0]
+            else:
+                def _pct(p: float) -> float:
+                    rank = (p / 100.0) * (n - 1)
+                    lo = int(rank)
+                    hi = min(lo + 1, n - 1)
+                    frac = rank - lo
+                    return vals[lo] + (vals[hi] - vals[lo]) * frac
+
+                p50 = _pct(50.0)
+                p95 = _pct(95.0)
+            out[node] = {
+                "count": float(n),
+                "p50_s": round(float(p50), 4),
+                "p95_s": round(float(p95), 4),
+                "max_s": round(float(vals[-1]), 4),
+            }
+        except Exception:
+            continue
+    return out
+
+
+def _clear_node_timings() -> None:
+    """Clear latency samples (tests)."""
+    try:
+        with _NODE_TIMINGS_LOCK:
+            _NODE_TIMINGS.clear()
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # Trace UX (#193) — human-readable evidence allowlist
@@ -1270,21 +1404,30 @@ async def decision_agent(state: ORCAState) -> dict:
             "masked_spans": 0,
         }
 
-    try:
-        from backend.agents import combiner as cb  # type: ignore
+    _decision_forecast = state.get("forecast")
+    # Combiner-once (#198): reuse the provisional combine result when the
+    # streaming path already scored these exact inputs (deep copy — the veto
+    # block below mutates ranked_zones/best). Miss → fresh combine as before.
+    _inputs_hash = _combined_inputs_hash(
+        fish, sea, weather, danger, user_location, language, _decision_forecast
+    )
+    combined = _take_provisional_combined(_inputs_hash)
+    if combined is None:
+        try:
+            from backend.agents import combiner as cb  # type: ignore
 
-        combined = cb.combine_and_rank(
-            fish_results=fish, sea_results=sea, weather_results=weather,
-            danger_results=danger, user_location=user_location,
-            detected_language=language, forecast=state.get("forecast"),
-        )
-    except Exception as exc:
-        logger.error("graph.decision: combiner failed %s", exc)
-        combined = {
-            "ranked_zones": [], "best": None,
-            "explanation": f"Combiner error: {exc}",
-            "citation": "INCOIS TextData", "all_unsafe": False, "score_breakdown": {},
-        }
+            combined = cb.combine_and_rank(
+                fish_results=fish, sea_results=sea, weather_results=weather,
+                danger_results=danger, user_location=user_location,
+                detected_language=language, forecast=_decision_forecast,
+            )
+        except Exception as exc:
+            logger.error("graph.decision: combiner failed %s", exc)
+            combined = {
+                "ranked_zones": [], "best": None,
+                "explanation": f"Combiner error: {exc}",
+                "citation": "INCOIS TextData", "all_unsafe": False, "score_breakdown": {},
+            }
 
     best = combined.get("best")
     ranked = combined.get("ranked_zones") or []
@@ -2276,11 +2419,10 @@ async def orchestrate_stream_via_graph(
             try:
                 from backend.db import redis as _redis_mod  # type: ignore
 
+                # Single batched turn write (1 get + 1 set) instead of two
+                # append_message calls (2 gets + 2 sets) — #198 Redis tail.
                 await asyncio.wait_for(
-                    _redis_mod.append_message(sid, "user", query or ""), timeout=1.0,
-                )
-                await asyncio.wait_for(
-                    _redis_mod.append_message(sid, "assistant", str(_reply)), timeout=1.0,
+                    _redis_mod.save_turn_batch(sid, query or "", str(_reply)), timeout=1.5,
                 )
             except Exception:
                 pass
@@ -2365,13 +2507,30 @@ async def orchestrate_stream_via_graph(
         try:
             from backend.agents import combiner as cb  # type: ignore
 
+            # Same inputs as decision_agent (language + forecast included) so
+            # the cached result is exactly reusable (combiner-once, #198).
+            _prov_ul = ul if isinstance(ul, dict) else {"lat": 0, "lon": 0}
+            _prov_lang = language or "en"
+            _prov_forecast = final_state.get("forecast")
             combined = cb.combine_and_rank(
                 fish_results=fish,
                 sea_results=sea_results or [],
                 weather_results=weather_results or [],
                 danger_results=danger_results or [],
-                user_location=ul if isinstance(ul, dict) else {"lat": 0, "lon": 0},
+                user_location=_prov_ul,
+                detected_language=_prov_lang,
+                forecast=_prov_forecast,
             )
+            try:
+                _store_provisional_combined(
+                    _combined_inputs_hash(
+                        fish, sea_results, weather_results, danger_results,
+                        _prov_ul, _prov_lang, _prov_forecast,
+                    ),
+                    combined,
+                )
+            except Exception:
+                pass
             best = combined.get("best")
         except Exception as exc:
             logger.warning("graph.stream combiner failed: %s", exc)
@@ -2532,6 +2691,12 @@ async def orchestrate_stream_via_graph(
             start_t = node_start.get(name, now)
             elapsed_s = now - start_t
             elapsed_ms = int(elapsed_s * 1000)
+            # Per-node latency telemetry (#198 P50/P95): observe-only, feeds
+            # get_node_latency_stats(). Never alters control flow.
+            try:
+                record_node_timing(name, elapsed_s)
+            except Exception:
+                pass
             # Observed 1.4s sub-agent budget — emits error but does not
             # preempt the slow node (LangGraph stream has no per-node cancel).
             if elapsed_s > NODE_TIMEOUT_S:

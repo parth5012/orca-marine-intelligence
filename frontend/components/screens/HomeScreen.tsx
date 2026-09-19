@@ -41,6 +41,7 @@ import { KPITrends } from '@/components/analytics/KPITrends';
 import { SkeletonLoader } from '@/components/common/SkeletonLoader';
 import { SystemStatusBadge } from '@/components/common/SystemStatusBadge';
 import { KOCHI_GHOST_PFZ } from '@/lib/ghostPFZ';
+import { fetchPfzCached } from '@/lib/pfzCache';
 import type { PFZItem } from '@/lib/pfz';
 import {
   KT_TO_KMH,
@@ -168,15 +169,12 @@ export const HomeScreen: React.FC = () => {
     };
   }, [userLocation.lat, userLocation.lon]);
 
-  // Featured zone & Base KPI derivation: live PFZ features via Next.js proxy.
+  // Featured zone & Base KPI derivation: live PFZ features via Next.js
+  // proxy (perf #198: shared 60s cache — same payload as the map engine).
   useEffect(() => {
     let cancelled = false;
     setPfzLoading(true);
-    fetch('/api/pfz?limit=100')
-      .then((res) => {
-        if (!res.ok) throw new Error(`pfz ${res.status}`);
-        return res.json();
-      })
+    fetchPfzCached('/api/pfz?limit=100')
       .then((data) => {
         if (cancelled) return;
         const features = Array.isArray(data?.features) ? data.features : [];
