@@ -581,6 +581,12 @@ Not implemented in MVP. Production deployment will add rate limiting per API key
 
 API version is embedded in the URL path (`/api/...`). Breaking changes will increment the version prefix.
 
+## Evaluation & Benchmarking
+
+- **Dataset**: `data/golden_v1.json` (66 multilingual cases across 22 languages) + `backend/evals/dataset.py` (84 English coastal/edge cases; 150 total)
+- **LangSmith Sync**: `orca-golden-v1` (`python -m backend.evals.dataset --sync`)
+- **Scorecard Report**: `reports/golden_v1_scorecard.md` (`python -m backend.evals.runner`)
+
 ---
 
 *Rewritten for Wayfinder map #92 (T4): routes validated against `backend/routers/*.py` Pydantic models, callers verified by code read, T3 pruned routes removed, T5 fetch rule recorded. See also `docs/ORCA_GeoJSON_Architecture.md`, `docs/ORCA_Codebase_Guide.md`.*

@@ -15,6 +15,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field, asdict
+from pathlib import Path
 from typing import Any, Callable
 
 from backend.evals.dataset import MarineEvalExample, load_marine_eval_dataset
@@ -120,6 +121,27 @@ class EvaluationReport:
                 else:
                     row_vals.append("-")
             lines.append(f"| {b} | " + " | ".join(row_vals) + " |")
+
+        lines.append("")
+        lines.append("## Top Failures & Degradation Cases")
+        lines.append("")
+        failed = [r for r in self.results if not r.get("passed")]
+        if not failed:
+            lines.append("No failures detected. All evaluated examples met benchmark criteria.")
+        else:
+            for idx, r in enumerate(failed[:10], 1):
+                eid = r.get("example_id")
+                lc = r.get("landing_center")
+                reasons = []
+                for eval_name in [
+                    "groundedness", "safety", "preservation", "risk_calibration",
+                    "language_purity", "numeral_invariant"
+                ]:
+                    ev = r.get(eval_name, {})
+                    if ev and not ev.get("passed", True):
+                        reasons.append(f"{eval_name}: {ev.get('reason') or ev.get('reasoning')}")
+                reason_str = "; ".join(reasons) if reasons else "Threshold not reached"
+                lines.append(f"{idx}. **{eid}** ({lc}): {reason_str}")
 
         return "\n".join(lines)
 
@@ -227,13 +249,14 @@ def run_marine_evals(
         if example_passed:
             passed_count += 1
 
-        # Grouping key preserves distinct scenarios per landing center
-        scenario_tag = ex.example_id.rsplit("_", 1)[-1] if "_" in ex.example_id else ex.example_id
-        group_key = f"{scenario_tag}_{ex.landing_center}_{ex.inputs.get('latitude', '')}_{ex.inputs.get('longitude', '')}"
-        if group_key not in groups:
-            groups[group_key] = {}
-            group_refs[group_key] = ex.reference
-        groups[group_key][ex.language] = output
+        # Grouping key preserves distinct scenarios per landing center for multilingual cases
+        if ex.example_id.startswith("GOLDEN_V1_"):
+            scenario_tag = ex.example_id.rsplit("_", 1)[-1]
+            group_key = f"golden_{scenario_tag}_{ex.landing_center}"
+            if group_key not in groups:
+                groups[group_key] = {}
+                group_refs[group_key] = ex.reference
+            groups[group_key][ex.language] = output
 
         # Matrix tracking
         bucket = ex.metadata.get("category")
@@ -301,3 +324,32 @@ def run_marine_evals(
 
     logger.info("Evaluation complete: %d/%d passed in %.2fs", passed_count, n, elapsed)
     return report
+
+
+if __name__ == "__main__":
+    import argparse
+    from backend.evals.dataset import load_golden_v1, load_marine_eval_dataset
+
+    parser = argparse.ArgumentParser(description="Run ORCA Marine Offline Evaluations")
+    parser.add_argument("--dataset", default=None, help="Path to golden dataset JSON (or default)")
+    parser.add_argument("--out", default="reports/golden_v1_scorecard.md", help="Scorecard output path")
+    args = parser.parse_args()
+
+    if args.dataset:
+        ds = load_golden_v1(args.dataset)
+        # Also combine with English seeds if golden dataset loaded
+        ds_en = load_marine_eval_dataset()
+        combined_ds = ds + ds_en
+    else:
+        combined_ds = load_golden_v1() + load_marine_eval_dataset()
+
+    rep = run_marine_evals(dataset=combined_ds, use_langsmith=False)
+    scorecard_text = rep.generate_scorecard()
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(scorecard_text)
+
+    print(f"Evaluation report written to {out_path}")
+    print(scorecard_text)
