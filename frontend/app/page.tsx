@@ -111,12 +111,13 @@ function Shell() {
     setSelectedPFZ,
   } = useApp();
 
+  // Ticket #195: pre-SSE shell state is UNKNOWN (amber), never SAFE.
   const [safetyState, setSafetyState] = useState<SafetyData>({
-    waves_m: 0.8,
-    wind_kts: 12,
-    danger: 'none',
-    badge: 'green',
-    warning_text: 'SAFE',
+    waves_m: null,
+    wind_kts: null,
+    danger: 'unknown',
+    badge: 'amber',
+    warning_text: 'UNKNOWN',
   });
 
   // Acquire GPS position on client mount (Kochi fallback).

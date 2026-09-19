@@ -31,6 +31,17 @@ import Link from 'next/link';
 import { Search, Layers, Target, X, Navigation, Eye, MessageSquareText } from 'lucide-react';
 import MapView from './MapView';
 import SafetyBadge from './SafetyBadge';
+import {
+  bearingLabel,
+  chlorophyllLabel,
+  distanceLabel,
+  geofenceRows,
+  sstLabel,
+  suitabilityLabel,
+  toFiniteNumber,
+  waveLabel,
+  windLabel,
+} from './drawerHonesty';
 import LayerControl from './LayerControl';
 import { parseLocation, formatDMS, haversineDistance } from './geo';
 import type { BasemapStyle } from './carto';
@@ -267,7 +278,9 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
   const zoneLon = Array.isArray(zoneCoords) ? Number(zoneCoords[0]) : NaN;
   const zoneName = String(zoneProps.place ?? zoneProps.name ?? 'Selected Zone');
   const zoneCode = String(zoneProps.zone_id ?? zoneProps.code ?? zoneProps.id ?? 'PFZ');
-  const zoneSuitability = String(zoneProps.suitability ?? 'HIGH');
+  // Ticket #195: every drawer claim comes from feature props; missing
+  // values render as em-dash / Not verified, never hardcoded defaults.
+  const zoneSuitability = suitabilityLabel(zoneProps);
   const zonePlaceParam = String(zoneProps.place ?? zoneName);
 
   return (
@@ -522,10 +535,10 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <SafetyBadge
-                  waves={Number(zoneProps.wave_m ?? zoneProps.wave_height_m ?? 0.8)}
-                  wind={Number(zoneProps.wind_kt ?? zoneProps.wind_speed_kt ?? 12)}
-                  danger={String(zoneProps.danger ?? 'none')}
-                  badge={String(zoneProps.badge ?? 'green')}
+                  waves={toFiniteNumber(zoneProps.wave_m ?? zoneProps.wave_height_m)}
+                  wind={toFiniteNumber(zoneProps.wind_kt ?? zoneProps.wind_speed_kt)}
+                  danger={zoneProps.danger ?? undefined}
+                  badge={zoneProps.badge ?? undefined}
                   compact
                 />
                 <button
@@ -548,17 +561,17 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
               <div className={`p-2 rounded-xl border ${isLight ? 'bg-cyan-50/80 border-cyan-100' : 'bg-slate-900/80 border-slate-800'}`}>
                 <span className="text-[11px] text-slate-400">Distance</span>
                 <div className="font-bold text-cyan-600 dark:text-cyan-200 text-sm mt-0.5">
-                  {String(zoneProps.distance ?? zoneProps.distance_km ?? '25')} km
+                  {distanceLabel(zoneProps)}
                 </div>
                 <div className="text-[10px] text-slate-400">
-                  {String(zoneProps.bearing ? `${zoneProps.bearing}°` : (zoneProps.dir ?? zoneProps.bearingDegrees ?? 'SW'))}
+                  {bearingLabel(zoneProps)}
                 </div>
               </div>
               {showSst && (
                 <div className={`p-2 rounded-xl border ${isLight ? 'bg-amber-50/80 border-amber-100' : 'bg-slate-900/80 border-slate-800'}`}>
                   <span className="text-[11px] text-slate-400">SST Temp</span>
                   <div className="font-bold text-amber-600 dark:text-amber-300 text-sm mt-0.5">
-                    {String(zoneProps.sst ?? zoneProps.sst_c ?? zoneProps.temperature_c ?? '28.4')}°C
+                    {sstLabel(zoneProps)}
                   </div>
                   <div className="text-[10px] text-slate-400">Surface Temp</div>
                 </div>
@@ -567,34 +580,46 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
                 <div className={`p-2 rounded-xl border ${isLight ? 'bg-teal-50/80 border-teal-100' : 'bg-slate-900/80 border-slate-800'}`}>
                   <span className="text-[11px] text-slate-400">Chlorophyll</span>
                   <div className="font-bold text-teal-600 dark:text-teal-300 text-sm mt-0.5">
-                    {String(zoneProps.chlorophyll ?? zoneProps.chl ?? '0.8')} mg/m³
+                    {chlorophyllLabel(zoneProps)}
                   </div>
-                  <div className="text-[10px] text-slate-400">Plankton High</div>
+                  <div className="text-[10px] text-slate-400">Plankton</div>
                 </div>
               )}
               {(showWaves || showWind) && (
                 <div className={`p-2 rounded-xl border ${isLight ? 'bg-sky-50/80 border-sky-100' : 'bg-slate-900/80 border-slate-800'}`}>
                   <span className="text-[11px] text-slate-400">Waves & Wind</span>
                   <div className="font-bold text-sky-600 dark:text-blue-300 text-sm mt-0.5">
-                    {showWaves ? `${String(zoneProps.wave_m ?? zoneProps.wave_height_m ?? '1.1')}m` : '—'}
+                    {showWaves ? waveLabel(zoneProps) : '—'}
                     {' / '}
-                    {showWind ? `${String(zoneProps.wind_kt ?? zoneProps.wind_speed_kt ?? '12')}kt` : '—'}
+                    {showWind ? windLabel(zoneProps) : '—'}
                   </div>
-                  <div className="text-[10px] text-slate-400">Live telemetry</div>
+                  <div className="text-[10px] text-slate-400">Sea state</div>
                 </div>
               )}
             </div>
 
+            {/* Ticket #195: geofence rows strictly from feature props
+                (inside_eez / inside_mpa / imbl_distance_km); missing props
+                read "Not verified", never a hardcoded km claim. */}
             <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] mb-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-sky-400" /> EEZ: Inside India EEZ
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" /> MPA: &gt; 12 km clear
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-orange-400" /> IMBL: &gt; 45 km buffer
-              </span>
+              {geofenceRows(zoneProps).map((row) => (
+                <span key={row.key} className="flex items-center gap-1.5">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      row.tone === 'sky'
+                        ? 'bg-sky-400'
+                        : row.tone === 'emerald'
+                        ? 'bg-emerald-400'
+                        : row.tone === 'red'
+                        ? 'bg-red-400'
+                        : row.tone === 'orange'
+                        ? 'bg-orange-400'
+                        : 'bg-slate-400'
+                    }`}
+                  />{' '}
+                  {row.label}: {row.detail}
+                </span>
+              ))}
               <span className="font-mono">
                 {Number.isFinite(zoneLat) ? formatDMS(zoneLat, true) : ''} |{' '}
                 {Number.isFinite(zoneLon) ? formatDMS(zoneLon, false) : ''} · {zoneSuitability}
