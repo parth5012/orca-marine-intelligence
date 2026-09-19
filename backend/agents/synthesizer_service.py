@@ -126,14 +126,20 @@ _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 # Secret-scrub patterns for SEC-01: never leak API keys in SSE errors.
 _KEY_VAL_RE = re.compile(r"(?i)\b(api[_-]?key|secret|key)\s*[:=]\s*['\"]?[^'\"\s,}]+['\"]?")
 _AIZA_RE = re.compile(r"AIza[0-9A-Za-z\-_]{20,}")
+_GSK_RE = re.compile(r"gsk_[A-Za-z0-9_\-]{10,}")
+_XOX_RE = re.compile(r"xox[abpras]?-[A-Za-z0-9\-_]+")
+_BEARER_RE = re.compile(r"(?i)Bearer\s+[A-Za-z0-9\-._~+/=]{8,}")
 
 
 def _scrub_secrets(text: str) -> str:
-    """Redact API-key material (key=... / AIza... ) before SSE exposure."""
+    """Redact API-key material (key=... / AIza... / gsk_ / xox / Bearer) before SSE exposure."""
     if not text:
         return text
     out = _KEY_VAL_RE.sub(r"\1=[REDACTED]", text)
     out = _AIZA_RE.sub("[REDACTED_API_KEY]", out)
+    out = _GSK_RE.sub("[REDACTED_API_KEY]", out)
+    out = _XOX_RE.sub("[REDACTED_API_KEY]", out)
+    out = _BEARER_RE.sub("Bearer [REDACTED]", out)
     return out
 
 

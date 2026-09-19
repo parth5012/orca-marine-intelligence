@@ -211,7 +211,7 @@ class TestChatStreamingEndpoint:
         ) in saved
 
     def test_chat_stream_error_recovery(self, client):
-        """Verify unhandled stream generator exceptions emit an SSE error event."""
+        """Verify unhandled stream generator exceptions emit a GENERIC SSE error event (#199)."""
         async def mock_stream(*args, **kwargs) -> AsyncGenerator[dict, None]:
             yield {"type": "status", "agent": "planner", "state": "running"}
             raise RuntimeError("Database connection timeout during planning")
@@ -230,7 +230,9 @@ class TestChatStreamingEndpoint:
         assert len(parsed) == 2
         assert parsed[0]["event"] == "status"
         assert parsed[1]["event"] == "error"
-        assert "Database connection timeout" in parsed[1]["data"]["message"]
+        # #199: no traceback/internals to the client — generic message only.
+        assert parsed[1]["data"]["message"] == "Internal chat error; please retry."
+        assert "Database connection timeout" not in parsed[1]["data"]["message"]
 
     def test_planner_fallback_emits_non_fatal_status_event(self, client):
         """Ticket #78: Verify planner failure emits non-fatal status fallback event instead of error."""

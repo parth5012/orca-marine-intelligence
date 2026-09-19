@@ -50,6 +50,17 @@ except ImportError:
     from core.logging import get_logger, setup_logging
     from core.middleware import RequestLoggingMiddleware
 
+try:
+    from backend.core.security import (
+        SecurityHeadersMiddleware,
+        allow_vercel_preview,
+    )
+except ImportError:
+    from core.security import (  # type: ignore
+        SecurityHeadersMiddleware,
+        allow_vercel_preview,
+    )
+
 logger = get_logger("orca.api")
 
 DEFAULT_ALLOWED_ORIGINS = (
@@ -61,7 +72,7 @@ DEFAULT_ALLOWED_ORIGINS = (
 
 # Allow all Vercel preview deployments (unique URL per commit) in addition
 # to the explicit list above. Public read API with no cookie auth, so safe.
-VERCEL_PREVIEW_ORIGIN_REGEX = r"https://.*\.vercel\.app"
+VERCEL_PREVIEW_ORIGIN_REGEX = r"^https://[a-zA-Z0-9_\-]+\.vercel\.app$"
 
 _start_time: float = time.time()
 
@@ -216,21 +227,26 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS from environment
+# Configure CORS from environment: explicit allowlist only. Vercel preview
+# regex is opt-out (ORCA_ALLOW_VERCEL_PREVIEW=false locks prod to the
+# allowlist). Methods/headers are enumerated — never "*" with credentials.
+# Static ACAO in vercel.json was removed; FastAPI is the single CORS issuer.
 allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS)
 allowed_origins = [origin.strip() for origin in allowed_origins_raw.split(",") if origin.strip()]
 allow_credentials = True
 if "*" in allowed_origins:
     allow_credentials = False
+_preview_regex = VERCEL_PREVIEW_ORIGIN_REGEX if allow_vercel_preview() else None
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=VERCEL_PREVIEW_ORIGIN_REGEX,
+    allow_origin_regex=_preview_regex,
     allow_credentials=allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Requested-With"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
 # Mount live routers under /api

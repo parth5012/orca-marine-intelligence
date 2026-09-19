@@ -31,6 +31,17 @@ _redis_binary_client = None
 _memory_store: dict[str, Any] = {}
 _memory_expiry: dict[str, float] = {}
 
+# #199: bound the in-memory fallback so a Redis outage can't OOM the process.
+# Oldest-inserted keys evicted first (insertion-ordered dict). Env-override.
+_MEMORY_MAX_ENTRIES = int(os.getenv("ORCA_MEMORY_CACHE_MAX", "1000"))
+
+
+def _enforce_memory_bound() -> None:
+    while len(_memory_store) > _MEMORY_MAX_ENTRIES:
+        oldest = next(iter(_memory_store))
+        _memory_store.pop(oldest, None)
+        _memory_expiry.pop(oldest, None)
+
 
 def _is_expired(key: str) -> bool:
     exp = _memory_expiry.get(key)
@@ -121,6 +132,7 @@ async def set_json(key: str, value: dict, ttl_seconds: int = 3600):
     # In-memory fallback
     _memory_store[key] = json.loads(json.dumps(value, ensure_ascii=False))
     _memory_expiry[key] = time.time() + ttl_seconds
+    _enforce_memory_bound()
 
 
 async def save_session(session_id: str, data: dict, ttl_seconds: int = 86400):
@@ -282,4 +294,5 @@ async def set_tile_cache(key: str, value: bytes, ttl_seconds: int = 3600) -> Non
 
     _memory_store[key] = data
     _memory_expiry[key] = time.time() + ttl_seconds
+    _enforce_memory_bound()
 
