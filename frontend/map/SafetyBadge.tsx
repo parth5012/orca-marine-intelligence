@@ -36,10 +36,14 @@ function toFinite(v: unknown): number | null {
 }
 
 /**
- * Pure sea-status resolver (ticket #195, unit-tested).
- * null/undefined/NaN waves or wind -> 'unknown' unless an explicit
- * danger signal (red badge, danger/cyclone flag, or a breaching
- * finite measurement) forces 'danger'.
+ * Pure sea-status resolver (ticket #195, unit-tested; bands canonicalised
+ * to backend/agents/safety_thresholds.py in #196: wave 1.5/2.5m,
+ * wind 15/25kt).
+ * Backend badge/danger is authoritative and checked first — numeric bands
+ * below are only a fallback for payloads that carry raw measurements
+ * without a backend verdict. null/undefined/NaN waves or wind ->
+ * 'unknown' unless an explicit danger signal (red badge, danger/cyclone
+ * flag, or a breaching finite measurement) forces 'danger'.
  */
 export function resolveSeaStatus(
   waves: unknown,
@@ -55,8 +59,8 @@ export function resolveSeaStatus(
     badge === 'red' ||
     dangerStr === 'danger' ||
     dangerStr === 'cyclone' ||
-    (wv != null && wv >= 2.5) ||
-    (wn != null && wn >= 30);
+    (wv != null && wv > 2.5) ||
+    (wn != null && wn > 25);
   if (isDanger) return 'danger';
 
   // Fail open to caution: no measurement, no verdict.
@@ -68,7 +72,7 @@ export function resolveSeaStatus(
     dangerStr === 'eez' ||
     dangerStr === 'mpa' ||
     wv >= 1.5 ||
-    wn >= 20;
+    wn >= 15;
   if (isCaution) return 'caution';
 
   return 'safe';

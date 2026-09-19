@@ -710,19 +710,22 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                   const danger = parsed.danger || parsed.safety || 'unknown';
                   const badge = parsed.badge || (danger === 'safe' ? 'green' : 'amber');
 
+                  // #196: backend badge/danger is authoritative; numeric bands
+                  // below are canonical fallback only (wave 1.5/2.5m,
+                  // wind 15/25kt per backend/agents/safety_thresholds.py).
                   let warningText = 'SAFE';
                   const isHighDanger =
                     danger === 'danger' ||
                     danger === 'cyclone' ||
                     badge === 'red' ||
-                    (typeof waves === 'number' && waves >= 2.5) ||
-                    (typeof wind === 'number' && wind >= 30);
+                    (typeof waves === 'number' && waves > 2.5) ||
+                    (typeof wind === 'number' && wind > 25);
 
                   const isCaution =
                     danger === 'caution' ||
                     badge === 'amber' ||
                     (typeof waves === 'number' && waves >= 1.5) ||
-                    (typeof wind === 'number' && wind >= 20);
+                    (typeof wind === 'number' && wind >= 15);
 
                   if (danger === 'cyclone') {
                     warningText = 'CYCLONE WARNING - DO NOT SAIL';

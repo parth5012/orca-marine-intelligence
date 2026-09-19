@@ -34,31 +34,40 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Thresholds (non-negotiable per ORCA_GeoJSON_Architecture.md + issue #13)
+# Thresholds — SINGLE SOURCE OF TRUTH is
+# backend/agents/safety_thresholds.py (wayfinder #196). Aliases below keep
+# legacy import paths working; classification delegates to the canonical
+# bands (wave 1.5/2.5m, current 1.5/2.5kt).
 # ---------------------------------------------------------------------------
-WAVE_SAFE_MAX = 1.5  # m, exclusive — <1.5 safe
-WAVE_CAUTION_MAX = 2.5  # m, inclusive upper for caution — 1.5-2.5 caution, >2.5 danger
-CURRENT_CAUTION_KT = 2.0  # >2 caution
-CURRENT_DANGER_KT = 3.0  # >3 danger
-_SEVERITY_RANK = {"safe": 0, "caution": 1, "danger": 2}
+from backend.agents.safety_thresholds import (
+    CURRENT_DANGER_MIN_KT as CURRENT_DANGER_KT,
+)
+from backend.agents.safety_thresholds import (
+    CURRENT_SAFE_MAX_KT as CURRENT_CAUTION_KT,
+)
+from backend.agents.safety_thresholds import (
+    WAVE_DANGER_MIN_M as WAVE_CAUTION_MAX,
+)
+from backend.agents.safety_thresholds import (
+    WAVE_SAFE_MAX_M as WAVE_SAFE_MAX,
+)
+from backend.agents.safety_thresholds import (
+    classify_current as _canonical_current,
+)
+from backend.agents.safety_thresholds import (
+    classify_wave as _canonical_wave,
+)
+_SEVERITY_RANK = {"safe": 0, "caution": 1, "danger": 2, "unknown": 1}
 
 
 def _classify_wave(wave_m: float) -> str:
     """Classify wave height per spec: <1.5 safe, 1.5-2.5 caution, >2.5 danger."""
-    if wave_m < WAVE_SAFE_MAX:
-        return "safe"
-    if wave_m <= WAVE_CAUTION_MAX:
-        return "caution"
-    return "danger"
+    return _canonical_wave(wave_m)
 
 
 def _classify_current(current_kt: float) -> str:
-    """Classify current: <=2 safe, >2 caution, >3 danger."""
-    if current_kt > CURRENT_DANGER_KT:
-        return "danger"
-    if current_kt > CURRENT_CAUTION_KT:
-        return "caution"
-    return "safe"
+    """Classify current: <1.5 safe, 1.5-2.5 caution, >2.5 danger."""
+    return _canonical_current(current_kt)
 
 
 def _overall_status(wave_status: str, current_status: str) -> str:

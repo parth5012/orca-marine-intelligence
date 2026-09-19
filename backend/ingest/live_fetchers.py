@@ -42,14 +42,30 @@ PFZ_GEOJSON_PATH = DATA_DIR / "pfz-today.geojson"
 EEZ_GEOJSON_PATH = DATA_DIR / "eez.geojson"
 MPA_GEOJSON_PATH = DATA_DIR / "mpa.geojson"
 
-# Safety thresholds
-WIND_SAFE_MAX = 15.0       # kt, <15 safe
-WIND_CAUTION_MAX = 25.0    # kt, 15-25 caution, >25 danger
-WAVE_SAFE_MAX = 1.5        # m, <1.5 safe
-WAVE_CAUTION_MAX = 2.5     # m, 1.5-2.5 caution, >2.5 danger
-CURRENT_SAFE_MAX = 1.5     # kt, <1.5 safe
-CURRENT_CAUTION_MAX = 2.5  # kt, 1.5-2.5 caution, >2.5 danger
-CYCLONE_PRESSURE_DANGER = 995.0  # hPa, below 995 indicates tropical depression/cyclone
+# Safety thresholds — SINGLE SOURCE OF TRUTH is
+# backend/agents/safety_thresholds.py (wayfinder #196). Aliases below keep
+# legacy import paths working.
+from backend.agents.safety_thresholds import (
+    CURRENT_DANGER_MIN_KT as CURRENT_CAUTION_MAX,
+)
+from backend.agents.safety_thresholds import (
+    CURRENT_SAFE_MAX_KT as CURRENT_SAFE_MAX,
+)
+from backend.agents.safety_thresholds import (
+    PRESSURE_DANGER_HPA as CYCLONE_PRESSURE_DANGER,
+)
+from backend.agents.safety_thresholds import (
+    WAVE_DANGER_MIN_M as WAVE_CAUTION_MAX,
+)
+from backend.agents.safety_thresholds import (
+    WAVE_SAFE_MAX_M as WAVE_SAFE_MAX,
+)
+from backend.agents.safety_thresholds import (
+    WIND_DANGER_MIN_KT as WIND_CAUTION_MAX,
+)
+from backend.agents.safety_thresholds import (
+    WIND_SAFE_MAX_KT as WIND_SAFE_MAX,
+)
 
 
 IST_TZ = timezone(timedelta(hours=5, minutes=30))

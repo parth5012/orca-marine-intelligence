@@ -12,9 +12,16 @@ Scoring Formula:
     score = closest * 0.4 + safe_sea * 0.3 + wind_ok * 0.2 + not_banned * 0.1
 
     - closest:    1.0 - (distance_km / max_dist) normalized to [0,1]
-    - safe_sea:   1.0 if wave < 1.5 else max(0.0, 1.0 - (wave-1.5)/1.5)
-    - wind_ok:    1.0 if wind < 15 else max(0.0, 1.0 - (wind-15)/15)
-    - not_banned: 0.0 if inside_mpa or not inside_eez else 1.0
+    - safe_sea:   worst of wave/current components, each
+                  1.0 if value < safe-max else max(0.0, 1.0 - (v-safe)/(danger-safe))
+                  (canonical bands in safety_thresholds: wave 1.5/2.5m,
+                  current 1.5/2.5kt). Missing current is informational and
+                  does NOT penalize ranking — the wave component carries
+                  safe_sea alone (safety veto still fail-opens on missing
+                  wave/wind, never SAFE).
+    - wind_ok:    1.0 if wind < 15kt else max(0.0, 1.0 - (wind-15)/10)
+    - not_banned: 0.0 if inside_mpa or explicitly outside EEZ,
+                  0.5 if geofence unknown (inside_eez=None), else 1.0
 
 Edge Cases:
     - All spots unsafe → return warning with all_unsafe=True, advisory DO NOT SAIL
@@ -95,62 +102,37 @@ def _build_lookup(results: list[dict] | None) -> dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
-# US-ORCA-014 canonical safety contract (mirrors orchestrator._veto_safety)
+# US-ORCA-014 canonical safety contract — SINGLE SOURCE OF TRUTH is
+# backend/agents/safety_thresholds.py (wayfinder #196). All bands,
+# conversions, and the veto live there; this module only re-exports.
 # ---------------------------------------------------------------------------
 
-SUCCESS_CONFIDENCE = 0.87
-DEGRADED_CONFIDENCE = 0.62
-CONFIDENCE_SUCCESS_FLOOR = 0.80
-_KT_TO_KPH = 1.852
+from backend.agents.safety_thresholds import (
+    CONFIDENCE_SUCCESS_FLOOR,
+    CURRENT_DANGER_MIN_KT,
+    CURRENT_SAFE_MAX_KT,
+    DEGRADED_CONFIDENCE,
+    SUCCESS_CONFIDENCE,
+    WAVE_DANGER_MIN_M,
+    WAVE_SAFE_MAX_M,
+    WIND_DANGER_MIN_KT,
+    WIND_SAFE_MAX_KT,
+    apply_safety_veto,
+    is_banned,
+)
 
 
-def apply_safety_veto(zone: dict) -> str:
-    """Apply the canonical safety veto to a ranked zone (US-ORCA-014).
-
-    danger: wave>2.5m or wind>40kph or cyclone alert or inside MPA or
-        explicitly outside EEZ. caution: wave>1.5m or wind>25kph, or any
-        missing measurement (nulls degrade to caution, never safe).
-        Otherwise safe. Additive annotation — never alters scoring.
-    """
-    if not isinstance(zone, dict):
-        return "caution"
-    wave = zone.get("wave_height_m", zone.get("wave_m", zone.get("wave")))
-    try:
-        wave_m = float(wave) if wave is not None else None
-    except (TypeError, ValueError):
-        wave_m = None
-    if zone.get("wind_kph") is not None and zone.get("wind_kt") is None and zone.get("wind_speed_kt") is None:
-        try:
-            wind_kph: float | None = float(zone.get("wind_kph"))
-        except (TypeError, ValueError):
-            wind_kph = None
-    else:
-        wind_raw = zone.get("wind_kt", zone.get("wind_speed_kt"))
-        try:
-            wind_kph = float(wind_raw) * _KT_TO_KPH if wind_raw is not None else None
-        except (TypeError, ValueError):
-            wind_kph = None
-    try:
-        banned = bool(zone.get("inside_mpa")) or (zone.get("inside_eez") is False)
-    except Exception:
-        banned = False
-    try:
-        cyclone = bool(zone.get("cyclone_alert", zone.get("cyclone")))
-    except Exception:
-        cyclone = False
-    if banned or cyclone:
-        return "danger"
-    if wave_m is None or wind_kph is None:
-        if (wave_m is not None and wave_m > 2.5) or (
-            wind_kph is not None and wind_kph > 40.0
-        ):
-            return "danger"
-        return "caution"
-    if wave_m > 2.5 or wind_kph > 40.0:
-        return "danger"
-    if wave_m > 1.5 or wind_kph > 25.0:
-        return "caution"
-    return "safe"
+def _get_current(sea: dict | None) -> float | None:
+    if not sea:
+        return None
+    for k in ("current_kt", "current_speed_kt", "current", "current_kts"):
+        v = sea.get(k)
+        if v is not None:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                continue
+    return None
 
 
 def normalize_contract(
@@ -420,18 +402,43 @@ def combine_and_rank(
             if len(sea_results) == len(fish_results):
                 sea_entry = sea_results[idx]
         wave = _get_wave(sea_entry)
+        current = _get_current(sea_entry)
         if wave is None:
             wave_val = None
             safe_sea = 0.4  # uncertainty penalty in score, but not a threshold violation
             wave_exceeded = False
         else:
             wave_val = float(wave)
-            if wave_val < 1.5:
-                safe_sea = 1.0
+            if wave_val < WAVE_SAFE_MAX_M:
+                _wave_comp = 1.0
                 wave_exceeded = False
             else:
-                safe_sea = max(0.0, 1.0 - (wave_val - 1.5) / 1.5)
+                _wave_comp = max(
+                    0.0,
+                    1.0 - (wave_val - WAVE_SAFE_MAX_M) / (WAVE_DANGER_MIN_M - WAVE_SAFE_MAX_M),
+                )
                 wave_exceeded = True
+            safe_sea = _wave_comp
+        # Current is scored explicitly: folded into safe_sea as the worst
+        # of wave/current (documented in the module docstring). Missing
+        # current is informational — wave alone carries safe_sea.
+        if current is None:
+            current_val = None
+            current_exceeded = False
+        else:
+            current_val = float(current)
+            if current_val < CURRENT_SAFE_MAX_KT:
+                _cur_comp = 1.0
+                current_exceeded = False
+            else:
+                _cur_comp = max(
+                    0.0,
+                    1.0 - (current_val - CURRENT_SAFE_MAX_KT)
+                    / (CURRENT_DANGER_MIN_KT - CURRENT_SAFE_MAX_KT),
+                )
+                current_exceeded = True
+            if wave_val is not None:
+                safe_sea = min(safe_sea, _cur_comp)
 
         # Weather: wind
         weather_entry = weather_lookup.get(zone_id)
@@ -445,11 +452,15 @@ def combine_and_rank(
             wind_exceeded = False
         else:
             wind_val = float(wind)
-            if wind_val < 15:
+            if wind_val < WIND_SAFE_MAX_KT:
                 wind_ok = 1.0
                 wind_exceeded = False
             else:
-                wind_ok = max(0.0, 1.0 - (wind_val - 15) / 15)
+                wind_ok = max(
+                    0.0,
+                    1.0 - (wind_val - WIND_SAFE_MAX_KT)
+                    / (WIND_DANGER_MIN_KT - WIND_SAFE_MAX_KT),
+                )
                 wind_exceeded = True
 
         # Tide (T2 #117): passthrough from weather_agent; missing -> None/unknown.
@@ -487,7 +498,9 @@ def combine_and_rank(
             inside_eez = None
             inside_mpa = False
         else:
-            # Defaults: inside_eez True, inside_mpa False if missing
+            # Defaults: inside_eez None (unknown, never a ban), inside_mpa
+            # False if missing. A missing geofence must never read as
+            # "outside EEZ" (fail-open to caution, #196).
             inside_eez_raw = danger_entry.get("inside_eez")
             inside_mpa_raw = danger_entry.get("inside_mpa")
             # Also handle alternative keys
@@ -495,13 +508,14 @@ def combine_and_rank(
                 inside_eez_raw = danger_entry.get("insideEEZ")
             if inside_mpa_raw is None:
                 inside_mpa_raw = danger_entry.get("insideMPA")
-            inside_eez = bool(inside_eez_raw) if inside_eez_raw is not None else False
+            inside_eez = bool(inside_eez_raw) if inside_eez_raw is not None else None
             inside_mpa = bool(inside_mpa_raw) if inside_mpa_raw is not None else False
 
-        # Explicit ban (inside MPA / outside EEZ) scores 0. Unknown geofence
-        # scores 0.5 (uncertainty, never a ban) so skipped checks degrade to
-        # caution instead of a false "outside Indian EEZ" DO NOT SAIL.
-        if inside_mpa or inside_eez is False:
+        # Explicit ban (inside MPA / explicitly outside EEZ) scores 0.
+        # Unknown geofence (inside_eez=None) scores 0.5 (uncertainty, never
+        # a ban) so skipped checks degrade to caution instead of a false
+        # "outside Indian EEZ" DO NOT SAIL. Canonical is_banned() (#196).
+        if is_banned(inside_mpa, inside_eez):
             not_banned = 0.0
         elif inside_eez is None:
             not_banned = 0.5
@@ -518,8 +532,10 @@ def combine_and_rank(
             "not_banned": round(float(not_banned), 4),
             "wave_exceeded": wave_exceeded,
             "wind_exceeded": wind_exceeded,
+            "current_exceeded": current_exceeded,
             "wave_available": wave_val is not None,
             "wind_available": wind_val is not None,
+            "current_available": current_val is not None,
             "score": score,
         }
 
@@ -548,12 +564,15 @@ def combine_and_rank(
             "wave_height_m": round(float(wave_val), 2) if wave_val is not None else None,
             "wind_kt": round(float(wind_val), 2) if wind_val is not None else None,
             "wind_speed_kt": round(float(wind_val), 2) if wind_val is not None else None,
+            "current_kt": round(float(current_val), 2) if current_val is not None else None,
+            "current_speed_kt": round(float(current_val), 2) if current_val is not None else None,
             "tide_range_m": tide_range_val,
             "tidal_state": tidal_state_val,
             "next_high_tide_utc": next_high_val,
             "next_low_tide_utc": next_low_val,
             "wave_available": wave_val is not None,
             "wind_available": wind_val is not None,
+            "current_available": current_val is not None,
             "inside_eez": inside_eez,
             "inside_mpa": inside_mpa,
             "lightning_risk": l_risk,
@@ -580,14 +599,15 @@ def combine_and_rank(
     ranked.sort(key=lambda z: (-z["score"], z["wave_height_m"] if z["wave_height_m"] is not None else 999.0, z["distance_km"]))
 
     # All-unsafe detection: every zone actually exceeds at least one safety threshold
-    # Thresholds: wave >= 1.5m, wind >= 15kt, or banned (not_banned == 0)
+    # Canonical bands (safety_thresholds): wave >= 1.5m, wind >= 15kt,
+    # current >= 1.5kt, or banned (not_banned == 0.0).
     # Missing measurements (wave/wind unavailable) do not count as threshold violations.
     all_unsafe = False
     if ranked:
         unsafe_count = 0
         for z in ranked:
             bd = z["score_breakdown"]
-            if bd.get("wave_exceeded") or bd.get("wind_exceeded") or bd.get("not_banned") == 0.0:
+            if bd.get("wave_exceeded") or bd.get("wind_exceeded") or bd.get("current_exceeded") or bd.get("not_banned") == 0.0:
                 unsafe_count += 1
         if unsafe_count == len(ranked):
             all_unsafe = True
@@ -617,9 +637,11 @@ def combine_and_rank(
         reasons = []
         bd = best["score_breakdown"]
         if bd.get("wave_exceeded") and best.get("wave_height_m") is not None:
-            reasons.append(f"wave {best['wave_height_m']}m exceeds safe limit 1.5m")
+            reasons.append(f"wave {best['wave_height_m']}m exceeds safe limit {WAVE_SAFE_MAX_M}m")
         if bd.get("wind_exceeded") and best.get("wind_kt") is not None:
-            reasons.append(f"wind {best['wind_kt']}kt exceeds safe limit 15kt")
+            reasons.append(f"wind {best['wind_kt']}kt exceeds safe limit {WIND_SAFE_MAX_KT:g}kt")
+        if bd.get("current_exceeded") and best.get("current_kt") is not None:
+            reasons.append(f"current {best['current_kt']}kt exceeds safe limit {CURRENT_SAFE_MAX_KT}kt")
         if bd.get("not_banned") == 0.0:
             if best.get("inside_eez") is False:
                 reasons.append("outside Indian EEZ")
@@ -643,7 +665,7 @@ def combine_and_rank(
             f"{wave_str}, {wind_str}) "
             f"ranked #1 as safest and closest option. "
             f"Score {best['score']} (closest {bd['closest']}, sea {bd['safe_sea']}, wind {bd['wind_ok']}, allowed {bd['not_banned']}). "
-            f"Safe sea (<1.5m) and safe wind (<15kt) outside restricted zones."
+            f"Safe sea (<{WAVE_SAFE_MAX_M}m) and safe wind (<{WIND_SAFE_MAX_KT:g}kt) outside restricted zones."
         )
         # If best is banned or caution, add note
         if bd["not_banned"] == 0.0:
@@ -750,12 +772,15 @@ def combine_and_rank(
                 "wave_height_m": best.get("wave_height_m"),
                 "wind_kt": best.get("wind_kt"),
                 "wind_speed_kt": best.get("wind_kt"),
+                "current_kt": best.get("current_kt"),
+                "current_speed_kt": best.get("current_kt"),
                 "tide_range_m": best.get("tide_range_m"),
                 "tidal_state": best.get("tidal_state", "unknown"),
                 "next_high_tide_utc": best.get("next_high_tide_utc"),
                 "next_low_tide_utc": best.get("next_low_tide_utc"),
                 "wave_available": best.get("wave_available", True),
                 "wind_available": best.get("wind_available", True),
+                "current_available": best.get("current_available", False),
                 "inside_eez": best["inside_eez"],
                 "inside_mpa": best["inside_mpa"],
                 "lightning_risk": best.get("lightning_risk"),
@@ -791,6 +816,8 @@ def combine_and_rank(
                 "direction": best_out.get("direction"),
                 "wave_height_m": best_out.get("wave_height_m"),
                 "wind_kts": best_out.get("wind_kt"),
+                "current_kt": best_out.get("current_kt"),
+                "cyclone_alert": best_out.get("cyclone_alert", False),
                 "all_unsafe": all_unsafe,
                 "citation": citation,
                 "inside_eez": best_out.get("inside_eez"),
@@ -873,6 +900,8 @@ def build_localized_advisory(
             )
             tier = "UNKNOWN"
         else:
+            from backend.agents.safety_thresholds import is_banned as _is_banned
+
             metrics = {
                 "place": port_name or best.get("place"),
                 "lat": best.get("lat"),
@@ -882,6 +911,8 @@ def build_localized_advisory(
                 "direction": best.get("direction", best.get("dir")),
                 "wave_height_m": best.get("wave_height_m", best.get("wave_m")),
                 "wind_kts": best.get("wind_kts", best.get("wind_kt", best.get("wind_speed_kt"))),
+                "current_kt": best.get("current_kt", best.get("current_speed_kt")),
+                "cyclone_alert": best.get("cyclone_alert", best.get("cyclone", False)),
                 "all_unsafe": all_unsafe,
                 "citation": citation,
                 "inside_eez": best.get("inside_eez"),
@@ -893,8 +924,9 @@ def build_localized_advisory(
                 metrics.get("wave_height_m"),
                 metrics.get("wind_kts"),
                 all_unsafe,
-                bool(metrics.get("inside_mpa"))
-                or (metrics.get("inside_eez") is False),
+                _is_banned(metrics.get("inside_mpa"), metrics.get("inside_eez")),
+                metrics.get("current_kt"),
+                bool(metrics.get("cyclone_alert", False)),
             )
         elapsed_ms = int((_time.perf_counter() - t0) * 1000)
         return {

@@ -303,13 +303,15 @@ class TestSeaChecker:
         assert _classify_wave(3.0) == "danger"
 
     def test_classify_current_thresholds(self):
+        # Canonical bands (#196, safety_thresholds): <1.5 safe,
+        # 1.5-2.5 caution, >2.5 danger (mirrors the wave bands).
         from backend.agents.sea_checker import _classify_current
         assert _classify_current(1.0) == "safe"
-        assert _classify_current(2.0) == "safe"
-        assert _classify_current(2.1) == "caution"
-        assert _classify_current(2.9) == "caution"
-        assert _classify_current(3.0) == "caution"
-        assert _classify_current(3.01) == "danger"
+        assert _classify_current(1.4) == "safe"
+        assert _classify_current(1.5) == "caution"
+        assert _classify_current(2.0) == "caution"
+        assert _classify_current(2.5) == "caution"
+        assert _classify_current(2.51) == "danger"
         assert _classify_current(4.0) == "danger"
 
     def test_overall_status_worst_wins(self):

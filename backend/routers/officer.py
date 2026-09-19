@@ -255,13 +255,26 @@ def is_danger_sea_state(
     current_kt: float = 0.0,
     pressure_hpa: float = 1013.0,
 ) -> bool:
-    """True when the weather.py:136 red rule fires. Pure, same thresholds."""
+    """True when the weather.py red rule fires. Pure, canonical thresholds."""
+    from backend.agents.safety_thresholds import (
+        CURRENT_DANGER_MIN_KT as _CUR_D,
+    )
+    from backend.agents.safety_thresholds import (
+        PRESSURE_DANGER_HPA as _P_D,
+    )
+    from backend.agents.safety_thresholds import (
+        WAVE_DANGER_MIN_M as _WAV_D,
+    )
+    from backend.agents.safety_thresholds import (
+        WIND_DANGER_MIN_KT as _WND_D,
+    )
+
     try:
         return (
-            float(wind_kt) > 25.0
-            or float(wave_m) > 2.5
-            or float(current_kt) > 2.5
-            or float(pressure_hpa) < 995.0
+            float(wind_kt) > _WND_D
+            or float(wave_m) > _WAV_D
+            or float(current_kt) > _CUR_D
+            or float(pressure_hpa) < _P_D
         )
     except (TypeError, ValueError):
         return False

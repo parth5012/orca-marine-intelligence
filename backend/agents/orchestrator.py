@@ -74,12 +74,29 @@ TIMEOUT_S = 10.0
 DEFAULT_CONFIDENCE = 0.87
 DEGRADED_CONFIDENCE = 0.62
 
-# US-ORCA-014 canonical GeoJSON contract thresholds (wind in kph).
-_WAVE_DANGER_M = 2.5
-_WAVE_CAUTION_M = 1.5
-_WIND_DANGER_KPH = 40.0
-_WIND_CAUTION_KPH = 25.0
-_KT_TO_KPH = 1.852
+# US-ORCA-014 canonical GeoJSON contract thresholds — SINGLE SOURCE OF
+# TRUTH is backend/agents/safety_thresholds.py (wayfinder #196). Aliases
+# below preserve the legacy private names; the veto itself delegates to
+# safety_thresholds.veto_safety (wind converted kph → kt, canonical
+# 15/25kt bands). CONFIDENCE constants are imported for the same reason.
+from backend.agents.safety_thresholds import (
+    DEGRADED_CONFIDENCE as DEGRADED_CONFIDENCE,
+)
+from backend.agents.safety_thresholds import (
+    KT_TO_KPH as _KT_TO_KPH,
+)
+from backend.agents.safety_thresholds import (
+    WIND_DANGER_MIN_KPH as _WIND_DANGER_KPH,
+)
+from backend.agents.safety_thresholds import (
+    WIND_SAFE_MAX_KPH as _WIND_CAUTION_KPH,
+)
+from backend.agents.safety_thresholds import (
+    WAVE_DANGER_MIN_M as _WAVE_DANGER_M,
+)
+from backend.agents.safety_thresholds import (
+    WAVE_SAFE_MAX_M as _WAVE_CAUTION_M,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +200,7 @@ def _degraded_danger(points: list[dict]) -> list[dict]:
             "is_safe": False,
             "status": "unknown",
             "warnings": ["danger check unavailable (timeout/error)"],
-            "inside_eez": True,
+            "inside_eez": None,
             "inside_mpa": False,
             "mpa_name": None,
         })
@@ -220,12 +237,9 @@ def _parse_depth_m(depth_range: Any) -> float | None:
 
 def _wind_kt_to_kph(wind_kt: Any) -> float | None:
     """Convert wind knots to kph (US-ORCA-014 canonical contract)."""
-    if wind_kt is None:
-        return None
-    try:
-        return round(float(wind_kt) * _KT_TO_KPH, 2)
-    except (TypeError, ValueError):
-        return None
+    from backend.agents.safety_thresholds import wind_kt_to_kph as _conv
+
+    return _conv(wind_kt)
 
 
 def _veto_safety(
@@ -234,36 +248,33 @@ def _veto_safety(
     inside_eez: Any,
     inside_mpa: Any,
     cyclone_alert: Any = False,
+    current_kt: Any = None,
 ) -> tuple[str, float]:
     """Apply the US-ORCA-014 safety veto.
 
-    danger: wave>2.5 or wind>40kph or cyclone alert or inside MPA or
-        explicitly outside EEZ. caution: wave>1.5 or wind>25kph.
+    Canonical implementation lives in safety_thresholds.veto_safety;
+    this wrapper preserves the legacy (wave_m, wind_kph, ...) signature
+    by converting kph → kt into the canonical 15/25kt bands (#196).
+
+    danger: wave>2.5m or wind>25kt or current>2.5kt or cyclone alert
+        or inside MPA or explicitly outside EEZ. caution: wave>=1.5m
+        or wind>=15kt or current>=1.5kt.
     Missing measurements degrade to caution. Returns (safety, confidence)
     where confidence is DEFAULT_CONFIDENCE only for safe, else degraded.
     """
+    from backend.agents.safety_thresholds import veto_safety as _canonical
+    from backend.agents.safety_thresholds import wind_kph_to_kt as _to_kt
+
     try:
-        banned = bool(inside_mpa) or (inside_eez is False)
+        wind_kt = _to_kt(wind_kph) if wind_kph is not None else None
     except Exception:
-        banned = False
-    try:
-        cyclone = bool(cyclone_alert)
-    except Exception:
-        cyclone = False
-    if banned or cyclone:
-        return "danger", DEGRADED_CONFIDENCE
-    if wave_m is None or wind_kph is None:
-        # Nulls → caution + degraded confidence (never assumed safe).
-        if (wave_m is not None and wave_m > _WAVE_DANGER_M) or (
-            wind_kph is not None and wind_kph > _WIND_DANGER_KPH
-        ):
-            return "danger", DEGRADED_CONFIDENCE
-        return "caution", DEGRADED_CONFIDENCE
-    if wave_m > _WAVE_DANGER_M or wind_kph > _WIND_DANGER_KPH:
-        return "danger", DEGRADED_CONFIDENCE
-    if wave_m > _WAVE_CAUTION_M or wind_kph > _WIND_CAUTION_KPH:
-        return "caution", DEGRADED_CONFIDENCE
-    return "safe", DEFAULT_CONFIDENCE
+        wind_kt = None
+    safety, conf = _canonical(
+        wave_m, wind_kt, inside_eez, inside_mpa, cyclone_alert, current_kt
+    )
+    if safety == "safe":
+        return "safe", DEFAULT_CONFIDENCE
+    return safety, conf
 
 
 def _to_geojson_features(ranked_zones: list[dict]) -> list[dict]:
@@ -337,8 +348,16 @@ def _to_geojson_features(ranked_zones: list[dict]) -> list[dict]:
         else:
             wind_kph = _wind_kt_to_kph(wind_raw)
         cyclone_alert = z.get("cyclone_alert", z.get("cyclone"))
+        current_kt = z.get("current_kt")
+        if current_kt is None:
+            current_kt = z.get("current_speed_kt", z.get("current"))
         safety, confidence = _veto_safety(
-            wave_m, wind_kph, z.get("inside_eez"), z.get("inside_mpa"), cyclone_alert
+            wave_m,
+            wind_kph,
+            z.get("inside_eez"),
+            z.get("inside_mpa"),
+            cyclone_alert,
+            current_kt,
         )
         features.append({
             "type": "Feature",

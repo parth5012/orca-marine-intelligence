@@ -132,10 +132,37 @@ async def get_current_weather(
         wave_period_s = float(marine_data.get("wave_period_s", 7.0))
         current_speed_kt = float(marine_data.get("current_speed_kt", 1.0))
 
-        # Composite safety status classification
-        if wind_speed_kt > 25.0 or wave_height_m > 2.5 or current_speed_kt > 2.5 or pressure_hpa < 995.0:
+        # Composite safety status classification — canonical bands from
+        # backend/agents/safety_thresholds.py (wayfinder #196):
+        # wind 15/25kt, wave 1.5/2.5m, current 1.5/2.5kt, pressure 995/1005hPa.
+        from backend.agents.safety_thresholds import (
+            CURRENT_DANGER_MIN_KT as _CUR_D,
+        )
+        from backend.agents.safety_thresholds import (
+            CURRENT_SAFE_MAX_KT as _CUR_S,
+        )
+        from backend.agents.safety_thresholds import (
+            PRESSURE_CAUTION_HPA as _P_C,
+        )
+        from backend.agents.safety_thresholds import (
+            PRESSURE_DANGER_HPA as _P_D,
+        )
+        from backend.agents.safety_thresholds import (
+            WAVE_DANGER_MIN_M as _WAV_D,
+        )
+        from backend.agents.safety_thresholds import (
+            WAVE_SAFE_MAX_M as _WAV_S,
+        )
+        from backend.agents.safety_thresholds import (
+            WIND_DANGER_MIN_KT as _WND_D,
+        )
+        from backend.agents.safety_thresholds import (
+            WIND_SAFE_MAX_KT as _WND_S,
+        )
+
+        if wind_speed_kt > _WND_D or wave_height_m > _WAV_D or current_speed_kt > _CUR_D or pressure_hpa < _P_D:
             status = "danger"
-        elif wind_speed_kt > 15.0 or wave_height_m > 1.5 or current_speed_kt > 1.5 or pressure_hpa < 1005.0:
+        elif wind_speed_kt > _WND_S or wave_height_m > _WAV_S or current_speed_kt > _CUR_S or pressure_hpa < _P_C:
             status = "caution"
         else:
             status = "safe"
@@ -295,12 +322,13 @@ async def get_weather_history(
             day_wave = round(max(0.4, base_wave + (day_offset % 2 - 0.5) * 0.2), 1)
             day_current = round(max(0.3, base_current + (day_offset % 2 - 0.5) * 0.1), 1)
 
-            # Safety determination
-            safety = "safe"
-            if day_wind > 25.0 or day_wave > 2.5:
-                safety = "danger"
-            elif day_wind > 15.0 or day_wave > 1.5:
-                safety = "caution"
+            # Safety determination — canonical bands via
+            # derive_safety_tier (#196): wave 1.5/2.5m, wind 15/25kt,
+            # current 1.5/2.5kt. Uppercase tier lowered to keep the
+            # lowercase history API contract.
+            from backend.agents.safety_thresholds import derive_safety_tier
+
+            safety = derive_safety_tier(day_wave, day_wind, current_kt=day_current).lower()
 
             day_data = {
                 "date": date_str,
