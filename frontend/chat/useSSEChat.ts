@@ -11,6 +11,10 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+// Perf #198: monotonic suffix so message ids stay unique even when two
+// messages are created within the same millisecond (Date.now alone collides).
+let msgSeq = 0;
+
 export interface ReasoningStep {
   agent: string;
   state: 'running' | 'done' | 'timeout' | 'error' | 'fallback';
@@ -356,6 +360,10 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
   const parseZoneFeatures = useCallback((features: any[] = [], center?: [number, number] | null): MarineZoneCard[] => {
     const cards: MarineZoneCard[] = [];
     if (!Array.isArray(features)) return cards;
+    // Perf #198: O(n) dedup via Sets (was O(n^2) cards.some scans) + stable
+    // deterministic ids (coords-based, no Date.now) so re-renders keep keys.
+    const seenIds = new Set<string>();
+    const seenCanon = new Set<string>();
 
     features.forEach((feat, idx) => {
       const props = feat?.properties || feat || {};
@@ -398,22 +406,22 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
       const safetyStatus = toSafety(props);
 
-      const cardId = props.zone_id ? String(props.zone_id) : `zone-${idx}-${Date.now()}`;
+      // Stable id: backend zone_id when present, else deterministic
+      // coords+index fallback (never Date.now — re-renders keep React keys).
+      const latR = coords ? Number(coords[0]).toFixed(4) : '';
+      const lonR = coords ? Number(coords[1]).toFixed(4) : '';
+      const cardId = props.zone_id
+        ? String(props.zone_id)
+        : `zone-${idx}-${latR || 'x'}-${lonR || 'x'}`;
       // Guard: backend occasionally sends the same zone twice with different
       // zone_ids (PostGIS yesterday+today rows, synthetic vs dated ids).
       // Canonical key = normalized name + rounded coords (~11m). Skip dupes.
       const normName = String(zoneName || '').trim().toLowerCase();
-      const latR = coords ? Number(coords[0]).toFixed(4) : '';
-      const lonR = coords ? Number(coords[1]).toFixed(4) : '';
       const canonKey = `${normName}|${latR}|${lonR}`;
-      if (cards.some((c) => c.id === cardId)) return;
-      if (canonKey !== '|' && cards.some((c) => {
-        const cn = String((c as any).name || '').trim().toLowerCase();
-        const cc = (c as any).coordinates as [number, number] | undefined;
-        const clat = cc ? Number(cc[0]).toFixed(4) : '';
-        const clon = cc ? Number(cc[1]).toFixed(4) : '';
-        return `${cn}|${clat}|${clon}` === canonKey;
-      })) return;
+      if (seenIds.has(cardId)) return;
+      if (canonKey !== '|' && seenCanon.has(canonKey)) return;
+      seenIds.add(cardId);
+      if (canonKey !== '|') seenCanon.add(canonKey);
       cards.push({
         id: cardId,        name: zoneName,
         bearing,
@@ -439,8 +447,8 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       if (!text.trim() || isStreaming) return;
       options.onRouteChange?.(null);
 
-      const userMessageId = `user-${Date.now()}`;
-      const assistantMessageId = `asst-${Date.now()}`;
+      const userMessageId = `user-${Date.now()}-${(msgSeq += 1)}`;
+      const assistantMessageId = `asst-${Date.now()}-${(msgSeq += 1)}`;
       const startTime = Date.now();
 
       const userMsg: ChatMessage = {

@@ -53,6 +53,7 @@ import {
 } from './carto';
 import { useThemeModeOptional } from '@/context/AppContext';
 import { haversineKm, segmentCrossesPolygon } from '@/lib/pfz';
+import { fetchPfzCached } from '@/lib/pfzCache';
 
 export interface MapLayerToggles {
   pfz?: boolean;
@@ -355,7 +356,8 @@ export default function MapInner({
     ? userLocation
     : geoLoc;
 
-  // Fetch PFZ points from /api/pfz proxy
+  // Fetch PFZ points from /api/pfz proxy (perf #198: limit=200 per
+  // sector, 60s SWR cache — one payload per sector, not a refetch storm).
   useEffect(() => {
     let isCancelled = false;
     setPfzLoading(true);
@@ -364,12 +366,11 @@ export default function MapInner({
     if (sector && sector !== 'ALL') {
       queryParams.set('sector', sector);
     }
-    queryParams.set('limit', '1200');
+    queryParams.set('limit', '200');
 
     const url = `/api/pfz?${queryParams.toString()}`;
 
-    fetch(url)
-      .then((res) => res.json())
+    fetchPfzCached(url)
       .then((data) => {
         if (!isCancelled && data && Array.isArray(data.features)) {
           setPfzFeatures(data.features);

@@ -73,6 +73,94 @@ _EEZ_CACHE: dict | None = None
 _MPA_CACHE: dict | None = None
 _IMBL_CACHE: dict | None = None
 
+# Bounding-box index over cached multipolygons (Ticket #198 — perf).
+# Each entry aligns with its multipolygon list; (id, len) guards against
+# stale reuse when the loader is mocked in tests. Bboxes make containment
+# checks O(#polygons) with ray-casting only on bbox hits — exact, since a
+# point outside a polygon's bbox is provably outside the polygon.
+_EEZ_BBOXES: list | None = None
+_EEZ_BBOXES_FOR: tuple | None = None
+_MPA_BBOXES: list | None = None
+_MPA_BBOXES_FOR: tuple | None = None
+_MPA_FEAT_BBOXES: list | None = None
+_MPA_FEAT_BBOXES_FOR: tuple | None = None
+_IMBL_BBOXES: list | None = None
+_IMBL_BBOXES_FOR: tuple | None = None
+
+
+def _mp_bbox(mp: list) -> tuple | None:
+    """Bounding box (minlon, minlat, maxlon, maxlat) over a multipolygon."""
+    minlon = minlat = float("inf")
+    maxlon = maxlat = float("-inf")
+    found = False
+    try:
+        for polygon in mp or []:
+            for ring in polygon or []:
+                for pt in ring or []:
+                    try:
+                        x, y = float(pt[0]), float(pt[1])
+                    except (TypeError, ValueError, IndexError):
+                        continue
+                    found = True
+                    if x < minlon:
+                        minlon = x
+                    if x > maxlon:
+                        maxlon = x
+                    if y < minlat:
+                        minlat = y
+                    if y > maxlat:
+                        maxlat = y
+    except Exception:
+        return None
+    if not found:
+        return None
+    return (minlon, minlat, maxlon, maxlat)
+
+
+def _bbox_contains(bbox: tuple | None, lon: float, lat: float) -> bool:
+    """Exact pre-filter: outside bbox ⇒ outside polygon (never a false skip)."""
+    if bbox is None:
+        return True
+    try:
+        return bool(bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3])
+    except Exception:
+        return True
+
+
+def _bboxes_for(multipolygons: list, cache_name: str) -> list:
+    """Return per-multipolygon bboxes, reusing the cached index when valid."""
+    global _EEZ_BBOXES, _EEZ_BBOXES_FOR, _MPA_BBOXES, _MPA_BBOXES_FOR
+    global _MPA_FEAT_BBOXES, _MPA_FEAT_BBOXES_FOR
+    global _IMBL_BBOXES, _IMBL_BBOXES_FOR
+    try:
+        key = (id(multipolygons), len(multipolygons))
+    except Exception:
+        return [_mp_bbox(mp) for mp in (multipolygons or [])]
+    if cache_name == "eez":
+        cached, tag = _EEZ_BBOXES, _EEZ_BBOXES_FOR
+    elif cache_name == "mpa":
+        cached, tag = _MPA_BBOXES, _MPA_BBOXES_FOR
+    elif cache_name == "mpa_feat":
+        cached, tag = _MPA_FEAT_BBOXES, _MPA_FEAT_BBOXES_FOR
+    else:
+        cached, tag = _IMBL_BBOXES, _IMBL_BBOXES_FOR
+    if cached is not None and tag == key and len(cached) == len(multipolygons):
+        return cached
+    if cache_name == "mpa_feat":
+        # multipolygons here is actually the features list; bbox per feature.
+        fresh = [_mp_bbox((f.get("multipolygon") if isinstance(f, dict) else None) or []) for f in (multipolygons or [])]
+    else:
+        fresh = [_mp_bbox(mp) for mp in (multipolygons or [])]
+    if cache_name == "eez":
+        _EEZ_BBOXES, _EEZ_BBOXES_FOR = fresh, key
+    elif cache_name == "mpa":
+        _MPA_BBOXES, _MPA_BBOXES_FOR = fresh, key
+    elif cache_name == "mpa_feat":
+        _MPA_FEAT_BBOXES, _MPA_FEAT_BBOXES_FOR = fresh, key
+    else:
+        _IMBL_BBOXES, _IMBL_BBOXES_FOR = fresh, key
+    return fresh
+
 
 # ---------------------------------------------------------------------------
 # Geometry helpers — haversine, ray-casting, distance to polygon edge
@@ -331,9 +419,20 @@ def _load_cached_geojson(cache_name: str, candidates: list[Path]) -> tuple[list,
 def _clear_geojson_cache() -> None:
     """Clear cached GeoJSON — useful for tests."""
     global _EEZ_CACHE, _MPA_CACHE, _IMBL_CACHE
+    global _EEZ_BBOXES, _EEZ_BBOXES_FOR, _MPA_BBOXES, _MPA_BBOXES_FOR
+    global _MPA_FEAT_BBOXES, _MPA_FEAT_BBOXES_FOR
+    global _IMBL_BBOXES, _IMBL_BBOXES_FOR
     _EEZ_CACHE = None
     _MPA_CACHE = None
     _IMBL_CACHE = None
+    _EEZ_BBOXES = None
+    _EEZ_BBOXES_FOR = None
+    _MPA_BBOXES = None
+    _MPA_BBOXES_FOR = None
+    _MPA_FEAT_BBOXES = None
+    _MPA_FEAT_BBOXES_FOR = None
+    _IMBL_BBOXES = None
+    _IMBL_BBOXES_FOR = None
 
 
 # ---------------------------------------------------------------------------
@@ -356,9 +455,12 @@ def _fallback_check_eez(lat: float, lon: float) -> tuple[bool, float | None]:
 
     inside = False
     min_dist = float("inf")
-    for mp in multipolygons:
+    # Bbox gate (#198): ray-cast only multipolygons whose bbox contains the
+    # point. Outside every bbox ⇒ provably outside EEZ — skip all ray-casts.
+    bboxes = _bboxes_for(multipolygons, "eez")
+    for mp, bbox in zip(multipolygons, bboxes):
         # mp is multipolygon: list[polygon]
-        if _point_in_multipolygon(lon, lat, mp):
+        if _bbox_contains(bbox, lon, lat) and _point_in_multipolygon(lon, lat, mp):
             inside = True
         d = _distance_to_multipolygon_km(lat, lon, mp)
         if d < min_dist:
@@ -373,9 +475,14 @@ def _fallback_check_mpa(lat: float, lon: float) -> tuple[bool, str | None]:
     multipolygons, features = _load_cached_geojson("mpa", _GEOJSON_CANDIDATES_MPA)
     if not multipolygons:
         return False, None
+    # Bbox gate (#198): ray-cast only features whose bbox contains the point.
+    feat_bboxes = _bboxes_for(features, "mpa_feat")
     for idx, feat in enumerate(features):
         mp = feat.get("multipolygon") or []
         if not mp:
+            continue
+        bbox = feat_bboxes[idx] if idx < len(feat_bboxes) else None
+        if not _bbox_contains(bbox, lon, lat):
             continue
         if _point_in_multipolygon(lon, lat, mp):
             props = feat.get("properties") or {}
