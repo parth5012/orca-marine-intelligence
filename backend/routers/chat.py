@@ -10,7 +10,7 @@ conversation memory via Redis, and vernacular voice transcription.
 
 Endpoints:
   POST /api/chat          Send query, receive SSE advisory stream
-  POST /api/chat/voice    Ingest vernacular voice audio, transcribe via Groq Whisper
+  POST /api/chat/voice    Ingest vernacular voice audio, transcribe via Bhashini ULCA ASR
 
 Wayfinder T3 (map #92): /chat/stream alias and /chat/history deleted per
 human grill decision — single primary kept, history deferred post-MVP.
@@ -18,24 +18,27 @@ human grill decision — single primary kept, history deferred post-MVP.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import shutil
+import subprocess
+import tempfile
 import uuid
 from typing import Any, Dict, List, Optional
 
-import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 try:
     from backend.agents.graph import orchestrate_stream_via_graph
-    from backend.core.bhashini import translate_from_english, translate_to_english
+    from backend.core.bhashini import transcribe, translate_from_english, translate_to_english
     from backend.db.redis import append_message, get_redis_client
 except ImportError:
     from agents.graph import orchestrate_stream_via_graph  # type: ignore
-    from core.bhashini import translate_from_english, translate_to_english  # type: ignore
+    from core.bhashini import transcribe, translate_from_english, translate_to_english  # type: ignore
     from db.redis import append_message, get_redis_client  # type: ignore
 
 logger = logging.getLogger("orca.chat")
@@ -238,6 +241,61 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     )
 
 
+def _convert_to_16k_mono_wav(raw: bytes, filename: Optional[str] = None) -> bytes:
+    """
+    Convert uploaded audio bytes to 16kHz mono WAV (Bhashini ASR requirement).
+
+    Frontend MediaRecorder emits webm/opus which ULCA ASR does NOT accept.
+    Tries ffmpeg (`ffmpeg -i in -ac 1 -ar 16000 -sample_fmt s16 out.wav`);
+    on any failure (ffmpeg missing/error) falls back to raw passthrough so
+    already-WAV uploads still work. Never raises.
+    """
+    suffix = ""
+    if filename and "." in filename:
+        ext = filename.rsplit(".", 1)[-1][:8]
+        ext = "".join(ch for ch in ext if ch.isalnum())
+        if ext:
+            suffix = "." + ext
+    src_path = None
+    dst_path = None
+    try:
+        if shutil.which("ffmpeg") is None:
+            logger.warning("ffmpeg not found; passing voice audio through unconverted.")
+            return raw
+        with tempfile.NamedTemporaryFile(suffix=suffix or ".webm", delete=False) as src:
+            src.write(raw)
+            src_path = src.name
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as dst:
+            dst_path = dst.name
+        try:
+            proc = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-i", src_path,
+                 "-ac", "1", "-ar", "16000", "-sample_fmt", "s16", dst_path],
+                capture_output=True,
+                timeout=30,
+            )
+            if proc.returncode != 0:
+                logger.warning(
+                    "ffmpeg conversion failed (rc=%s): %s; passing audio through unconverted.",
+                    proc.returncode,
+                    (proc.stderr or b"")[:200],
+                )
+                return raw
+            with open(dst_path, "rb") as fh:
+                return fh.read()
+        finally:
+            for path in (src_path, dst_path):
+                if not path:
+                    continue
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+    except Exception as err:
+        logger.warning("Voice audio conversion failed, using raw passthrough: %s", err)
+        return raw
+
+
 @router.post("/chat/voice")
 async def chat_voice(
     file: Optional[UploadFile] = File(None),
@@ -247,7 +305,7 @@ async def chat_voice(
     lon: Optional[float] = Form(None),
     language: Optional[str] = Form("en"),
 ) -> Dict[str, Any]:
-    """Ingest vernacular voice audio, transcribe via Groq Whisper, and return transcription."""
+    """Ingest vernacular voice audio, transcribe via Bhashini ULCA ASR, and return transcription."""
     upload_file = file if file is not None else audio
     if upload_file is None:
         raise HTTPException(
@@ -256,7 +314,6 @@ async def chat_voice(
         )
 
     resolved_session_id = session_id or uuid.uuid4().hex
-    groq_api_key = os.getenv("GROQ_API_KEY")
     transcription_text = ""
     MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
@@ -267,46 +324,29 @@ async def chat_voice(
                 status_code=413,
                 detail=f"Audio file exceeds maximum size of 25MB ({len(content)} bytes)",
             )
-        if groq_api_key:
-            try:
-                filename = upload_file.filename or "audio.wav"
-                content_type = upload_file.content_type or "audio/wav"
-
-                async with httpx.AsyncClient(timeout=30.0) as http_client:
-                    headers = {"Authorization": f"Bearer {groq_api_key}"}
-                    files_payload = {
-                        "file": (filename, content, content_type),
-                    }
-                    data_payload = {
-                        "model": "whisper-large-v3",
-                    }
-                    if language:
-                        data_payload["language"] = language
-
-                    resp = await http_client.post(
-                        "https://api.groq.com/openai/v1/audio/transcriptions",
-                        headers=headers,
-                        data=data_payload,
-                        files=files_payload,
-                    )
-                    if resp.status_code == 200:
-                        result_json = resp.json()
-                        transcription_text = result_json.get("text", "").strip()
-                    else:
-                        logger.warning(
-                            "Groq Whisper API returned %s: %s",
-                            resp.status_code,
-                            resp.text,
-                        )
-            except Exception as err:
-                logger.warning("Groq Whisper transcription failed: %s", err)
+        source_lang = _normalize_ui_lang(language)
+        wav_bytes = await asyncio.to_thread(
+            _convert_to_16k_mono_wav, content, upload_file.filename
+        )
+        redis_client = None
+        try:
+            redis_client = await get_redis_client()
+        except Exception as e:
+            logger.warning("Failed to get redis client for voice ASR: %s", e)
+        try:
+            result = await transcribe(wav_bytes, source_lang, redis_client)
+            if result.transcribed and result.text.strip():
+                transcription_text = result.text.strip()
+        except Exception as err:
+            # transcribe() itself never raises; this guards the call boundary.
+            logger.warning("Bhashini ASR transcription failed: %s", err)
     finally:
         await upload_file.close()
 
     if not transcription_text:
         raise HTTPException(
             status_code=503,
-            detail="Voice transcription unavailable: no transcription produced (missing GROQ_API_KEY or upstream failure).",
+            detail="Voice transcription unavailable: no transcription produced (Bhashini ASR unavailable or no speech detected).",
         )
 
     return {
