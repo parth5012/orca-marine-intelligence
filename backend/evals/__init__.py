@@ -26,6 +26,9 @@ from backend.evals.evaluators import (
     GeofenceSafetyEvaluator,
     MetricPreservationEvaluator,
     RiskCalibrationEvaluator,
+    LanguagePurityEvaluator,
+    NumeralInvariantEvaluator,
+    CrossLangTierEvaluator,
 )
 from backend.evals.runner import (
     EvaluationReport,
@@ -42,6 +45,9 @@ __all__ = [
     "GeofenceSafetyEvaluator",
     "MetricPreservationEvaluator",
     "RiskCalibrationEvaluator",
+    "LanguagePurityEvaluator",
+    "NumeralInvariantEvaluator",
+    "CrossLangTierEvaluator",
     "EvaluationReport",
     "run_marine_evals",
 ]
