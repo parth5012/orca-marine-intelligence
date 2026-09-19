@@ -766,9 +766,9 @@ def load_marine_eval_dataset(limit: int | None = None) -> list[MarineEvalExample
         ex = MarineEvalExample(
             example_id=item["id"],
             landing_center=item["landing_center"],
-            inputs=item["inputs"],
-            reference=item["reference"],
-            metadata=item["metadata"],
+            inputs=item["inputs"].copy(),
+            reference=item["reference"].copy(),
+            metadata=item["metadata"].copy(),
         )
         examples.append(ex)
 
