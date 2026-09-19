@@ -20,3 +20,21 @@ def reset_graph_cache():
     backend.agents.graph._compiled_graph = None
     yield
     backend.agents.graph._compiled_graph = None
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """Reset in-memory rate limit state before and after each test."""
+    try:
+        from backend.core.security import clear_rate_limit_state
+
+        clear_rate_limit_state()
+    except Exception:
+        pass
+    yield
+    try:
+        from backend.core.security import clear_rate_limit_state
+
+        clear_rate_limit_state()
+    except Exception:
+        pass

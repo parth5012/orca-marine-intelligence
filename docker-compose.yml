@@ -16,6 +16,12 @@
 #   5000:8000  Backend  (8000 blocked on Windows by Hyper-V excluded range 7945-8044 → WinError 10013)
 #   3000:3000  Frontend (Next.js)
 #
+# PROD WARNING: POSTGRES_PASSWORD=orca is a dev default — override via .env
+# (POSTGRES_PASSWORD=<strong-random>, e.g. openssl rand -hex 32) and do NOT
+# expose 5432/6379 to the public internet. In prod either drop the `ports:`
+# entries for postgis/redis (internal Docker network only) or firewall them
+# to trusted hosts. Never commit a real password to git.
+#
 # Env: .env is auto-loaded. Docker overrides DATABASE_URL/REDIS_URL to use
 # service hostnames (postgis/redis). Add secrets to .env, not here.
 

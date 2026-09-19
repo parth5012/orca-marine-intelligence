@@ -25,6 +25,19 @@ logger = get_logger("orca.middleware.request")
 # Valid request ID pattern: 1-128 chars of alphanumeric, hyphen, underscore, period
 REQUEST_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-\.]{1,128}$")
 
+# PII redaction (#199): lat/lon/session values must never sit in access logs.
+# Redacts query-string keys (lat, lon, session_id, session) in logged paths.
+_PII_QUERY_RE = re.compile(
+    r"(?i)((?:^|[?&])(?:lat|lon|latitude|longitude|session_id|session)=)([^&]*)"
+)
+
+
+def redact_pii_path(path: str) -> str:
+    """Replace lat/lon/session values in a logged path with [REDACTED]."""
+    if not path:
+        return path
+    return _PII_QUERY_RE.sub(r"\1[REDACTED]", path)
+
 
 def is_valid_request_id(req_id: Optional[str]) -> bool:
     """Validate incoming X-Request-ID to prevent header injection or malformed data."""
@@ -68,7 +81,14 @@ class RequestLoggingMiddleware:
         client = scope.get("client")
         client_ip = client[0] if client else "unknown"
         method = scope.get("method", "UNKNOWN")
-        path = scope.get("path", "")
+        raw_path = scope.get("path", "")
+        raw_qs = scope.get("query_string", b"")
+        try:
+            qs_suffix = ("?" + raw_qs.decode("latin1")) if raw_qs else ""
+        except Exception:
+            qs_suffix = ""
+        # PII: log redacted path+query (lat/lon/session values masked).
+        path = redact_pii_path(raw_path + qs_suffix)
         start_time = time.perf_counter()
 
         logger.info(
@@ -124,4 +144,4 @@ class RequestLoggingMiddleware:
             clear_contextvars()
 
 
-__all__ = ["RequestLoggingMiddleware", "is_valid_request_id"]
+__all__ = ["RequestLoggingMiddleware", "is_valid_request_id", "redact_pii_path"]

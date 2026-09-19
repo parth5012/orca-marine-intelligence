@@ -266,7 +266,17 @@ data: <JSON>
 
 **Status Codes:**
 - `200` — Stream initiated (`text/event-stream`)
-- `422` — Validation error (missing required `message` field)
+- `422` — Validation error (missing/empty `message`, `message` > 2000 chars, `session_id` > 128 chars)
+- `429` — Per-IP rate limit exceeded (`30/min` chat; `Retry-After` header)
+
+**Security notes (#199):** `session_id` is client-controlled but format-validated
+(`^[A-Za-z0-9_.-]{1,128}$`; invalid → fresh `uuid4` server-issued). Tradeoff:
+no server matching-secret, so a guessed ID could read that session's 24h-TTL
+history — mitigated by unguessable `uuid4` defaults + short TTL; full
+server-issued secret deferred post-MVP to avoid breaking existing clients.
+SSE `error` events carry a generic message only (`Internal chat error; please
+retry.`); full tracebacks stay in server logs. Access logs redact
+`lat`/`lon`/`session_id` values (PII).
 
 ---
 
@@ -305,7 +315,13 @@ Vernacular voice audio transcribed via Bhashini ULCA ASR (2-call Config → Comp
 - `200` — Transcription successful (`mock` is always `false`)
 - `413` — Audio file exceeds 25MB (`25 * 1024 * 1024` bytes)
 - `422` — Missing audio file (neither `file` nor `audio` provided)
+- `429` — Per-IP rate limit exceeded (`10/min` voice; `Retry-After` header)
 - `503` — Transcription unavailable (missing Bhashini keys, upstream failure, or no speech detected)
+
+**Security notes (#199):** voice is public (no auth — fishing-community
+kiosks); abuse contained by the `10/min` per-IP limit + 25MB cap + 255-char
+filename sanitization. `language` is normalized (`ml-IN` → `ml`); unknown
+codes fall back to `en`.
 
 ---
 
