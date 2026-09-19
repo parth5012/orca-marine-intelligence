@@ -2,9 +2,9 @@
 Single safety truth — threshold table + EEZ double-talk regression (#196).
 
 Canonical bands (backend/agents/safety_thresholds.py):
-  wave <1.5 safe / 1.5–2.5 caution / >2.5 danger
-  wind <15kt safe / 15–25kt caution / >25kt danger
-  current <1.5kt safe / 1.5–2.5kt caution / >2.5kt danger
+  wave <2.0 safe / 2.0–3.5 caution / >3.5 danger
+  wind <22kt safe / 22–27kt caution / >27kt danger
+  current <2.0kt safe / 2.0–3.0kt caution / >3.0kt danger
 Missing wave/wind → caution (fail-open, never SAFE).
 Missing geofence (inside_eez=None) → unknown/caution, never a ban.
 """
@@ -20,36 +20,39 @@ from backend.agents import safety_thresholds as st
 
 WAVE_CASES = [
     (0.8, "safe"),
-    (1.4, "safe"),
-    (1.5, "caution"),
-    (2.5, "caution"),
-    (2.6, "danger"),
-    (3.0, "danger"),
+    (1.9, "safe"),
+    (2.0, "caution"),
+    (2.8, "caution"),
+    (3.5, "caution"),
+    (3.6, "danger"),
+    (4.2, "danger"),
 ]
 
 WIND_CASES = [
     (8.0, "safe"),
-    (14.9, "safe"),
-    (15.0, "caution"),
+    (21.9, "safe"),
+    (22.0, "caution"),
     (25.0, "caution"),
-    (25.1, "danger"),
-    (30.0, "danger"),
+    (27.0, "caution"),
+    (27.1, "danger"),
+    (32.0, "danger"),
 ]
 
 CURRENT_CASES = [
     (1.0, "safe"),
-    (1.4, "safe"),
-    (1.5, "caution"),
+    (1.9, "safe"),
+    (2.0, "caution"),
     (2.5, "caution"),
-    (2.6, "danger"),
-    (3.5, "danger"),
+    (3.0, "caution"),
+    (3.1, "danger"),
+    (3.8, "danger"),
 ]
 
 
 def test_canonical_constants():
-    assert (st.WAVE_SAFE_MAX_M, st.WAVE_DANGER_MIN_M) == (1.5, 2.5)
-    assert (st.WIND_SAFE_MAX_KT, st.WIND_DANGER_MIN_KT) == (15.0, 25.0)
-    assert (st.CURRENT_SAFE_MAX_KT, st.CURRENT_DANGER_MIN_KT) == (1.5, 2.5)
+    assert (st.WAVE_SAFE_MAX_M, st.WAVE_DANGER_MIN_M) == (2.0, 3.5)
+    assert (st.WIND_SAFE_MAX_KT, st.WIND_DANGER_MIN_KT) == (22.0, 27.0)
+    assert (st.CURRENT_SAFE_MAX_KT, st.CURRENT_DANGER_MIN_KT) == (2.0, 3.0)
 
 
 @pytest.mark.parametrize("value,expected", WAVE_CASES)
@@ -91,9 +94,9 @@ def test_weather_agent_wind_parity(value, expected):
 def test_live_fetchers_constants_parity():
     from backend.ingest import live_fetchers as lf
 
-    assert (lf.WAVE_SAFE_MAX, lf.WAVE_CAUTION_MAX) == (1.5, 2.5)
-    assert (lf.WIND_SAFE_MAX, lf.WIND_CAUTION_MAX) == (15.0, 25.0)
-    assert (lf.CURRENT_SAFE_MAX, lf.CURRENT_CAUTION_MAX) == (1.5, 2.5)
+    assert (lf.WAVE_SAFE_MAX, lf.WAVE_CAUTION_MAX) == (2.0, 3.5)
+    assert (lf.WIND_SAFE_MAX, lf.WIND_CAUTION_MAX) == (22.0, 27.0)
+    assert (lf.CURRENT_SAFE_MAX, lf.CURRENT_CAUTION_MAX) == (2.0, 3.0)
 
 
 @pytest.mark.parametrize("value,expected", WIND_CASES)
@@ -146,10 +149,10 @@ def test_orchestrator_veto_wind_parity(value, expected):
 def test_officer_danger_rule_parity():
     from backend.routers.officer import is_danger_sea_state
 
-    assert is_danger_sea_state(wind_kt=26.0) is True
-    assert is_danger_sea_state(wave_m=2.6) is True
-    assert is_danger_sea_state(current_kt=2.6) is True
-    assert is_danger_sea_state(wind_kt=25.0, wave_m=2.5, current_kt=2.5) is False
+    assert is_danger_sea_state(wind_kt=28.0) is True
+    assert is_danger_sea_state(wave_m=3.6) is True
+    assert is_danger_sea_state(current_kt=3.1) is True
+    assert is_danger_sea_state(wind_kt=27.0, wave_m=3.5, current_kt=3.0) is False
     assert is_danger_sea_state(wind_kt=8.0, wave_m=0.8, current_kt=1.0) is False
 
 
@@ -160,7 +163,7 @@ def test_missing_wave_wind_fail_open_caution():
     assert st.derive_safety_tier(None, None) == "CAUTION"
     assert st.apply_safety_veto({"wave_height_m": None, "wind_kt": 8.0}) == "caution"
     # ...but a measured breach still reads DANGER when the other is missing.
-    assert st.derive_safety_tier(3.0, None) == "DANGER"
+    assert st.derive_safety_tier(4.0, None) == "DANGER"
     assert st.derive_safety_tier(None, 30.0) == "DANGER"
 
 

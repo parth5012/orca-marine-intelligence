@@ -181,14 +181,15 @@ class TestTileServiceConfiguration:
             assert "your_carto_api_key" not in layer["url"]
 
     def test_tile_pbf_endpoint_valid_coordinates(self, client):
-        """GET /api/tiles/{z}/{x}/{y}.pbf serves protobuf tile with cache header."""
-        res = client.get("/api/tiles/0/0/0.pbf?layer=pfz")
-        assert res.status_code == 200
-        assert res.headers.get("content-type") == "application/x-protobuf"
-        assert res.headers.get("cache-control") == "public, max-age=3600"
-        assert res.headers.get("x-tile-layer") == "pfz"
-        assert res.headers.get("x-tile-coords") == "0/0/0"
-        assert res.content == b""
+        """GET /api/tiles/{z}/{x}/{y}.pbf serves protobuf tile with cache header, or 503 when PostGIS offline."""
+        with patch("backend.routers.tiles.get_mvt_tile", return_value=b""):
+            res = client.get("/api/tiles/0/0/0.pbf?layer=pfz")
+            assert res.status_code == 200
+            assert res.headers.get("content-type") == "application/x-protobuf"
+            assert res.headers.get("cache-control") == "public, max-age=3600"
+            assert res.headers.get("x-tile-layer") == "pfz"
+            assert res.headers.get("x-tile-coords") == "0/0/0"
+            assert res.content == b""
 
     def test_tile_pbf_endpoint_bounds_validation(self, client):
         """GET /api/tiles/{z}/{x}/{y}.pbf rejects invalid Web Mercator bounds."""
@@ -202,6 +203,7 @@ class TestTileServiceConfiguration:
 
     def test_tile_pbf_header_injection_guard(self, client):
         """Untrusted layer parameters are sanitized to safe whitelist default."""
-        res = client.get("/api/tiles/0/0/0.pbf?layer=malicious_header_payload")
-        assert res.status_code == 200
-        assert res.headers.get("x-tile-layer") == "pfz"
+        with patch("backend.routers.tiles.get_mvt_tile", return_value=b""):
+            res = client.get("/api/tiles/0/0/0.pbf?layer=malicious_header_payload")
+            assert res.status_code == 200
+            assert res.headers.get("x-tile-layer") == "pfz"

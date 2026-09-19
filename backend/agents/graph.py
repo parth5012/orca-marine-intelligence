@@ -2536,6 +2536,8 @@ async def orchestrate_stream_via_graph(
             logger.warning("graph.stream combiner failed: %s", exc)
             best = None
         if not isinstance(best, dict):
+            if combined.get("all_unsafe"):
+                return {"type": "safety", "waves_m": None, "wind_kts": None, "danger": "danger", "badge": "red", "provisional": True}
             return {"type": "safety", "waves_m": None, "wind_kts": None, "danger": "unknown", "badge": "amber", "provisional": True}
         # Mirror decision_agent badge reasoning (duplicated for earliness).
         # Empty lists mean "unknown", never safe.

@@ -65,10 +65,14 @@ def test_generate_structured_json_with_groq_client():
 
 def test_generate_structured_json_groq_failure_raises_planner_api_error():
     """When Groq API call fails, PlannerAPIError is raised."""
+    from backend.agents.planner_service import (
+        PlannerAPIError as _FreshPlannerAPIError,
+        _generate_structured_json as _fresh_generate_structured_json,
+    )
     mock_client = MagicMock()
     mock_client.chat.completions.create.side_effect = RuntimeError("Groq rate limit 429")
 
-    with pytest.raises(PlannerAPIError) as exc_info:
-        _generate_structured_json("test prompt", client=mock_client)
+    with pytest.raises(_FreshPlannerAPIError) as exc_info:
+        _fresh_generate_structured_json("test prompt", client=mock_client)
     assert "groq" in str(exc_info.value).lower()
     assert "call failed" in str(exc_info.value).lower()

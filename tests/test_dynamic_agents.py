@@ -170,6 +170,21 @@ def _run_mock_pipeline(
         else:
             danger_s = "safe"
         badge = orchestrator._badge_for_best(best, sea_s, wind_s, danger_s)
+    elif combined.get("all_unsafe"):
+        badge = "red"
+        # Find worst status among weather/ocean/geofence
+        for r in weather:
+            if r.get("status") == "danger":
+                wind_s = "danger"
+                break
+        for r in ocean:
+            if r.get("status") == "danger":
+                sea_s = "danger"
+                break
+        for r in geofence:
+            if r.get("status") == "danger":
+                danger_s = "danger"
+                break
     return {
         "batch": batch,
         "fish": fish,
@@ -598,12 +613,17 @@ class TestNamedCoastalPortPriority:
         from backend.agents.graph import orchestrate_via_graph
 
         haryana_gps = {"lat": 28.5, "lon": 77.0}
-        result = await orchestrate_via_graph(
-            query="fish near Kochi",
-            language="en",
-            location=haryana_gps,
-            session_id=f"test-haryana-kochi-{uuid.uuid4().hex[:8]}",
-        )
+        async def fake_get_wave_current(lat, lon, zone_id, idx):
+            # Normal safe conditions for Kochi query
+            return (0.8, 1.0, "marine_data_package")
+
+        with patch("backend.agents.subagents.sea_checker.get_wave_current", side_effect=fake_get_wave_current):
+            result = await orchestrate_via_graph(
+                query="fish near Kochi",
+                language="en",
+                location=haryana_gps,
+                session_id=f"test-haryana-kochi-{uuid.uuid4().hex[:8]}",
+            )
 
         assert result is not None
         # Center is [lon, lat] (GeoJSON order) of best PFZ zone near Kochi,
