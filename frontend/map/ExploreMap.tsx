@@ -26,7 +26,7 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Search, Layers, Target, X, Navigation, Eye, MessageSquareText } from 'lucide-react';
 import MapView from './MapView';
@@ -46,6 +46,7 @@ import LayerControl from './LayerControl';
 import { parseLocation, formatDMS, haversineDistance } from './geo';
 import type { BasemapStyle } from './carto';
 import { filterEngineLayers, isLayerOn } from './layers';
+import { fetchPfzCached } from '@/lib/pfzCache';
 import { useApp, DEFAULT_ACTIVE_LAYERS, KOCHI_FALLBACK } from '@/context/AppContext';
 import type { MapLayerKey } from '@/context/AppContext';
 
@@ -119,6 +120,8 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
     lon: number;
   } | null>(null);
   const [nearestLoading, setNearestLoading] = useState<boolean>(false);
+  // Perf #198: debounce rapid search resubmits (Enter spam / double tap).
+  const lastSearchAt = useRef<number>(0);
 
   // Sync controlled props (map tab drives center/zoom/highlight from chat).
   // applyCenter is declared first: the sector sync below recenters the map
@@ -182,6 +185,9 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
   const handleSearch = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      const now = Date.now();
+      if (now - lastSearchAt.current < 300) return;
+      lastSearchAt.current = now;
       setSearchError(null);
       if (!searchQuery.trim()) return;
       const loc = parseLocation(searchQuery);
@@ -224,15 +230,15 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
   );
 
   // Live Find-Nearest: nearest live PFZ feature to GPS/center (no mocks).
+  // Perf #198: cached /api/pfz?limit=200 per sector (60s SWR) — repeated
+  // clicks reuse one payload instead of refetching every click.
   const handleFindNearest = useCallback(async () => {
     setNearestLoading(true);
     try {
       const params = new URLSearchParams();
       if (selectedSector && selectedSector !== 'ALL') params.set('sector', selectedSector);
       params.set('limit', '200');
-      const res = await fetch(`/api/pfz?${params.toString()}`);
-      if (!res.ok) throw new Error(`pfz ${res.status}`);
-      const data = await res.json();
+      const data = await fetchPfzCached(`/api/pfz?${params.toString()}`);
       const features = Array.isArray(data?.features) ? data.features : [];
       if (features.length === 0) return;
       const origin = userLocation ?? { lat: mapCenter[0], lon: mapCenter[1] };
