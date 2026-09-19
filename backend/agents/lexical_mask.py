@@ -384,26 +384,21 @@ def derive_safety_tier(
     wind_kts: float | None,
     all_unsafe: bool = False,
     banned: bool = False,
+    current_kt: float | None = None,
+    cyclone_alert: bool = False,
 ) -> str:
     """Deterministic SAFE/CAUTION/DANGER mirror of sea/weather thresholds.
 
-    Code trumps LLM: all_unsafe or banned or wave>2.5 / wind>25 → DANGER.
+    Canonical implementation lives in
+    ``backend/agents/safety_thresholds.py`` — this wrapper preserves the
+    legacy signature (plus additive ``current_kt``/``cyclone_alert``) so
+    existing importers keep working. Code trumps LLM: all_unsafe, banned,
+    cyclone, or wave>2.5 / wind>25kt / current>2.5kt → DANGER; missing
+    wave/wind → CAUTION (fail-open, never SAFE).
     """
-    if all_unsafe or banned:
-        return "DANGER"
-    try:
-        wave = float(wave_m) if wave_m is not None else 0.0
-    except (TypeError, ValueError):
-        wave = 0.0
-    try:
-        wind = float(wind_kts) if wind_kts is not None else 0.0
-    except (TypeError, ValueError):
-        wind = 0.0
-    if wave > 2.5 or wind > 25:
-        return "DANGER"
-    if wave >= 1.5 or wind >= 15:
-        return "CAUTION"
-    return "SAFE"
+    from backend.agents.safety_thresholds import derive_safety_tier as _canonical
+
+    return _canonical(wave_m, wind_kts, all_unsafe, banned, current_kt, cyclone_alert)
 
 
 def contains_native_script(text: str, lang: str) -> bool:
@@ -482,7 +477,9 @@ def render_grounded_advisory(metrics: dict, lang: str = "en") -> str:
     wind_s = _fmt_num(wind_raw, 1)
     citation = str(m.get("citation") or "INCOIS TextData")
 
-    banned = bool(m.get("inside_mpa")) or (m.get("inside_eez") is False)
+    from backend.agents.safety_thresholds import is_banned as _is_banned
+
+    banned = _is_banned(m.get("inside_mpa"), m.get("inside_eez"))
     tier = str(m.get("overall_safety") or "").upper()
     if tier not in ("SAFE", "CAUTION", "DANGER"):
         tier = derive_safety_tier(
@@ -490,11 +487,25 @@ def render_grounded_advisory(metrics: dict, lang: str = "en") -> str:
             wind_raw,
             bool(m.get("all_unsafe", False)),
             banned,
+            m.get("current_kt", m.get("current_speed_kt")),
+            bool(m.get("cyclone_alert", m.get("cyclone", False))),
         )
     if bool(m.get("all_unsafe", False)):
         tier = "DANGER"  # veto: code trumps LLM
     # SAFETY veto: an explicit overall_safety must never override physical
     # bans/limits — force DANGER on banned waters or extreme sea/weather.
+    # Canonical bands (safety_thresholds): wave>2.5m / wind>25kt /
+    # current>2.5kt / cyclone.
+    from backend.agents.safety_thresholds import (
+        CURRENT_DANGER_MIN_KT as _CUR_D,
+    )
+    from backend.agents.safety_thresholds import (
+        WAVE_DANGER_MIN_M as _WAV_D,
+    )
+    from backend.agents.safety_thresholds import (
+        WIND_DANGER_MIN_KT as _WND_D,
+    )
+
     try:
         _wave_veto = float(m.get("wave_height_m", m.get("wave_m", 0)) or 0)
     except (TypeError, ValueError):
@@ -503,7 +514,15 @@ def render_grounded_advisory(metrics: dict, lang: str = "en") -> str:
         _wind_veto = float(wind_raw or 0)
     except (TypeError, ValueError):
         _wind_veto = 0.0
-    if banned or _wave_veto > 2.5 or _wind_veto > 25:
+    try:
+        _cur_veto = float(m.get("current_kt", m.get("current_speed_kt", 0)) or 0)
+    except (TypeError, ValueError):
+        _cur_veto = 0.0
+    try:
+        _cyc_veto = bool(m.get("cyclone_alert", m.get("cyclone", False)))
+    except Exception:
+        _cyc_veto = False
+    if banned or _cyc_veto or _wave_veto > _WAV_D or _wind_veto > _WND_D or _cur_veto > _CUR_D:
         tier = "DANGER"
 
     tag = SAFETY_TAGS[code][tier]

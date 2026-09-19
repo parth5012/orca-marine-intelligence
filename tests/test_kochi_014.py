@@ -3,7 +3,7 @@
 Covers:
   1. Kochi returns ranked zone under 10s (mocked PostGIS/live fetchers)
   2. Planner timeout uses Kochi baseline (9.93, 76.26)
-  3. Safety veto wave/wind thresholds (2.5m / 40kph danger, 1.5m / 25kph caution)
+   3. Safety veto wave/wind thresholds (2.5m / 46.3kph danger, 1.5m / 27.78kph caution)
   4. Contract keys canonical (safety, distance_km, depth_m, wave_m, wind_kph, confidence)
   5. Cache fallback file (data/pfz-today.geojson offline read + missing-file [])
 
@@ -201,18 +201,23 @@ class TestPlannerTimeoutKochiBaseline:
 
 class TestSafetyVetoWaveWind:
     def test_orchestrator_veto_thresholds(self):
+        # Canonical bands (#196, safety_thresholds): wave 1.5/2.5m,
+        # wind 15/25kt (27.78/46.3kph). _veto_safety takes wind in kph.
         from backend.agents.orchestrator import _veto_safety
 
         # danger: wave > 2.5m
         s, _ = _veto_safety(3.0, 10.0, True, False, False)
         assert s == "danger"
-        # danger: wind > 40kph (21.6kt == 40kph -> use 25kt=46kph)
-        s, _ = _veto_safety(0.8, 46.3, True, False, False)
+        # danger: wind > 25kt (25kt = 46.3kph, so 47.0kph is danger ...)
+        s, _ = _veto_safety(0.8, 47.0, True, False, False)
         assert s == "danger"
+        # ... while exactly 25kt (46.3kph) is still caution.
+        s, _ = _veto_safety(0.8, 46.3, True, False, False)
+        assert s == "caution"
         # caution: wave > 1.5m
         s, _ = _veto_safety(2.0, 10.0, True, False, False)
         assert s == "caution"
-        # caution: wind > 25kph (15kt=27.8kph)
+        # caution: wind > 15kt (15kt=27.78kph)
         s, _ = _veto_safety(0.8, 27.8, True, False, False)
         assert s == "caution"
         # safe: calm
@@ -224,9 +229,23 @@ class TestSafetyVetoWaveWind:
         from backend.agents.combiner import apply_safety_veto
 
         assert apply_safety_veto({"wave_height_m": 3.0, "wind_kt": 5.0}) == "danger"
-        assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 25.0}) == "danger"  # 25kt=46kph
+        assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 26.0}) == "danger"
+        assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 25.0}) == "caution"
         assert apply_safety_veto({"wave_height_m": 2.0, "wind_kt": 5.0}) == "caution"
         assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 8.0}) == "safe"
+        # current is scored explicitly (#196): >2.5kt danger, >=1.5kt caution.
+        assert (
+            apply_safety_veto(
+                {"wave_height_m": 0.8, "wind_kt": 8.0, "current_kt": 3.0}
+            )
+            == "danger"
+        )
+        assert (
+            apply_safety_veto(
+                {"wave_height_m": 0.8, "wind_kt": 8.0, "current_kt": 2.0}
+            )
+            == "caution"
+        )
         # nulls degrade to caution, never safe
         assert apply_safety_veto({"wave_height_m": None, "wind_kt": 8.0}) == "caution"
         # banned waters -> danger

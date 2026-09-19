@@ -102,7 +102,8 @@ export function compassFromDegrees(deg: number): string {
   return dirs[Math.round(norm / 22.5) % 16];
 }
 
-/** Safety class mirroring backend/routers/weather.py composite status. */
+/** Safety class mirroring backend/routers/weather.py composite status
+ * (canonical bands: backend/agents/safety_thresholds.py #196). */
 export function classifySea(
   windKt: number,
   waveM: number,

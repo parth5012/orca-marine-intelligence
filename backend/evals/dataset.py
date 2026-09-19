@@ -183,10 +183,10 @@ def load_marine_eval_dataset(limit: int | None = None) -> list[MarineEvalExample
         wind = pk_data["wind"] if pk_data else c["base_wind"]
 
         tier = "safe"
-        if wave > 2.5 or wind > 25.0:
-            tier = "danger"
-        elif wave >= 1.5 or wind >= 15.0:
-            tier = "caution"
+        from backend.agents.safety_thresholds import derive_safety_tier as _tier
+
+        _t = _tier(wave, wind, False, False)
+        tier = _t.lower()
 
         ex = MarineEvalExample(
             example_id=f"COASTAL_CENTER_{i+1:02d}",

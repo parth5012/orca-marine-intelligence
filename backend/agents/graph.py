@@ -1181,7 +1181,7 @@ async def danger_agent(state: ORCAState) -> dict:
                 if lat is None or lon is None:
                     return {
                         "is_safe": False, "status": "unknown", "warnings": ["missing lat/lon"],
-                        "inside_eez": True, "inside_mpa": False, "mpa_name": None,
+                        "inside_eez": None, "inside_mpa": False, "mpa_name": None,
                     }
                 return await da.check_safety(float(lat), float(lon))
 
@@ -1418,13 +1418,27 @@ async def decision_agent(state: ORCAState) -> dict:
         src = weather[0].get("source")
         if src and src != "unknown":
             evidence.append(f"Wind: {human_source_label(src)}")
+    # Geofence verdict (#196): canonical banned flag, NOT substring matching.
+    # The old guard (any "EEZ"/"MPA" in evidence) missed the spelled-out
+    # danger_agent warning ("Outside Indian Exclusive Economic Zone — ...")
+    # and appended "No EEZ/MPA violation" alongside it — double-talk.
     if danger and isinstance(danger[0], dict):
+        from backend.agents.safety_thresholds import is_banned as _is_banned
+        from backend.agents.safety_thresholds import (
+            resolve_geofence_evidence as _geo_evidence,
+        )
+
+        _b = best if isinstance(best, dict) else {}
+        _banned_flag = _is_banned(_b.get("inside_mpa"), _b.get("inside_eez"))
+        if _banned_flag is False and isinstance(danger[0], dict):
+            # Best may lack flags on zone_id mismatch — fall back to the
+            # danger entry's own flags before declaring "no violation".
+            _banned_flag = _is_banned(
+                danger[0].get("inside_mpa"), danger[0].get("inside_eez")
+            )
         warnings = danger[0].get("warnings") or []
-        for w in warnings:
-            if "unavailable" not in w.lower():
-                evidence.append(str(w))
-        if not any("MPA" in e or "EEZ" in e for e in evidence):
-            evidence.append("No EEZ/MPA violation")
+        for _line in _geo_evidence(_banned_flag, list(warnings)):
+            evidence.append(str(_line))
 
     # Ticket #193: planner reasoning_trace NO LONGER rides into evidence.
     # The full trace stays in state["reasoning_trace"] for the Workflow
