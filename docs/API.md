@@ -272,7 +272,7 @@ data: <JSON>
 
 ## POST /api/chat/voice
 
-Vernacular voice audio transcribed via Groq Whisper (`whisper-large-v3`). There is **no mock fallback**: when `GROQ_API_KEY` is missing or upstream produces nothing, the endpoint returns 503.
+Vernacular voice audio transcribed via Bhashini ULCA ASR (2-call Config → Compute flow, `taskType=asr`, 16kHz mono WAV). The backend converts browser `webm/opus` recordings with ffmpeg (`-ac 1 -ar 16000 -sample_fmt s16`); the deploy image must include ffmpeg, otherwise uploads pass through unconverted. There is **no mock fallback**: when Bhashini credentials are missing (`BHASHINI_API_KEY` / `BHASHINI_ULCA_USER_ID`), upstream fails, or no speech is detected, the endpoint returns 503. `GROQ_API_KEY` is planner-only and never used in the voice path.
 
 **File:** `backend/routers/chat.py:137`
 
@@ -287,7 +287,7 @@ Vernacular voice audio transcribed via Groq Whisper (`whisper-large-v3`). There 
 | `session_id` | string | No | Multi-turn session ID. Generated if omitted. |
 | `lat` | number | No | GPS latitude (WGS84). |
 | `lon` | number | No | GPS longitude (WGS84). |
-| `language` | string | No | Language hint for Whisper (default: `"en"`). |
+| `language` | string | No | Source-language hint for ASR, ISO-639-1 (default: `"en"`; `ml-IN` → `ml`). |
 
 **Response `200`:**
 
@@ -305,7 +305,7 @@ Vernacular voice audio transcribed via Groq Whisper (`whisper-large-v3`). There 
 - `200` — Transcription successful (`mock` is always `false`)
 - `413` — Audio file exceeds 25MB (`25 * 1024 * 1024` bytes)
 - `422` — Missing audio file (neither `file` nor `audio` provided)
-- `503` — Transcription unavailable (missing key or upstream failure)
+- `503` — Transcription unavailable (missing Bhashini keys, upstream failure, or no speech detected)
 
 ---
 

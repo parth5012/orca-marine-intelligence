@@ -8,7 +8,7 @@ Covers:
   - POST /api/chat SSE streaming events (status, map, safety, token, done)
   - Error recovery and graceful degradation in SSE stream
   - Multi-turn conversation persistence in Redis (verified via get_history)
-  - POST /api/chat/voice vernacular voice transcription (Groq Whisper & offline fallback)
+  - POST /api/chat/voice vernacular voice transcription (Bhashini ULCA ASR & offline fallback)
   - End-to-end integration with LangGraph supervisor
 
 Wayfinder T3 (map #92): /chat/stream alias and /chat/history deleted —
@@ -379,7 +379,7 @@ class TestChatHistoryEndpointRemoved:
 
 
 class TestVoiceTranscriptionEndpoint:
-    """Tests for POST /api/chat/voice."""
+    """Tests for POST /api/chat/voice (Bhashini ULCA ASR, no Groq in voice path)."""
 
     def test_voice_missing_file_returns_422(self, client):
         """Verify request without file returns 422 validation error."""
@@ -387,7 +387,7 @@ class TestVoiceTranscriptionEndpoint:
         assert resp.status_code == 422
 
     def test_voice_offline_mock_fallback(self, client):
-        """Verify 503 (no mock transcription) when GROQ_API_KEY not configured."""
+        """Verify 503 (no mock transcription) when Bhashini keys not configured."""
         with patch.dict(os.environ, {}, clear=True):
             files = {"file": ("malayalam_sample.wav", b"RIFFFAKEWAVDATA", "audio/wav")}
             data = {"language": "ml", "session_id": "voice-sess-1"}
@@ -397,16 +397,24 @@ class TestVoiceTranscriptionEndpoint:
             body = resp.json()
             assert "transcription" in body.get("detail", "").lower() or "unavailable" in body.get("detail", "").lower()
 
-    def test_voice_groq_whisper_success(self, client):
-        """Verify Groq Whisper transcription API called when GROQ_API_KEY present."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "text": "എവിടെ മത്സ്യം കിട്ടും? (Where is fish available?)"
-        }
+    def test_voice_bhashini_success(self, client):
+        """Verify Bhashini transcribe() result returned with unchanged shape."""
+        from backend.core.bhashini import TranscriptionResult
 
-        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test_mock_key"}):
-            with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_response)) as mock_post:
+        mock_result = TranscriptionResult(
+            text="എവിടെ മത്സ്യം കിട്ടും? (Where is fish available?)",
+            source_lang="ml",
+            transcribed=True,
+            cached=False,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"BHASHINI_API_KEY": "test-key", "BHASHINI_ULCA_USER_ID": "test-user"},
+        ):
+            with patch(
+                "backend.routers.chat.transcribe", new=AsyncMock(return_value=mock_result)
+            ) as mock_transcribe:
                 files = {"file": ("fisherman_voice.m4a", b"AUDIOBYTES", "audio/m4a")}
                 data = {"language": "ml", "lat": 9.93, "lon": 76.26}
                 resp = client.post("/api/chat/voice", files=files, data=data)
@@ -417,22 +425,21 @@ class TestVoiceTranscriptionEndpoint:
                 assert "session_id" in body and body["session_id"]
                 assert body.get("mock") is False
 
-                # Verify httpx call parameters
-                assert mock_post.called
-                call_kwargs = mock_post.call_args[1]
-                assert "Authorization" in call_kwargs["headers"]
-                assert call_kwargs["headers"]["Authorization"] == "Bearer gsk_test_mock_key"
-                assert call_kwargs["data"]["model"] == "whisper-large-v3"
-                assert call_kwargs["data"]["language"] == "ml"
+                # Bhashini called once with converted audio + normalized lang
+                assert mock_transcribe.call_count == 1
+                assert mock_transcribe.call_args[0][1] == "ml"
 
-    def test_voice_groq_whisper_error_falls_back_gracefully(self, client):
-        """Verify Groq API failure returns 503 without fake transcription."""
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.text = "Internal Groq Error"
+    def test_voice_bhashini_error_falls_back_gracefully(self, client):
+        """Verify Bhashini failure returns 503 without fake transcription."""
+        from backend.core.bhashini import TranscriptionResult
 
-        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test_mock_key"}):
-            with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_response)):
+        mock_result = TranscriptionResult(text="", source_lang="ml", transcribed=False)
+
+        with patch.dict(
+            os.environ,
+            {"BHASHINI_API_KEY": "test-key", "BHASHINI_ULCA_USER_ID": "test-user"},
+        ):
+            with patch("backend.routers.chat.transcribe", new=AsyncMock(return_value=mock_result)):
                 files = {"audio": ("query.wav", b"AUDIOBYTES", "audio/wav")}
                 resp = client.post("/api/chat/voice", files=files)
 

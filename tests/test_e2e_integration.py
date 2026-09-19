@@ -735,16 +735,16 @@ def test_isro_r6_vernacular_voice_and_language_support(client: TestClient):
     ISRO R6: Vernacular Voice & Multilingual Regional Advisory Grounding.
     Tests voice transcription endpoint, lexical masking preserving metrics, and multilingual replies.
     """
-    # 1. Voice transcription endpoint
+    # 1. Voice transcription endpoint (Bhashini ULCA ASR)
     dummy_wav_bytes = b"RIFF....WAVEfmt ...." + b"\x00" * 100
     files = {"file": ("fisherman_query.wav", dummy_wav_bytes, "audio/wav")}
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"text": "എവിടെ മത്സ്യം? (Where to fish?)"}
+    from backend.core.bhashini import TranscriptionResult as _TR
 
-    with patch.dict(os.environ, {"GROQ_API_KEY": "test_groq_key"}):
-        with patch("httpx.AsyncClient.post", return_value=mock_resp):
+    mock_asr = _TR(text="എവിടെ മീൻ? (Where to fish?)", source_lang="ml", transcribed=True)
+
+    with patch.dict(os.environ, {"BHASHINI_API_KEY": "test_key", "BHASHINI_ULCA_USER_ID": "test_user"}):
+        with patch("backend.routers.chat.transcribe", new=AsyncMock(return_value=mock_asr)):
             v_resp = client.post("/api/chat/voice", files=files, data={"language": "ml"})
             assert v_resp.status_code == 200
             v_data = v_resp.json()
