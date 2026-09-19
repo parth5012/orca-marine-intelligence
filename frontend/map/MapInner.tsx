@@ -36,6 +36,7 @@ import 'leaflet/dist/leaflet.css';
 import { EEZ_GEOJSON, MPA_GEOJSON, IMBL_COORDINATES } from './boundaries';
 import { haversineDistance, bearing, formatDMS, getCompassDirection } from './geo';
 import SafetyBadge from './SafetyBadge';
+import { toFiniteNumber, MISSING, distanceLabel, suitabilityLabel } from './drawerHonesty';
 import {
   BasemapStyle,
   BASEMAP_OPTIONS,
@@ -308,17 +309,15 @@ export default function MapInner({
   const [pfzLoading, setPfzLoading] = useState<boolean>(true);
   const [selectedFeature, setSelectedFeature] = useState<any | null>(null);
 
-  // Weather inspection state
+  // Weather inspection state. Ticket #195: pre-fetch state is UNKNOWN
+  // (amber) with no measurements — never SAFE-looking numbers.
   const [weatherState, setWeatherState] = useState<LiveWeatherState>({
     lat: center[0],
     lon: center[1],
-    temperature_c: 28.5,
-    wind_speed_kt: 12,
-    wave_height_m: 0.9,
-    status: 'Safe for fishing operations',
-    danger: 'none',
-    badge: 'green',
-    source: 'incois_marine',
+    status: 'Sea state unavailable',
+    danger: 'unknown',
+    badge: 'amber',
+    source: 'live_api',
     loading: false,
   });
 
@@ -397,38 +396,42 @@ export default function MapInner({
       const res = await fetch(`${backendBase}/api/weather/current?lat=${lat}&lon=${lon}`);
       if (res.ok) {
         const data = await res.json();
+        // Ticket #195: missing fields propagate as unknown — only finite
+        // live measurements can clear UNKNOWN, never default to SAFE.
+        const waveM = toFiniteNumber(data.wave_height_m);
+        const windKt = toFiniteNumber(data.wind_speed_kt);
+        const tempC = toFiniteNumber(data.temperature_c);
+        const known = waveM != null && windKt != null;
+        const dangerHit = known && (waveM > 2.5 || windKt > 30);
         setWeatherState({
           lat,
           lon,
-          temperature_c: data.temperature_c ?? 28.5,
-          wind_speed_kt: data.wind_speed_kt ?? 12,
-          wave_height_m: data.wave_height_m ?? 0.9,
-          status: data.status || 'Normal conditions',
-          danger: data.wave_height_m > 2.5 || data.wind_speed_kt > 30 ? 'danger' : 'none',
-          badge: data.wave_height_m > 2.5 || data.wind_speed_kt > 30 ? 'red' : 'green',
+          temperature_c: tempC ?? undefined,
+          wind_speed_kt: windKt ?? undefined,
+          wave_height_m: waveM ?? undefined,
+          status: data.status || (known ? 'Normal conditions' : 'Sea state unavailable'),
+          danger: dangerHit ? 'danger' : known ? 'none' : 'unknown',
+          badge: dangerHit ? 'red' : known ? 'green' : 'amber',
           source: data.source || 'live_api',
           loading: false,
         });
         return;
       }
     } catch {
-      // Backend offline: compute realistic synthetic marine estimate based on coordinates
+      // Backend offline -> UNKNOWN amber, never synthetic SAFE numbers.
     }
 
-    // Graceful offline fallback weather calculation
-    const distToCoast = Math.abs(lon - 76.0) * 111;
-    const estWave = Math.min(2.2, Math.max(0.6, 0.7 + distToCoast * 0.015));
-    const estWind = Math.min(24, Math.max(8, 10 + distToCoast * 0.12));
-
+    // Ticket #195: backend offline/unreachable -> UNKNOWN amber with no
+    // measurements. Never invent estWave/estWind green SAFE values.
     setWeatherState({
       lat,
       lon,
-      temperature_c: 28.4,
-      wind_speed_kt: Math.round(estWind * 10) / 10,
-      wave_height_m: Math.round(estWave * 10) / 10,
-      status: 'Moderate swell, normal operating conditions',
-      danger: estWave > 2.0 ? 'caution' : 'none',
-      badge: estWave > 2.0 ? 'amber' : 'green',
+      temperature_c: undefined,
+      wind_speed_kt: undefined,
+      wave_height_m: undefined,
+      status: 'Sea state unavailable (backend offline)',
+      danger: 'unknown',
+      badge: 'amber',
       source: 'offline_fallback',
       loading: false,
     });
@@ -728,7 +731,7 @@ export default function MapInner({
                           border: `1px solid ${color}80`,
                         }}
                       >
-                        {props.suitability || 'high'}
+                        {suitabilityLabel(props)}
                       </span>
                     </div>
 
@@ -748,13 +751,18 @@ export default function MapInner({
                       <div>
                         <span className="text-slate-400">Distance:</span>{' '}
                         <span className="text-white font-medium">
-                          {props.distance || props.distance_km || '25'} km
+                          {distanceLabel(props)}
                         </span>
                       </div>
                       <div>
                         <span className="text-slate-400">Depth:</span>{' '}
                         <span className="text-white font-medium">
-                          {props.depth || props.depth_m || '40'} m
+                          {(() => {
+                            const d = props.depth ?? props.depth_m;
+                            if (d == null || String(d).trim() === '') return MISSING;
+                            const s = String(d).trim();
+                            return s.includes('m') ? s : `${s} m`;
+                          })()}
                         </span>
                       </div>
                       <div className="col-span-2 text-[10px] font-mono text-cyan-200 mt-1">
@@ -828,7 +836,7 @@ export default function MapInner({
                       {hlProps.place || hlProps.name || hlProps.zone_id || 'Target Fishing Zone'}
                     </span>
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                      {hlProps.suitability || 'HIGH'}
+                      {suitabilityLabel(hlProps)}
                     </span>
                   </div>
 
@@ -848,13 +856,23 @@ export default function MapInner({
                     <div>
                       <span className="text-slate-400">Distance:</span>{' '}
                       <span className="text-white font-medium">
-                        {hlProps.distance || hlProps.distance_km || (navMetrics ? `${navMetrics.distKm} km` : '25 km')}
+                        {(() => {
+                          const lbl = distanceLabel(hlProps);
+                          if (lbl !== MISSING) return lbl;
+                          if (navMetrics) return `${navMetrics.distKm} km`;
+                          return MISSING;
+                        })()}
                       </span>
                     </div>
                     <div>
                       <span className="text-slate-400">Depth:</span>{' '}
                       <span className="text-white font-medium">
-                        {hlProps.depth || hlProps.depth_m || '40 m'}
+                        {(() => {
+                          const d = hlProps.depth ?? hlProps.depth_m;
+                          if (d == null || String(d).trim() === '') return MISSING;
+                          const s = String(d).trim();
+                          return s.includes('m') ? s : `${s} m`;
+                        })()}
                       </span>
                     </div>
                   </div>
@@ -1173,7 +1191,7 @@ export default function MapInner({
             <div className="bg-slate-950/60 p-1.5 rounded border border-slate-800">
               <span className="text-slate-400 block text-[10px]">Wave Height</span>
               <span className="text-cyan-300 font-bold text-sm">
-                {weatherState.wave_height_m} m
+                {weatherState.wave_height_m != null ? `${weatherState.wave_height_m} m` : '—'}
               </span>
             </div>
             )}
@@ -1181,7 +1199,7 @@ export default function MapInner({
             <div className="bg-slate-950/60 p-1.5 rounded border border-slate-800">
               <span className="text-slate-400 block text-[10px]">Wind Speed</span>
               <span className="text-cyan-300 font-bold text-sm">
-                {weatherState.wind_speed_kt} kts
+                {weatherState.wind_speed_kt != null ? `${weatherState.wind_speed_kt} kts` : '—'}
               </span>
             </div>
             )}
