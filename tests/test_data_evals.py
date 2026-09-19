@@ -29,6 +29,7 @@ from backend.evals.dataset import (
     load_marine_eval_dataset,
     MarineEvalExample,
     export_dataset_to_json,
+    _find_parquet_features_file,
 )
 from backend.evals.evaluators import (
     MarineGroundednessEvaluator,
@@ -41,6 +42,11 @@ from backend.evals.runner import run_marine_evals, EvaluationReport
 
 class TestMarineDataPackageFallbacks:
     """Verifies Tier 3 fallback to parquet when live network APIs fail."""
+
+    pytestmark = pytest.mark.skipif(
+        _find_parquet_features_file() is None,
+        reason="Marine data package parquet files not present in local environment",
+    )
 
     @pytest.mark.asyncio
     async def test_sea_checker_parquet_fallback(self):

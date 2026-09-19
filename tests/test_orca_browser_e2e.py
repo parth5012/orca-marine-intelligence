@@ -6,12 +6,25 @@ Runs all 8 edge cases using the Orca integrated browser automation engine.
 import pytest
 import os
 import sys
+import urllib.request
 
 # Add project root and scripts directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts")))
 
 from scripts.e2e_orca_browser_runner import OrcaE2ETestSuite
+
+def _is_frontend_running() -> bool:
+    try:
+        with urllib.request.urlopen("http://localhost:3000", timeout=1.0) as resp:
+            return resp.status in (200, 304)
+    except Exception:
+        return False
+
+pytestmark = pytest.mark.skipif(
+    not _is_frontend_running(),
+    reason="Frontend dev server not running on http://localhost:3000",
+)
 
 @pytest.fixture(scope="module")
 def orca_suite():

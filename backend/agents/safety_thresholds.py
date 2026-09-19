@@ -10,11 +10,9 @@ synthesizer_service) imports from here — grep must show no second
 literal definition.
 
 Canonical bands (fail-open caution, never SAFE on missing data):
-  - wave:    <1.5m safe, 1.5–2.5m caution, >2.5m danger
-  - wind:    <15kt safe, 15–25kt caution, >25kt danger
-  - current: <1.5kt safe, 1.5–2.5kt caution, >2.5kt danger
-    (sea_checker's old 2/3kt drift unified to 1.5/2.5kt to mirror the
-    wave bands; live_fetchers + routers/weather already used 1.5/2.5.)
+  - wave:    <2.0m safe, 2.0–3.5m caution, >3.5m danger
+  - wind:    <22kt safe, 22–27kt caution, >27kt danger
+  - current: <2.0kt safe, 2.0–3.0kt caution, >3.0kt danger
   - banned (inside MPA or explicitly outside EEZ) or cyclone alert → danger.
   - missing wave/wind (None) → caution, never safe. Missing geofence
     (inside_eez=None) is unknown, never a ban — only an explicit
@@ -32,18 +30,18 @@ from typing import Any
 # Canonical bands
 # ---------------------------------------------------------------------------
 
-WAVE_SAFE_MAX_M = 1.5
-WAVE_DANGER_MIN_M = 2.5
+WAVE_SAFE_MAX_M = 2.0
+WAVE_DANGER_MIN_M = 3.5
 
-WIND_SAFE_MAX_KT = 15.0
-WIND_DANGER_MIN_KT = 25.0
+WIND_SAFE_MAX_KT = 22.0
+WIND_DANGER_MIN_KT = 27.0
 
-CURRENT_SAFE_MAX_KT = 1.5
-CURRENT_DANGER_MIN_KT = 2.5
+CURRENT_SAFE_MAX_KT = 2.0
+CURRENT_DANGER_MIN_KT = 3.0
 
 KT_TO_KPH = 1.852
-WIND_SAFE_MAX_KPH = round(WIND_SAFE_MAX_KT * KT_TO_KPH, 2)  # 27.78
-WIND_DANGER_MIN_KPH = round(WIND_DANGER_MIN_KT * KT_TO_KPH, 2)  # 46.3
+WIND_SAFE_MAX_KPH = round(WIND_SAFE_MAX_KT * KT_TO_KPH, 2)  # 40.74
+WIND_DANGER_MIN_KPH = round(WIND_DANGER_MIN_KT * KT_TO_KPH, 2)  # 50.0
 
 CYCLONE_RADIUS_KM = 500.0
 PRESSURE_DANGER_HPA = 995.0
@@ -145,7 +143,7 @@ def _finite_or_none(value: Any) -> float | None:
 
 
 def classify_wave(wave_m: Any) -> str:
-    """<1.5 safe, 1.5–2.5 caution, >2.5 danger, None → unknown."""
+    """<2.0 safe, 2.0–3.5 caution, >3.5 danger, None → unknown."""
     w = _finite_or_none(wave_m)
     if w is None:
         return "unknown"
@@ -157,7 +155,7 @@ def classify_wave(wave_m: Any) -> str:
 
 
 def classify_wind(wind_kt: Any) -> str:
-    """<15kt safe, 15–25kt caution, >25kt danger, None → unknown."""
+    """<22kt safe, 22–27kt caution, >27kt danger, None → unknown."""
     w = _finite_or_none(wind_kt)
     if w is None:
         return "unknown"
@@ -169,7 +167,7 @@ def classify_wind(wind_kt: Any) -> str:
 
 
 def classify_current(current_kt: Any) -> str:
-    """<1.5kt safe, 1.5–2.5kt caution, >2.5kt danger, None → unknown."""
+    """<2.0kt safe, 2.0–3.0kt caution, >3.0kt danger, None → unknown."""
     c = _finite_or_none(current_kt)
     if c is None:
         return "unknown"

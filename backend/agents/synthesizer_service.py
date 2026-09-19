@@ -609,7 +609,7 @@ async def synthesize_advisory(
 
     # Empty search: nothing to mask/synthesize — return the deterministic
     # combiner advisory directly without spending LLM budget.
-    if ctx["best"] is None:
+    if ctx["best"] is None and not ctx.get("all_unsafe"):
         elapsed_ms = _elapsed_ms()
         return {
             "status": "success",

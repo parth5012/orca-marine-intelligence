@@ -96,14 +96,14 @@ _HIGH_RISK_EDGE_CASES = [
         "name": "Arabian Sea Monsoon Swell Surge",
         "lat": 15.10,
         "lon": 72.80,
-        "expected_wave": 3.20,
+        "expected_wave": 3.80,
         "expected_wind": 22.0,
         "cyclone_alert": False,
         "safety_tier": "danger",
         "is_mpa": False,
         "mandate_do_not_sail": True,
         "category": "extreme_waves",
-        "notes": "Wave height 3.2m exceeds 2.5m danger threshold.",
+        "notes": "Wave height 3.8m exceeds 3.5m danger threshold.",
     },
 ]
 

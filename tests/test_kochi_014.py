@@ -201,48 +201,48 @@ class TestPlannerTimeoutKochiBaseline:
 
 class TestSafetyVetoWaveWind:
     def test_orchestrator_veto_thresholds(self):
-        # Canonical bands (#196, safety_thresholds): wave 1.5/2.5m,
-        # wind 15/25kt (27.78/46.3kph). _veto_safety takes wind in kph.
+        # Canonical bands (safety_thresholds): wave 2.0/3.5m,
+        # wind 22/27kt (40.74/50.0kph). _veto_safety takes wind in kph.
         from backend.agents.orchestrator import _veto_safety
 
-        # danger: wave > 2.5m
-        s, _ = _veto_safety(3.0, 10.0, True, False, False)
+        # danger: wave > 3.5m
+        s, _ = _veto_safety(3.6, 10.0, True, False, False)
         assert s == "danger"
-        # danger: wind > 25kt (25kt = 46.3kph, so 47.0kph is danger ...)
-        s, _ = _veto_safety(0.8, 47.0, True, False, False)
+        # danger: wind > 27kt (27kt = 50.0kph, so 51.0kph is danger ...)
+        s, _ = _veto_safety(0.8, 51.0, True, False, False)
         assert s == "danger"
-        # ... while exactly 25kt (46.3kph) is still caution.
-        s, _ = _veto_safety(0.8, 46.3, True, False, False)
+        # ... while exactly 27kt (50.0kph) is still caution.
+        s, _ = _veto_safety(0.8, 50.0, True, False, False)
         assert s == "caution"
-        # caution: wave > 1.5m
-        s, _ = _veto_safety(2.0, 10.0, True, False, False)
+        # caution: wave >= 2.0m
+        s, _ = _veto_safety(2.5, 10.0, True, False, False)
         assert s == "caution"
-        # caution: wind > 15kt (15kt=27.78kph)
-        s, _ = _veto_safety(0.8, 27.8, True, False, False)
+        # caution: wind >= 22kt (22kt=40.74kph)
+        s, _ = _veto_safety(0.8, 41.0, True, False, False)
         assert s == "caution"
         # safe: calm
-        s, c = _veto_safety(0.8, 14.8, True, False, False)
+        s, c = _veto_safety(0.8, 20.0, True, False, False)
         assert s == "safe"
         assert c == pytest.approx(0.87)
 
     def test_combiner_veto_mirrors_contract(self):
         from backend.agents.combiner import apply_safety_veto
 
-        assert apply_safety_veto({"wave_height_m": 3.0, "wind_kt": 5.0}) == "danger"
-        assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 26.0}) == "danger"
+        assert apply_safety_veto({"wave_height_m": 3.6, "wind_kt": 5.0}) == "danger"
+        assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 28.0}) == "danger"
         assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 25.0}) == "caution"
-        assert apply_safety_veto({"wave_height_m": 2.0, "wind_kt": 5.0}) == "caution"
+        assert apply_safety_veto({"wave_height_m": 2.5, "wind_kt": 5.0}) == "caution"
         assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 8.0}) == "safe"
-        # current is scored explicitly (#196): >2.5kt danger, >=1.5kt caution.
+        # current is scored explicitly: >3.0kt danger, >=2.0kt caution.
         assert (
             apply_safety_veto(
-                {"wave_height_m": 0.8, "wind_kt": 8.0, "current_kt": 3.0}
+                {"wave_height_m": 0.8, "wind_kt": 8.0, "current_kt": 3.2}
             )
             == "danger"
         )
         assert (
             apply_safety_veto(
-                {"wave_height_m": 0.8, "wind_kt": 8.0, "current_kt": 2.0}
+                {"wave_height_m": 0.8, "wind_kt": 8.0, "current_kt": 2.2}
             )
             == "caution"
         )
@@ -309,7 +309,7 @@ class TestContractKeysCanonical:
         assert ok["confidence"] == pytest.approx(0.87)
         assert ok["ranked_zones"][0]["safety"] == "safe"
         bad = normalize_contract(
-            [{"zone_id": "z1", "wave_height_m": 3.5, "wind_kt": 8.0}], False, 0.87
+            [{"zone_id": "z1", "wave_height_m": 3.8, "wind_kt": 8.0}], False, 0.87
         )
         assert bad["status"] == "degraded"
         assert bad["confidence"] == pytest.approx(0.62)

@@ -145,12 +145,12 @@ def test_compute_weather_flag(at_log, now, flag):
 @pytest.mark.parametrize(
     "kwargs,danger",
     [
-        ({"wind_kt": 25.1}, True),
-        ({"wind_kt": 25.0}, False),
-        ({"wave_m": 2.6}, True),
-        ({"wave_m": 2.5}, False),
-        ({"current_kt": 2.6}, True),
-        ({"current_kt": 2.5}, False),
+        ({"wind_kt": 27.1}, True),
+        ({"wind_kt": 27.0}, False),
+        ({"wave_m": 3.6}, True),
+        ({"wave_m": 3.5}, False),
+        ({"current_kt": 3.1}, True),
+        ({"current_kt": 3.0}, False),
         ({"pressure_hpa": 994.9}, True),
         ({"pressure_hpa": 995.0}, False),
         ({"wind_kt": 10, "wave_m": 1.0, "current_kt": 1.0, "pressure_hpa": 1013}, False),
