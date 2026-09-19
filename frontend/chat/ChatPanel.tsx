@@ -22,6 +22,7 @@ import {
   ReasoningStep,
   MarineZoneCard,
   SafetyData,
+  filterHumanEvidence,
 } from './useSSEChat';
 import { useApp } from '@/context/AppContext';
 import { AgentWorkflowModal } from '@/components/agent/AgentWorkflowModal';
@@ -120,16 +121,11 @@ export default function ChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
 
-  // Keep reasoning accordion open during streaming for active assistant turn
-  useEffect(() => {
-    const activeStreamingMsg = messages.find((m) => m.isStreaming && m.role === 'assistant');
-    if (activeStreamingMsg && expandedAccordions[activeStreamingMsg.id] === undefined) {
-      setExpandedAccordions((prev) => ({
-        ...prev,
-        [activeStreamingMsg.id]: true,
-      }));
-    }
-  }, [messages, expandedAccordions]);
+  // Ticket #193 (trace UX): the reasoning accordion stays COLLAPSED by
+  // default — even while streaming — so mobile chat reads as advisory
+  // (banner + reply + cards) instead of a debug log. The full trace is
+  // one tap away via the per-message "Workflow" modal. No auto-open
+  // effect here by design; toggleAccordion is the only opener.
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -322,7 +318,92 @@ export default function ChatPanel({
             ) : (
               /* Assistant Message */
               <div className="flex flex-col space-y-2 max-w-[95%]">
-                {/* Collapsible Reasoning Accordion */}
+                {/* Ticket #193: safety banner pinned FIRST — the verdict is
+                    visible without scrolling past the (collapsed) trace. */}
+                {msg.safety && (
+                  <div>
+                    {msg.safety.warning_text?.includes('DO NOT SAIL') ||
+                    msg.safety.danger === 'danger' ||
+                    msg.safety.danger === 'cyclone' ||
+                    msg.safety.badge === 'red' ? (
+                      <div data-testid="safety-banner-danger" role="alert" className="rounded-xl bg-red-950/80 border-2 border-red-600/90 p-3 shadow-lg shadow-red-950/40">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-xl" role="img" aria-label="Danger">
+                            🚨
+                          </span>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-xs font-black uppercase tracking-wider text-red-200">
+                                HIGH RISK ADVISORY: {msg.safety.warning_text || 'DO NOT SAIL'}
+                              </h4>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-800 text-white">
+                                DANGER
+                              </span>
+                            </div>
+                            <p className="text-xs text-red-100 font-medium mt-0.5">
+                              Hazardous sea conditions. Wave height {msg.safety.waves_m ?? '--'}m, wind speed {msg.safety.wind_kts ?? '--'} kts.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : msg.safety.warning_text === 'CAUTION' ||
+                      msg.safety.badge === 'amber' ||
+                      msg.safety.danger === 'caution' ? (
+                      <div data-testid="safety-banner-caution" role="alert" className="rounded-xl bg-amber-950/70 border border-amber-500/80 p-3 shadow-md">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-xl">⚠️</span>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                                SEA ADVISORY: CAUTION
+                              </h4>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-700 text-white">
+                                CAUTION
+                              </span>
+                            </div>
+                            <p className="text-xs text-amber-200/90 mt-0.5">
+                              Moderate sea conditions. Waves {msg.safety.waves_m ?? '--'}m, winds {msg.safety.wind_kts ?? '--'} kts. Proceed with vigilance.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : msg.safety.danger === 'safe' || msg.safety.badge === 'green' ? (
+                      <div data-testid="safety-banner-safe" className="rounded-xl bg-emerald-950/50 border border-emerald-500/50 px-3 py-2 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs text-emerald-300">
+                          <span>✅</span>
+                          <span className="font-semibold">SAFE CONDITIONS</span>
+                          <span className="text-slate-400">
+                            • Waves: {msg.safety.waves_m ?? '--'}m | Wind: {msg.safety.wind_kts ?? '--'} kts
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold bg-emerald-800 px-1.5 py-0.5 rounded text-white">
+                          SAFE
+                        </span>
+                      </div>
+                    ) : (
+                      <div data-testid="safety-banner-caution" role="alert" className="rounded-xl bg-amber-950/70 border border-amber-500/80 p-3 shadow-md">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-xl">⚠️</span>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                                SEA ADVISORY: CAUTION
+                              </h4>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-700 text-white">
+                                CAUTION
+                              </span>
+                            </div>
+                            <p className="text-xs text-amber-200/90 mt-0.5">
+                              Moderate sea conditions. Waves {msg.safety.waves_m ?? '--'}m, winds {msg.safety.wind_kts ?? '--'} kts. Proceed with vigilance.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Collapsible Reasoning Accordion (collapsed by default, #193) */}
                 {msg.reasoning_steps && msg.reasoning_steps.length > 0 && (
                   <div className="rounded-xl bg-slate-900/80 border border-slate-800 overflow-hidden shadow-sm">
                     <div className="w-full px-3 py-2 flex items-center justify-between text-xs bg-slate-900 border-b border-slate-800/60">
@@ -430,71 +511,6 @@ export default function ChatPanel({
                   </div>
                 )}
 
-                {/* High-Visibility Safety Danger Banner */}
-                {msg.safety && (
-                  <div>
-                    {msg.safety.warning_text?.includes('DO NOT SAIL') ||
-                    msg.safety.danger === 'danger' ||
-                    msg.safety.danger === 'cyclone' ||
-                    msg.safety.badge === 'red' ? (
-                      <div data-testid="safety-banner-danger" role="alert" className="rounded-xl bg-red-950/80 border-2 border-red-600/90 p-3 shadow-lg shadow-red-950/40 animate-pulse">
-                        <div className="flex items-center gap-2.5">
-                          <span className="text-xl" role="img" aria-label="Danger">
-                            🚨
-                          </span>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between">
-                              <h4 className="text-xs font-black uppercase tracking-wider text-red-200">
-                                HIGH RISK ADVISORY: {msg.safety.warning_text || 'DO NOT SAIL'}
-                              </h4>
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-800 text-white">
-                                DANGER
-                              </span>
-                            </div>
-                            <p className="text-xs text-red-100 font-medium mt-0.5">
-                              Hazardous sea conditions. Wave height {msg.safety.waves_m ?? '--'}m, wind speed {msg.safety.wind_kts ?? '--'} kts.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : msg.safety.warning_text === 'CAUTION' ||
-                      msg.safety.badge === 'amber' ||
-                      msg.safety.danger === 'caution' ? (
-                      <div data-testid="safety-banner-caution" role="alert" className="rounded-xl bg-amber-950/70 border border-amber-500/80 p-3 shadow-md">
-                        <div className="flex items-center gap-2.5">
-                          <span className="text-xl">⚠️</span>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between">
-                              <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                                SEA ADVISORY: CAUTION
-                              </h4>
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-700 text-white">
-                                CAUTION
-                              </span>
-                            </div>
-                            <p className="text-xs text-amber-200/90 mt-0.5">
-                              Moderate sea conditions. Waves {msg.safety.waves_m ?? '--'}m, winds {msg.safety.wind_kts ?? '--'} kts. Proceed with vigilance.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div data-testid="safety-banner-safe" className="rounded-xl bg-emerald-950/50 border border-emerald-500/50 px-3 py-2 flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-xs text-emerald-300">
-                          <span>✅</span>
-                          <span className="font-semibold">SAFE CONDITIONS</span>
-                          <span className="text-slate-400">
-                            • Waves: {msg.safety.waves_m ?? '0.8'}m | Wind: {msg.safety.wind_kts ?? '10'} kts
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-bold bg-emerald-800 px-1.5 py-0.5 rounded text-white">
-                          SAFE
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {/* Assistant Message Bubble */}
                 <div className="rounded-2xl rounded-tl-sm bg-slate-900 border border-slate-800 p-3.5 text-sm text-slate-100 shadow-md">
                   {msg.content ? (
@@ -526,21 +542,24 @@ export default function ChatPanel({
                     </div>
                   )}
 
-                  {/* Evidence & Latency Footer */}
+                  {/* Evidence & Latency Footer (allowlisted human pills only, #193) */}
                   <div data-testid="evidence-footer" className="mt-3 pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
-                    {msg.evidence && msg.evidence.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-slate-500 font-semibold">Evidence:</span>
-                        {msg.evidence.map((ev, eIdx) => (
-                          <span
-                            key={eIdx}
-                            className="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700"
-                          >
-                            {ev}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {(() => {
+                      const humanEvidence = filterHumanEvidence(msg.evidence);
+                      return humanEvidence.length > 0 ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-slate-500 font-semibold">Evidence:</span>
+                          {humanEvidence.map((ev, eIdx) => (
+                            <span
+                              key={eIdx}
+                              className="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700"
+                            >
+                              {ev}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
 
                     {msg.latency_ms != null && (
                       <span className="font-mono text-slate-500 ml-auto">

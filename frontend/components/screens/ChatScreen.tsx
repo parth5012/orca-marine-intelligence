@@ -26,6 +26,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import {
   useSSEChat,
+  filterHumanEvidence,
   type ChatMessage,
   type MarineZoneCard,
   type SafetyData,
@@ -68,6 +69,9 @@ const QUICK_ACTIONS = [
 ];
 
 function toSafetyStatus(safety?: SafetyData): 'SAFE' | 'CAUTION' | 'AVOID' {
+  // Fail-open to caution: missing/unknown safety never renders SAFE.
+  // Only an explicit safe/green verdict returns SAFE.
+  if (!safety) return 'CAUTION';
   const danger = String(safety?.danger ?? '').toLowerCase();
   const badge = String(safety?.badge ?? '').toLowerCase();
   const text = String(safety?.warning_text ?? '').toUpperCase();
@@ -85,7 +89,10 @@ function toSafetyStatus(safety?: SafetyData): 'SAFE' | 'CAUTION' | 'AVOID' {
   if (danger === 'caution' || badge === 'amber' || text.includes('CAUTION')) {
     return 'CAUTION';
   }
-  return 'SAFE';
+  if (danger === 'safe' || badge === 'green') {
+    return 'SAFE';
+  }
+  return 'CAUTION';
 }
 
 function isDangerSafety(safety?: SafetyData): boolean {
@@ -510,6 +517,76 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                       </div>
                     ) : null}
 
+                    {/* Ticket #193: safety banner pinned FIRST — the verdict
+                        is visible without scrolling past the (collapsed)
+                        trace (match ChatPanel; same testids as live panel). */}
+                    {msg.safety && (
+                      <div>
+                        {isDangerSafety(msg.safety) ? (
+                          <div data-testid="safety-banner-danger" role="alert" className="rounded-xl bg-red-950/80 border-2 border-red-600/90 p-3 shadow-lg shadow-red-950/40">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-xl" role="img" aria-label="Danger">🚨</span>
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="text-xs font-black uppercase tracking-wider text-red-200">
+                                    {isHi ? `उच्च जोखिम सलाह: ${msg.safety.warning_text || 'समुद्र में न जाएँ'}` : `HIGH RISK ADVISORY: ${msg.safety.warning_text || 'DO NOT SAIL'}`}
+                                  </h4>
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-800 text-white">
+                                    {isHi ? 'खतरा' : 'DANGER'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-red-100 font-medium mt-0.5">
+                                  {isHi
+                                    ? `खतरनाक समुद्री स्थिति। लहर ऊँचाई ${msg.safety.waves_m ?? '--'} मी, हवा गति ${msg.safety.wind_kts ?? '--'} नॉट।`
+                                    : `Hazardous sea conditions. Wave height ${msg.safety.waves_m ?? '--'}m, wind speed ${msg.safety.wind_kts ?? '--'} kts.`}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ) : isCautionSafety(msg.safety) ? (
+                          <div data-testid="safety-banner-caution" role="alert" className="rounded-xl bg-amber-950/70 border border-amber-500/80 p-3 shadow-md">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-xl">⚠️</span>
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                                    {isHi ? 'समुद्री सलाह: सावधानी' : 'SEA ADVISORY: CAUTION'}
+                                  </h4>
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-700 text-white">
+                                    {isHi ? 'सावधानी' : 'CAUTION'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-amber-200/90 mt-0.5">
+                                  {isHi
+                                    ? `मध्यम समुद्री स्थिति। लहरें ${msg.safety.waves_m ?? '--'} मी, हवाएँ ${msg.safety.wind_kts ?? '--'} नॉट। सतर्कता से आगे बढ़ें।`
+                                    : `Moderate sea conditions. Waves ${msg.safety.waves_m ?? '--'}m, winds ${msg.safety.wind_kts ?? '--'} kts. Proceed with vigilance.`}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div data-testid="safety-banner-safe" className="rounded-xl bg-emerald-950/50 border border-emerald-500/50 px-3 py-2 flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-xs text-emerald-300">
+                              <span>✅</span>
+                              <span className="font-semibold">{isHi ? 'सुरक्षित स्थिति' : 'SAFE CONDITIONS'}</span>
+                              <span className="text-slate-400">
+                                {isHi
+                                  ? `• लहरें: ${msg.safety.waves_m ?? '--'} मी | हवा: ${msg.safety.wind_kts ?? '--'} नॉट`
+                                  : `• Waves: ${msg.safety.waves_m ?? '--'}m | Wind: ${msg.safety.wind_kts ?? '--'} kts`}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-bold bg-emerald-800 px-1.5 py-0.5 rounded text-white">
+                              {isHi ? 'सुरक्षित' : 'SAFE'}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between mt-2">
+                          <span className={`text-xs font-medium ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{isHi ? 'सुरक्षा स्थिति:' : 'Safety Status:'}</span>
+                          <SafetyStatus status={toSafetyStatus(msg.safety)} size="sm" responseLang={effectiveLang} />
+                        </div>
+                      </div>
+                    )}
+
                     {/* Live multi-agent trace */}
                     {msg.reasoning_steps && msg.reasoning_steps.length > 0 && (
                       <AgentExecutionTrace
@@ -522,73 +599,6 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
                     {/* Rich live response details */}
                     <div className={`mt-3 space-y-3 pt-3 border-t ${isLight ? 'border-slate-100' : 'border-slate-800'}`}>
-                      {/* Safety banner (same testids as the live panel) */}
-                      {msg.safety && (
-                        <div>
-                          {isDangerSafety(msg.safety) ? (
-                            <div data-testid="safety-banner-danger" role="alert" className="rounded-xl bg-red-950/80 border-2 border-red-600/90 p-3 shadow-lg shadow-red-950/40 animate-pulse">
-                              <div className="flex items-center gap-2.5">
-                                <span className="text-xl" role="img" aria-label="Danger">🚨</span>
-                                <div className="flex-1">
-                                  <div className="flex items-center justify-between">
-                                    <h4 className="text-xs font-black uppercase tracking-wider text-red-200">
-                                      {isHi ? `उच्च जोखिम सलाह: ${msg.safety.warning_text || 'समुद्र में न जाएँ'}` : `HIGH RISK ADVISORY: ${msg.safety.warning_text || 'DO NOT SAIL'}`}
-                                    </h4>
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-800 text-white">
-                                      {isHi ? 'खतरा' : 'DANGER'}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-red-100 font-medium mt-0.5">
-                                    {isHi
-                                      ? `खतरनाक समुद्री स्थिति। लहर ऊँचाई ${msg.safety.waves_m ?? '--'} मी, हवा गति ${msg.safety.wind_kts ?? '--'} नॉट।`
-                                      : `Hazardous sea conditions. Wave height ${msg.safety.waves_m ?? '--'}m, wind speed ${msg.safety.wind_kts ?? '--'} kts.`}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          ) : isCautionSafety(msg.safety) ? (
-                            <div data-testid="safety-banner-caution" role="alert" className="rounded-xl bg-amber-950/70 border border-amber-500/80 p-3 shadow-md">
-                              <div className="flex items-center gap-2.5">
-                                <span className="text-xl">⚠️</span>
-                                <div className="flex-1">
-                                  <div className="flex items-center justify-between">
-                                    <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                                      {isHi ? 'समुद्री सलाह: सावधानी' : 'SEA ADVISORY: CAUTION'}
-                                    </h4>
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-700 text-white">
-                                      {isHi ? 'सावधानी' : 'CAUTION'}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-amber-200/90 mt-0.5">
-                                    {isHi
-                                      ? `मध्यम समुद्री स्थिति। लहरें ${msg.safety.waves_m ?? '--'} मी, हवाएँ ${msg.safety.wind_kts ?? '--'} नॉट। सतर्कता से आगे बढ़ें।`
-                                      : `Moderate sea conditions. Waves ${msg.safety.waves_m ?? '--'}m, winds ${msg.safety.wind_kts ?? '--'} kts. Proceed with vigilance.`}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div data-testid="safety-banner-safe" className="rounded-xl bg-emerald-950/50 border border-emerald-500/50 px-3 py-2 flex items-center justify-between">
-                              <div className="flex items-center gap-2 text-xs text-emerald-300">
-                                <span>✅</span>
-                                <span className="font-semibold">{isHi ? 'सुरक्षित स्थिति' : 'SAFE CONDITIONS'}</span>
-                                <span className="text-slate-400">
-                                  {isHi
-                                    ? `• लहरें: ${msg.safety.waves_m ?? '--'} मी | हवा: ${msg.safety.wind_kts ?? '--'} नॉट`
-                                    : `• Waves: ${msg.safety.waves_m ?? '--'}m | Wind: ${msg.safety.wind_kts ?? '--'} kts`}
-                                </span>
-                              </div>
-                              <span className="text-[10px] font-bold bg-emerald-800 px-1.5 py-0.5 rounded text-white">
-                                {isHi ? 'सुरक्षित' : 'SAFE'}
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between mt-2">
-                            <span className={`text-xs font-medium ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{isHi ? 'सुरक्षा स्थिति:' : 'Safety Status:'}</span>
-                            <SafetyStatus status={toSafetyStatus(msg.safety)} size="sm" responseLang={effectiveLang} />
-                          </div>
-                        </div>
-                      )}
 
                       {/* Live summary grid from SSE safety + first zone */}
                       {msg.safety && (msg.safety.waves_m != null || msg.safety.wind_kts != null || msg.zone_cards?.[0]?.sst_c != null) && (
@@ -620,10 +630,16 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                         </div>
                       )}
 
-                      {/* Evidence from live frames */}
-                      {msg.evidence && msg.evidence.length > 0 && (
-                        <EvidenceCard evidence={msg.evidence} confidenceScore={msg.confidence} responseLang={effectiveLang} />
-                      )}
+                      {/* EvidenceCard only for positive zone recommendations
+                          (#193): footer pills stay the canonical evidence
+                          surface, avoiding duplicate evidence rendering. */}
+                      {(() => {
+                        const humanEvidence = filterHumanEvidence(msg.evidence);
+                        const hasZones = (msg.zone_cards?.length ?? 0) > 0;
+                        return humanEvidence.length > 0 && hasZones ? (
+                          <EvidenceCard evidence={humanEvidence} confidenceScore={msg.confidence} responseLang={effectiveLang} />
+                        ) : null;
+                      })()}
 
                       {/* Active hazards from live safety frame */}
                       {msg.safety && toSafetyStatus(msg.safety) !== 'SAFE' && (msg.safety.message || msg.safety.warning_text) && (
@@ -658,21 +674,24 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                         </div>
                       )}
 
-                      {/* Evidence & latency footer */}
+                      {/* Evidence & latency footer (allowlisted human pills only, #193) */}
                       <div data-testid="evidence-footer" className="mt-3 pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
-                        {msg.evidence && msg.evidence.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-slate-500 font-semibold">{isHi ? 'प्रमाण:' : 'Evidence:'}</span>
-                            {msg.evidence.map((ev, eIdx) => (
-                              <span
-                                key={eIdx}
-                                className="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700"
-                              >
-                                {ev}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        {(() => {
+                          const humanEvidence = filterHumanEvidence(msg.evidence);
+                          return humanEvidence.length > 0 ? (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-slate-500 font-semibold">{isHi ? 'प्रमाण:' : 'Evidence:'}</span>
+                              {humanEvidence.map((ev, eIdx) => (
+                                <span
+                                  key={eIdx}
+                                  className="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700"
+                                >
+                                  {ev}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null;
+                        })()}
                         {msg.latency_ms != null && (
                           <span className="font-mono text-slate-500 ml-auto">
                             ⚡ {msg.latency_ms}ms

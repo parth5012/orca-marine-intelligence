@@ -84,6 +84,7 @@ __all__ = [
     "planner_error_to_sse_event",
     "plan_query",
     "generate_structured_plan",
+    "is_internal_trace_line",
 ]
 
 # ---------------------------------------------------------------------------
@@ -462,6 +463,10 @@ def _complete_reasoning_trace(plan: PlannerOutput) -> PlannerOutput:
     mentioned, a transparent completion line is appended (marked as
     auto-added) so auditors can distinguish LLM reasoning from filler.
     Tools never mentioned are also ensured absent from selected_tools.
+
+    Ticket #193: appended filler lines are internal audit
+    (see :func:`is_internal_trace_line`) and are excluded from the
+    human evidence allowlist — they stay in ``reasoning_trace`` only.
     """
     trace = list(plan.reasoning_trace or [])
     mentioned = {t for t in KNOWN_TOOLS if any(_line_refers_to_tool(line, t) for line in trace)}
@@ -487,6 +492,32 @@ def _complete_reasoning_trace(plan: PlannerOutput) -> PlannerOutput:
     plan.reasoning_trace = trace
     plan.selected_tools = selected
     return plan
+
+
+def is_internal_trace_line(line: object) -> bool:
+    """Tag auto-filler trace lines as internal (ticket #193).
+
+    Auto-completion lines appended by :func:`_complete_reasoning_trace`
+    (``trace line auto-added`` / ``trace completion`` /
+    ``planner gave no justification``) are audit filler, not human
+    evidence. The backend evidence allowlist
+    (``backend/agents/graph.py::is_human_evidence``) and the frontend
+    evidence filter drop these lines so mobile chat reads as advisory,
+    not a debug log. The full trace — including these lines — stays in
+    ``reasoning_trace`` for the Workflow modal / auditors.
+    """
+    if not isinstance(line, str) or not line.strip():
+        return True
+    lowered = line.strip().lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "trace line auto-added",
+            "trace completion",
+            "planner gave no justification",
+            "llm gave no explicit justification",
+        )
+    )
 
 
 def validate_and_normalize_plan(

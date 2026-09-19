@@ -12,9 +12,10 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle2, ShieldCheck, Database, Info } from 'lucide-react';
+import { CheckCircle2, ShieldCheck, Database, Info, AlertTriangle } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { motion } from 'framer-motion';
+import { filterHumanEvidence } from '@/chat/useSSEChat';
 
 interface EvidenceCardProps {
   evidence: string[];
@@ -89,8 +90,12 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
   const resolvedUpdated = lastUpdated ?? (isHi ? 'लाइव सलाह स्ट्रीम' : 'Live advisory stream');
   const answered = answeredSources ?? DATA_SOURCES;
   const pct = toPercent(confidenceScore);
+  // Ticket #193: render allowlisted human pills only — raw trace /
+  // internals (SELECT/SKIP, auto-filler, open_meteo ids, __M*__ spans)
+  // never reach the chat surface even if a caller passes them raw.
+  const humanEvidence = filterHumanEvidence(evidence);
 
-  if (!evidence || evidence.length === 0) return null;
+  if (!humanEvidence || humanEvidence.length === 0) return null;
 
   return (
     <div
@@ -157,12 +162,21 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({
         animate="show"
         className={`space-y-2.5 text-xs sm:text-sm font-medium ${isLight ? 'text-slate-700' : 'text-slate-200'}`}
       >
-        {evidence.map((item, idx) => (
-          <motion.li key={idx} variants={listItem} className="flex items-start gap-2.5 p-1 rounded-lg hover:bg-cyan-500/5 transition-colors">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-            <span className="leading-snug">{item}</span>
-          </motion.li>
-        ))}
+        {humanEvidence.map((item, idx) => {
+          // Warning-flavoured evidence (banned/violation/cyclone) gets an
+          // amber alert icon, never a green check.
+          const isWarning = /warning|banned|violation|cyclone/i.test(item);
+          return (
+            <motion.li key={idx} variants={listItem} className="flex items-start gap-2.5 p-1 rounded-lg hover:bg-cyan-500/5 transition-colors">
+              {isWarning ? (
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+              )}
+              <span className="leading-snug">{item}</span>
+            </motion.li>
+          );
+        })}
       </motion.ul>
 
       {resolvedSource && (

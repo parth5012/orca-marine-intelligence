@@ -137,6 +137,129 @@ PLANNER_CALL_TIMEOUT_S = float(os.getenv("ORCA_PLANNER_TIMEOUT_MS", "5000")) / 1
 KOCHI_FALLBACK_LOCATION = {"lat": 9.93, "lon": 76.26}
 
 # ---------------------------------------------------------------------------
+# Trace UX (#193) — human-readable evidence allowlist
+# ---------------------------------------------------------------------------
+# Mobile chat must read as advisory, not a debug log: multi-agent
+# reasoning stays in ``reasoning_trace`` (Workflow modal / auditors) while
+# ``evidence`` carries only human-readable items — INCOIS citation,
+# Wave/Wind human labels, geofence verdict, forecast window. Raw internals
+# (planner SELECT/SKIP lines, auto-filler completion lines, ``open_meteo``
+# source ids, ``selected_*`` fields, ``__M*__`` mask spans) are dropped.
+# System lines for non-advisory turns (chitchat / clarification /
+# no-location prompts) are human-readable and pass through unchanged.
+_HUMAN_SOURCE_LABELS: dict[str, str] = {
+    "open_meteo_live": "live model",
+    "marine_data_package": "archived climatology",
+    "mock_heuristic": "model estimate",
+}
+
+_INTERNAL_TRACE_MARKERS: tuple[str, ...] = (
+    "trace line auto-added",
+    "trace completion",
+    "planner gave no justification",
+    "llm gave no explicit justification",
+)
+
+# Planner SELECT/SKIP audit prefixes — internal reasoning, never evidence.
+_TRACE_PREFIXES: tuple[str, ...] = ("SELECT ", "SKIP ")
+
+# Geofence/safety verdict vocabulary (danger_agent warnings are spelled
+# out — "Exclusive Economic Zone", "Marine Protected Area" — so match
+# words, not just the EEZ/MPA abbreviations).
+_GEOFENCE_TOKENS: tuple[str, ...] = (
+    "eez",
+    "mpa",
+    "violation",
+    "warning",
+    "banned",
+    "not permitted",
+    "protected area",
+    "exclusive economic zone",
+    "boundary",
+    "imbl",
+    "geofence",
+    "cyclone",
+    "lightning",
+)
+
+
+def human_source_label(source: object) -> str:
+    """Map a raw telemetry source id to a human-readable evidence label."""
+    src = str(source or "").strip()
+    if not src or src.lower() == "unknown":
+        return "live observation"
+    return _HUMAN_SOURCE_LABELS.get(src, src.replace("_", " "))
+
+
+def is_internal_trace_line(line: object) -> bool:
+    """Mirror of planner_service.is_internal_trace_line (no import cycle)."""
+    if not isinstance(line, str) or not line.strip():
+        return True
+    return any(m in line.strip().lower() for m in _INTERNAL_TRACE_MARKERS)
+
+
+def is_human_evidence(item: object) -> bool:
+    """Allowlist check for a single evidence string (ticket #193)."""
+    if not isinstance(item, str) or not item.strip():
+        return False
+    s = item.strip()
+    lowered = s.lower()
+    # Raw internals never pass, even inside otherwise-valid lines.
+    if any(tok in s for tok in ("__M", "open_meteo")) or "selected_" in lowered:
+        return False
+    if is_internal_trace_line(s):
+        return False
+    # Planner audit lines (explicit LLM justification or skip notes).
+    if s.startswith(_TRACE_PREFIXES):
+        return False
+    if lowered.startswith("fuzzy port match:"):
+        return False
+    for tool in (
+        "find_fishing_zones",
+        "check_ocean_state",
+        "check_weather",
+        "check_geofence",
+    ):
+        if lowered.startswith(tool):
+            return False
+    # System lines for non-advisory turns stay verbatim.
+    if (
+        "conversational reply" in lowered
+        or "clarification requested" in lowered
+        or "location not provided" in lowered
+    ):
+        return True
+    # Advisory allowlist: INCOIS citation, Wave/Wind labels,
+    # geofence verdict, forecast window.
+    if s.startswith("INCOIS"):
+        return True
+    if s.startswith("Wave:") or s.startswith("Wind:"):
+        # Reject raw source ids (marine_data_package, mock_heuristic,
+        # open_meteo_live) — only human labels pass (no underscores).
+        _val = s.split(":", 1)[1] if ":" in s else ""
+        if "_" in _val:
+            return False
+        return True
+    if any(tok in lowered for tok in _GEOFENCE_TOKENS):
+        return True
+    if "forecast" in lowered:
+        return True
+    return False
+
+
+def filter_human_evidence(items: object) -> list[str]:
+    """Keep only human-readable evidence strings, deduped, order-stable."""
+    if isinstance(items, str):
+        items = [items]
+    if not isinstance(items, list):
+        return []
+    out: list[str] = []
+    for e in items:
+        if isinstance(e, str) and e.strip() and is_human_evidence(e) and e not in out:
+            out.append(e)
+    return out
+
+# ---------------------------------------------------------------------------
 # Lazy imports — keep graph importable even if langgraph not installed
 # ---------------------------------------------------------------------------
 # Upstream warning: installed langgraph's cache base imports JsonPlusSerializer
@@ -1126,11 +1249,10 @@ async def decision_agent(state: ORCAState) -> dict:
                     )
             except Exception:
                 pass
-        reasoning_trace = list(state.get("reasoning_trace") or [])
+        # Ticket #193: clarification evidence is the human GPS prompt only.
+        # The reasoning trace stays in state for the Workflow modal and
+        # never rides into evidence (advisory, not debug log).
         evidence_clar: list[str] = ["Clarification requested — GPS/location required for PFZ search"]
-        for line in reasoning_trace:
-            if isinstance(line, str) and line and line not in evidence_clar:
-                evidence_clar.append(line)
         return {
             "combined": None,
             "best": None,
@@ -1289,11 +1411,13 @@ async def decision_agent(state: ORCAState) -> dict:
     if sea and isinstance(sea[0], dict):
         src = sea[0].get("source")
         if src and src != "unknown":
-            evidence.append(f"Wave: {src}")
+            # Ticket #193: human label, never the raw source id
+            # (e.g. "open_meteo_live") — raw ids fail the allowlist.
+            evidence.append(f"Wave: {human_source_label(src)}")
     if weather and isinstance(weather[0], dict):
         src = weather[0].get("source")
         if src and src != "unknown":
-            evidence.append(f"Wind: {src}")
+            evidence.append(f"Wind: {human_source_label(src)}")
     if danger and isinstance(danger[0], dict):
         warnings = danger[0].get("warnings") or []
         for w in warnings:
@@ -1302,16 +1426,12 @@ async def decision_agent(state: ORCAState) -> dict:
         if not any("MPA" in e or "EEZ" in e for e in evidence):
             evidence.append("No EEZ/MPA violation")
 
-    # Evidence & trace propagation (ticket #32): planner reasoning_trace
-    # rides in graph state and is appended to final evidence citations
-    # (after the INCOIS citation so evidence[0] stays stable for tests).
-    try:
-        _trace = state.get("reasoning_trace") or []
-        for _line in _trace:
-            if isinstance(_line, str) and _line and _line not in evidence:
-                evidence.append(_line)
-    except Exception:
-        pass
+    # Ticket #193: planner reasoning_trace NO LONGER rides into evidence.
+    # The full trace stays in state["reasoning_trace"] for the Workflow
+    # modal / auditors; evidence keeps the human allowlist only
+    # (INCOIS citation + Wave/Wind labels + geofence verdict + forecast
+    # window). Defense-in-depth: filter even though no trace is appended.
+    evidence = filter_human_evidence(evidence)
 
     degraded = bool(state.get("degraded"))
     confidence = DEGRADED_CONFIDENCE if degraded or not best else DEFAULT_CONFIDENCE
@@ -1746,12 +1866,12 @@ async def orchestrate_via_graph(
             "Chennai so I can find safe fishing zones near you."
         )
         reasoning_trace = list(final.get("reasoning_trace") or [])
+        # Ticket #193: human GPS prompt + allowlisted decision evidence
+        # only — reasoning trace stays in `reasoning_trace` for the
+        # Workflow modal, never in evidence.
         evidence_clar: list[str] = ["Clarification requested — GPS/location required for PFZ search"]
-        for _line in reasoning_trace:
-            if isinstance(_line, str) and _line and _line not in evidence_clar:
-                evidence_clar.append(_line)
-        # Merge decision_agent evidence when present (already includes trace).
-        for _e in final.get("evidence") or []:
+        # Merge decision_agent evidence when present (already allowlisted).
+        for _e in filter_human_evidence(final.get("evidence") or []):
             if _e not in evidence_clar:
                 evidence_clar.append(str(_e))
         return {
@@ -2010,7 +2130,8 @@ async def orchestrate_stream_via_graph(
         _fb_ev = _fb.get("evidence") or ["INCOIS TextData"]
         if isinstance(_fb_ev, str):
             _fb_ev = [_fb_ev]
-        yield {"type": "evidence", "items": [str(e) for e in _fb_ev if e] or ["INCOIS TextData"]}
+        _fb_items = filter_human_evidence([str(e) for e in _fb_ev if e])
+        yield {"type": "evidence", "items": _fb_items or ["INCOIS TextData"]}
         yield {
             "type": "done",
             "language": _fb.get("language") or language,
@@ -2602,9 +2723,9 @@ async def orchestrate_stream_via_graph(
         # MAJ-02: clarification tail surfaces decision evidence when present.
         _tail_ev = decision_out.get("evidence") if isinstance(decision_out, dict) else None
         if isinstance(_tail_ev, list) and any(_tail_ev):
-            _tail_items = [str(e) for e in _tail_ev if e]
+            _tail_items = filter_human_evidence([str(e) for e in _tail_ev if e])
         elif isinstance(_tail_ev, str) and _tail_ev:
-            _tail_items = [_tail_ev]
+            _tail_items = filter_human_evidence([_tail_ev])
         else:
             _tail_items = ["Location not provided — cannot search PFZ zones"]
         yield {"type": "evidence", "items": _tail_items or ["Location not provided — cannot search PFZ zones"]}
@@ -2721,6 +2842,11 @@ async def orchestrate_stream_via_graph(
     if isinstance(evidence, str):
         evidence = [evidence]
     evidence = [str(e) for e in evidence if e]
+    # Ticket #193: evidence on the wire keeps the human allowlist only
+    # (INCOIS citation + Wave/Wind labels + geofence verdict + forecast
+    # window). Full reasoning stays in `reasoning_trace` for the Workflow
+    # modal — never in the streamed evidence frame.
+    evidence = filter_human_evidence(evidence)
     yield {"type": "evidence", "items": evidence or ["INCOIS TextData"]}
     total_s = time.perf_counter() - t0
     if total_s > P95_BUDGET_S:
