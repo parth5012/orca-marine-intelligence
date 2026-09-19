@@ -23,6 +23,7 @@ import {
   MarineZoneCard,
   SafetyData,
   filterHumanEvidence,
+  isDangerVeto,
 } from './useSSEChat';
 import { useApp } from '@/context/AppContext';
 import { AgentWorkflowModal } from '@/components/agent/AgentWorkflowModal';
@@ -569,8 +570,10 @@ export default function ChatPanel({
                   </div>
                 </div>
 
-                {/* Structured Marine Zone Cards */}
-                {msg.zone_cards && msg.zone_cards.length > 0 && (
+                {/* Structured Marine Zone Cards — veto (#197 choice a):
+                    DO NOT SAIL shows banner only, never cards. CAUTION/SAFE
+                    still render cards. */}
+                {msg.zone_cards && msg.zone_cards.length > 0 && !isDangerVeto(msg.safety) && (
                   <div className="space-y-2 pt-1">
                     <div className="flex items-center justify-between px-1">
                       <h4 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">

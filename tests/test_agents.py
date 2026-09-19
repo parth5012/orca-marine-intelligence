@@ -634,13 +634,22 @@ class TestCombiner:
         weather = [{"zone_id": "z1", "wind_kt": 30.0}]
         danger = [{"zone_id": "z1", "inside_eez": True, "inside_mpa": False}]
         result = combine_and_rank(fish, sea, weather, danger, {"lat": 9.93, "lon": 76.26})
-        bd = result["best"]["score_breakdown"]
+        # Veto (#197 choice a): single unsafe zone ships zero cards + reason.
+        # Scoring degradation is still observable via top-level score_breakdown.
+        assert result["all_unsafe"] is True
+        assert result["ranked_zones"] == []
+        assert result["best"] is None
+        assert "DO NOT SAIL" in result["explanation"]
+        bd = result["score_breakdown"]
         assert bd["safe_sea"] == pytest.approx(0.0, abs=0.0001)
         assert bd["wind_ok"] == pytest.approx(0.0, abs=0.0001)
         # banned
         danger2 = [{"zone_id": "z1", "inside_eez": False, "inside_mpa": False}]
         result2 = combine_and_rank(fish, sea, weather, danger2, {"lat": 9.93, "lon": 76.26})
-        assert result2["best"]["score_breakdown"]["not_banned"] == 0.0
+        assert result2["score_breakdown"]["not_banned"] == 0.0
+        assert result2["ranked_zones"] == []
+        assert result2["best"] is None
+        assert result2["all_unsafe"] is True
 
     def test_benchmark_pallithottam_beats_mampally(self):
         """Pallithottam 12km/0.8m calm beats closer Mampally 8km/2.8m rough."""
@@ -686,7 +695,9 @@ class TestCombiner:
         result = combine_and_rank(fish, sea, weather, danger, {"lat": 9.93, "lon": 76.26})
         assert result["all_unsafe"] is True
         assert "DO NOT SAIL" in result["explanation"] or "Do NOT sail" in result["explanation"]
-        assert result["best"] is not None
+        # Veto (#197 choice a): DO NOT SAIL ships zero cards + reason.
+        assert result["ranked_zones"] == []
+        assert result["best"] is None
 
     def test_empty_fish_returns_no_best(self):
         from backend.agents.combiner import combine_and_rank
@@ -985,3 +996,87 @@ class TestOrchestrator:
                                 result = await orchestrator.orchestrate(query="Where is fish near Kochi?", language="en", location=None, session_id="test-kochi")
         assert result["map"]["center"] is not None
         assert result["confidence"] == pytest.approx(0.87, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# Veto contradiction (#197 choice a): DO NOT SAIL never ships fish zones
+# ---------------------------------------------------------------------------
+
+class TestVetoContradiction:
+    """decision_agent enforces banner-only on veto; CAUTION/SAFE keep cards."""
+
+    def _rough_state(self):
+        return {
+            "fish_results": [
+                {"zone_id": "z1", "place": "Rough1", "sector": "K", "lat": 10.0, "lon": 76.0, "distance_from_user_km": 8.0},
+                {"zone_id": "z2", "place": "Rough2", "sector": "K", "lat": 10.1, "lon": 76.1, "distance_from_user_km": 12.0},
+            ],
+            "sea_results": [
+                {"zone_id": "z1", "wave_height_m": 3.0},
+                {"zone_id": "z2", "wave_height_m": 2.8},
+            ],
+            "weather_results": [
+                {"zone_id": "z1", "wind_kt": 30.0},
+                {"zone_id": "z2", "wind_kt": 28.0},
+            ],
+            "danger_results": [
+                {"zone_id": "z1", "inside_eez": True, "inside_mpa": False},
+                {"zone_id": "z2", "inside_eez": True, "inside_mpa": False},
+            ],
+            "user_location": {"lat": 9.93, "lon": 76.26},
+            "language": "en",
+        }
+
+    @pytest.mark.asyncio
+    async def test_decision_agent_veto_empties_map_and_forces_red(self):
+        from backend.agents.graph import decision_agent
+        out = await decision_agent(self._rough_state())
+        assert out["combined"]["all_unsafe"] is True
+        assert out["best"] is None
+        assert out["ranked_zones"] == []
+        # Streaming map event shape: no pfz_features on veto, no route.
+        assert out["map"]["pfz_features"] == []
+        assert out["map"]["route"] == []
+        assert out["safety"]["badge"] == "red"
+        assert out["safety"]["danger"] == "danger"
+        assert "DO NOT SAIL" in (out["reply"] or out["explanation"])
+
+    @pytest.mark.asyncio
+    async def test_decision_agent_banned_best_empties_map(self):
+        from backend.agents.graph import decision_agent
+        state = {
+            "fish_results": [
+                {"zone_id": "z1", "place": "BannedBay", "sector": "K", "lat": 10.0, "lon": 76.0, "distance_from_user_km": 5.0},
+            ],
+            "sea_results": [{"zone_id": "z1", "wave_height_m": 0.8}],
+            "weather_results": [{"zone_id": "z1", "wind_kt": 8.0}],
+            "danger_results": [{"zone_id": "z1", "inside_eez": True, "inside_mpa": True}],
+            "user_location": {"lat": 9.93, "lon": 76.26},
+            "language": "en",
+        }
+        out = await decision_agent(state)
+        assert out["combined"]["all_unsafe"] is True
+        assert out["best"] is None
+        assert out["map"]["pfz_features"] == []
+        assert out["safety"]["badge"] == "red"
+        assert out["safety"]["danger"] == "danger"
+        assert "DO NOT SAIL" in (out["reply"] or out["explanation"])
+
+    @pytest.mark.asyncio
+    async def test_decision_agent_safe_still_ships_cards(self):
+        from backend.agents.graph import decision_agent
+        state = {
+            "fish_results": [
+                {"zone_id": "z1", "place": "Calm", "sector": "K", "lat": 10.0, "lon": 76.0, "distance_from_user_km": 5.0},
+            ],
+            "sea_results": [{"zone_id": "z1", "wave_height_m": 0.8, "status": "safe"}],
+            "weather_results": [{"zone_id": "z1", "wind_kt": 8.0, "status": "safe"}],
+            "danger_results": [{"zone_id": "z1", "inside_eez": True, "inside_mpa": False, "status": "safe", "warnings": []}],
+            "user_location": {"lat": 9.93, "lon": 76.26},
+            "language": "en",
+        }
+        out = await decision_agent(state)
+        assert out["combined"]["all_unsafe"] is False
+        assert out["best"] is not None
+        assert len(out["map"]["pfz_features"]) == 1
+        assert out["safety"]["badge"] == "green"

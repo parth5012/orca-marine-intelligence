@@ -183,6 +183,16 @@ function toSafety(props: any): 'safe' | 'caution' | 'danger' | 'unknown' {
   return 'unknown';
 }
 
+// Veto (#197 choice a): DO NOT SAIL never ships fish zones — banner only.
+// Single helper so ChatPanel + hook agree on the veto condition.
+export function isDangerVeto(safety?: SafetyData | null): boolean {
+  if (!safety) return false;
+  if (safety.danger === 'danger' || safety.danger === 'cyclone' || safety.badge === 'red') return true;
+  const w = String(safety.warning_text || '').toUpperCase();
+  if (w.includes('DO NOT SAIL') || w.includes('CYCLONE WARNING')) return true;
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Trace UX (#193) — human-readable evidence allowlist (mirrors
 // backend/agents/graph.py::is_human_evidence). Mobile chat reads as
@@ -662,6 +672,22 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                   const pfzFeatures = parsed.pfz_features || parsed.features || [];
                   const route = parsed.route || [];
 
+                  // Veto (#197 choice a): suppress cards/highlight on DO NOT SAIL.
+                  // Map may arrive before safety — safety/done handlers clear
+                  // retroactively; when safety is already vetoed, drop now.
+                  if (isDangerVeto(updated.safety)) {
+                    updated.map_data = {
+                      center,
+                      pfz_features: [],
+                      route: [],
+                      provisional: parsed.provisional,
+                    };
+                    updated.zone_cards = [];
+                    options.onMapHighlight?.([]);
+                    options.onRouteChange?.(null);
+                    break;
+                  }
+
                   updated.map_data = {
                     center,
                     pfz_features: pfzFeatures,
@@ -750,6 +776,21 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
                   updated.safety = safetyObj;
                   options.onSafetyUpdate?.(safetyObj);
+                  // Veto (#197 choice a): banner-only on DO NOT SAIL — clear
+                  // any cards built from an earlier provisional map and
+                  // suppress map highlight + route.
+                  if (isDangerVeto(safetyObj)) {
+                    updated.zone_cards = [];
+                    if (updated.map_data) {
+                      updated.map_data = {
+                        ...updated.map_data,
+                        pfz_features: [],
+                        route: [],
+                      };
+                    }
+                    options.onMapHighlight?.([]);
+                    options.onRouteChange?.(null);
+                  }
                   break;
                 }
 
@@ -774,6 +815,18 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
                   updated.isStreaming = false;
                   updated.latency_ms = Date.now() - startTime;
                   updated.confidence = parsed.confidence;
+                  // Veto (#197 choice a): done never reintroduces cards —
+                  // banner-only enforced even if a late map raced safety.
+                  if (isDangerVeto(updated.safety)) {
+                    updated.zone_cards = [];
+                    if (updated.map_data) {
+                      updated.map_data = {
+                        ...updated.map_data,
+                        pfz_features: [],
+                        route: [],
+                      };
+                    }
+                  }
                   if (typeof parsed.response_language === 'string') {
                     updated.response_language = parsed.response_language;
                   }
