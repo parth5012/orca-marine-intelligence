@@ -658,7 +658,7 @@ _ENGLISH_EDGE_SEED: list[dict[str, Any]] = [
 
 
 def _find_parquet_features_file() -> Path | None:
-    base = Path(__file__).resolve().parents[3]
+    base = Path(__file__).resolve().parents[2]
     candidates = [
         base / "data" / "marine_data_package" / "marine-data" / "unified" / "marine_features" / "coastal_point_features.parquet",
         base / "data" / "coastal_point_features.parquet",
@@ -792,7 +792,15 @@ def load_golden_v1(path: str = "data/golden_v1.json", limit: int | None = None) 
     Loads frozen multilingual benchmark dataset from data/golden_v1.json.
     Falls back to load_marine_eval_dataset() with a warning if the file does not exist.
     """
-    golden_path = Path(path)
+    p = Path(path)
+    if not p.is_absolute():
+        repo_root = Path(__file__).resolve().parents[2]
+        golden_path = repo_root / path
+        if not golden_path.exists():
+            golden_path = p
+    else:
+        golden_path = p
+
     if not golden_path.exists():
         logger.warning(
             "Golden v1 dataset file not found at %s; falling back to default marine eval dataset.",
@@ -853,10 +861,19 @@ def sync_dataset_to_langsmith(
             description="ORCA Marine Intelligence benchmark evaluation dataset (ISRO SIH 26176)",
         )
         for ex in dataset:
+            outputs = dict(ex.reference)
+            if ex.frozen_reply:
+                outputs["frozen_reply"] = ex.frozen_reply
+            metadata = dict(ex.metadata)
+            metadata["language"] = ex.language
+            if ex.query_vernacular:
+                metadata["query_vernacular"] = ex.query_vernacular
+            metadata["invariants"] = ex.invariants
+
             client.create_example(
                 inputs=ex.inputs,
-                outputs=ex.reference,
-                metadata=ex.metadata,
+                outputs=outputs,
+                metadata=metadata,
                 dataset_id=ls_dataset.id,
             )
         logger.info("Successfully created LangSmith dataset '%s' (%d examples)", dataset_name, len(dataset))
@@ -864,3 +881,21 @@ def sync_dataset_to_langsmith(
     except Exception as exc:
         logger.warning("LangSmith dataset sync encountered an error: %s", exc)
         return None
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ORCA Marine Benchmark Dataset CLI")
+    parser.add_argument("--sync", action="store_true", help="Sync dataset to LangSmith")
+    parser.add_argument("--name", default="orca-golden-v1", help="LangSmith dataset name")
+    parser.add_argument("--dataset", default=None, help="Path to golden dataset JSON")
+    args = parser.parse_args()
+
+    if args.sync:
+        if args.dataset:
+            ds = load_golden_v1(args.dataset)
+        else:
+            ds = load_golden_v1() if Path("data/golden_v1.json").exists() else load_marine_eval_dataset()
+        res = sync_dataset_to_langsmith(dataset_name=args.name, dataset=ds)
+        print(f"Sync result: {res}")
