@@ -1291,6 +1291,58 @@ async def decision_agent(state: ORCAState) -> dict:
     citation = combined.get("citation") or "INCOIS TextData"
     explanation = combined.get("explanation") or ""
 
+    # Veto (#197 choice a): DO NOT SAIL never ships fish zones.
+    # Canonical banned flag (#196) — reuse, don't redefine.
+    try:
+        from backend.agents.safety_thresholds import is_banned as _is_banned_veto
+    except ImportError:
+        try:
+            from agents.safety_thresholds import is_banned as _is_banned_veto  # type: ignore
+        except ImportError:
+            _is_banned_veto = lambda _mpa, _eez: bool(_mpa) or (_eez is False)  # type: ignore
+    try:
+        _veto_flag = bool((combined or {}).get("all_unsafe"))
+    except Exception:
+        _veto_flag = False
+    try:
+        _bv = best if isinstance(best, dict) else {}
+        _banned_veto = bool(_is_banned_veto(_bv.get("inside_mpa"), _bv.get("inside_eez")))
+    except Exception:
+        _banned_veto = False
+    _vetoed = bool(_veto_flag or _banned_veto)
+    _veto_waves: Any = None
+    _veto_wind: Any = None
+    if _vetoed:
+        # Preserve metric context for the red banner before clearing zones.
+        # Combiner already clears best on veto, so fall back to the first
+        # sea/weather readings when best is gone (banner numbers, not zones).
+        try:
+            if isinstance(best, dict):
+                _veto_waves = best.get("wave_height_m")
+                _veto_wind = best.get("wind_kt") if best.get("wind_kt") is not None else best.get("wind_speed_kt")
+        except Exception:
+            pass
+        if _veto_waves is None:
+            try:
+                _s0 = sea[0] if sea and isinstance(sea[0], dict) else {}
+                _veto_waves = _s0.get("wave_height_m", _s0.get("wave_m"))
+            except Exception:
+                pass
+        if _veto_wind is None:
+            try:
+                _w0 = weather[0] if weather and isinstance(weather[0], dict) else {}
+                _veto_wind = _w0.get("wind_kt", _w0.get("wind_speed_kt"))
+            except Exception:
+                pass
+        best = None
+        ranked = []
+        try:
+            combined["ranked_zones"] = []
+            combined["best"] = None
+            combined["all_unsafe"] = True
+        except Exception:
+            pass
+
     # Weather-led reply: when the planner skipped find_fishing_zones
     # (weather/safety-only query), the combiner still ranks placeholder
     # rows and renders a fishing template ("ranked #1..."). Answer the
@@ -1347,8 +1399,12 @@ async def decision_agent(state: ORCAState) -> dict:
             logger.debug("graph.decision: weather-led reply skipped (%s)", _wle)
 
     # Build payload fragments (mirrors orchestrator._to_geojson_features etc.)
-    pfz_features = _to_geojson_features(ranked)
-    if best and best.get("lat") is not None:
+    # Veto (#197 choice a): never ship zones / highlight on DO NOT SAIL.
+    pfz_features = [] if _vetoed else _to_geojson_features(ranked)
+    if _vetoed:
+        center = [float(user_location["lon"]), float(user_location["lat"])] if user_location else None
+        route = []
+    elif best and best.get("lat") is not None:
         try:
             center = [float(best["lon"]), float(best["lat"])]
             route = [[float(user_location["lon"]), float(user_location["lat"])], [float(best["lon"]), float(best["lat"])]]
@@ -1361,7 +1417,10 @@ async def decision_agent(state: ORCAState) -> dict:
 
     # safety badge reasoning — autonomous decision per sub-agent outputs.
     # Empty result lists mean "unknown" (skipped/failed checks), never safe.
-    if best:
+    # Veto (#197 choice a): red/danger even with zero cards (best cleared).
+    if _vetoed:
+        safety = {"waves_m": _veto_waves, "wind_kts": _veto_wind, "danger": "danger", "badge": "red"}
+    elif best:
         sea_s = "safe" if sea else "unknown"
         wind_s = "safe" if weather else "unknown"
         danger_s = "safe" if danger else "unknown"
@@ -1389,13 +1448,14 @@ async def decision_agent(state: ORCAState) -> dict:
         # Veto parity: combiner all_unsafe / banned (outside EEZ, inside MPA)
         # must force red+DANGER even when per-zone danger lookup missed
         # (e.g. zone_id mismatch) — badge previously stayed green vs DO NOT SAIL text.
+        # Canonical is_banned (#196) via _is_banned_veto — do not redefine.
         try:
             _veto = bool((combined or {}).get("all_unsafe"))
         except Exception:
             _veto = False
         _b = best or {}
         try:
-            _banned = bool(_b.get("inside_mpa")) or (_b.get("inside_eez") is False)
+            _banned = bool(_is_banned_veto(_b.get("inside_mpa"), _b.get("inside_eez")))
         except Exception:
             _banned = False
         if _veto or _banned:
@@ -2348,12 +2408,17 @@ async def orchestrate_stream_via_graph(
             danger_field = "unknown"
         # Veto parity (mirror decision_agent): combiner all_unsafe / banned
         # forces red+DANGER even on zone_id lookup miss.
+        # Canonical is_banned (#196) — do not redefine.
         try:
             _veto = bool((combined or {}).get("all_unsafe"))
         except Exception:
             _veto = False
         try:
-            _banned = bool(best.get("inside_mpa")) or (best.get("inside_eez") is False)
+            from backend.agents.safety_thresholds import is_banned as _is_banned_prov
+        except ImportError:
+            _is_banned_prov = lambda _mpa, _eez: bool(_mpa) or (_eez is False)  # type: ignore
+        try:
+            _banned = bool(_is_banned_prov(best.get("inside_mpa"), best.get("inside_eez")))
         except Exception:
             _banned = False
         if _veto or _banned:

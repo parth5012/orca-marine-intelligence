@@ -614,6 +614,15 @@ def combine_and_rank(
 
     best = ranked[0] if ranked else None
 
+    # Veto (#197 choice a): banned best forces DO NOT SAIL even when not
+    # every zone breaches. Canonical is_banned (#196) — do not redefine.
+    if best is not None and not all_unsafe:
+        try:
+            if is_banned(best.get("inside_mpa"), best.get("inside_eez")):
+                all_unsafe = True
+        except Exception:
+            pass
+
     # Generate citation: INCOIS TextData {sector} {place} {date}
     if best:
         # sector may be human name like KERALA; keep as is, uppercase sector code variant?
@@ -832,8 +841,8 @@ def combine_and_rank(
             if satellite_text:
                 _localized = f"{_localized} {satellite_text}".strip()
             return {
-                "ranked_zones": ranked,
-                "best": best_out,
+                "ranked_zones": [] if all_unsafe else ranked,
+                "best": None if all_unsafe else best_out,
                 "explanation": _localized,
                 "explanation_en": explanation,
                 "localized_reply": _localized,
@@ -846,9 +855,11 @@ def combine_and_rank(
         except Exception:
             pass  # fall through to English explanation (graceful degrade)
 
+    # Veto (#197 choice a): DO NOT SAIL never ships fish zones — empty
+    # ranked/best but keep explanation (reason) + citation + all_unsafe.
     return {
-        "ranked_zones": ranked,
-        "best": best_out,
+        "ranked_zones": [] if all_unsafe else ranked,
+        "best": None if all_unsafe else best_out,
         "explanation": explanation,
         "localized_reply": explanation,
         "detected_language": lang_code,
