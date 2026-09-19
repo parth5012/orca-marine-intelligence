@@ -136,6 +136,526 @@ _HIGH_RISK_EDGE_CASES = [
     },
 ]
 
+_ENGLISH_EDGE_SEED: list[dict[str, Any]] = [
+    # Bucket 1: PFZ (~5 cases)
+    {
+        "id": "ENG_PFZ_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Are there good fishing zones near Kochi port?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "pfz", "notes": "Near port query"},
+    },
+    {
+        "id": "ENG_PFZ_02",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Find PFZ coordinates near 9.93 N, 76.26 E"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "pfz", "notes": "Explicit GPS query"},
+    },
+    {
+        "id": "ENG_PFZ_03",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.84, "longitude": 76.26, "query": "Show fishing zones 10km south of Kochi"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "pfz", "notes": "Relative offset 10km south"},
+    },
+    {
+        "id": "ENG_PFZ_04",
+        "landing_center": "Munambam",
+        "inputs": {"latitude": 10.18, "longitude": 76.18, "query": "Any fish near mulambam?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "pfz", "notes": "Typo in landing center mulambam"},
+    },
+    {
+        "id": "ENG_PFZ_05",
+        "landing_center": "Visakhapatnam",
+        "inputs": {"latitude": 17.68, "longitude": 83.21, "query": "Where to fish off Vizag?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "pfz", "notes": "Port alias Vizag for Visakhapatnam"},
+    },
+
+    # Bucket 2: Sea (~5 cases)
+    {
+        "id": "ENG_SEA_01",
+        "landing_center": "Chennai",
+        "inputs": {"latitude": 13.08, "longitude": 80.27, "query": "Sea condition off Chennai with 1.1m wave"},
+        "reference": {"expected_wave_height_m": 1.1, "expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "sea", "notes": "Safe waves <1.5m"},
+    },
+    {
+        "id": "ENG_SEA_02",
+        "landing_center": "Mangalore",
+        "inputs": {"latitude": 12.91, "longitude": 74.85, "query": "Wave height 2.2m off Mangalore"},
+        "reference": {"expected_wave_height_m": 2.2, "expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "sea", "notes": "Caution waves 1.5-2.5m"},
+    },
+    {
+        "id": "ENG_SEA_03",
+        "landing_center": "Veraval",
+        "inputs": {"latitude": 20.90, "longitude": 70.36, "query": "Monsoon swell 3.6m off Veraval"},
+        "reference": {"expected_wave_height_m": 3.6, "expected_safety_tier": "danger", "mandate_do_not_sail": True, "min_score": 0.00, "max_score": 0.50},
+        "metadata": {"category": "sea", "notes": "Danger waves >2.5m"},
+    },
+    {
+        "id": "ENG_SEA_04",
+        "landing_center": "Porbandar",
+        "inputs": {"latitude": 21.64, "longitude": 69.60, "query": "High surface currents 2.2 knots off Porbandar"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "sea", "notes": "Current override condition 2.2kt caution band"},
+    },
+    {
+        "id": "ENG_SEA_05",
+        "landing_center": "Ratnagiri",
+        "inputs": {"latitude": 16.99, "longitude": 73.28, "query": "Rough sea with 4.0m swell off Ratnagiri"},
+        "reference": {"expected_wave_height_m": 4.0, "expected_safety_tier": "danger", "mandate_do_not_sail": True, "min_score": 0.00, "max_score": 0.50},
+        "metadata": {"category": "sea", "notes": "Extreme swell danger"},
+    },
+
+    # Bucket 3: Weather (~5 cases)
+    {
+        "id": "ENG_WX_01",
+        "landing_center": "Tuticorin",
+        "inputs": {"latitude": 8.76, "longitude": 78.13, "query": "Wind 8 knots off Tuticorin"},
+        "reference": {"expected_wind_speed_kt": 8.0, "expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "weather", "notes": "Safe wind tier <15kt"},
+    },
+    {
+        "id": "ENG_WX_02",
+        "landing_center": "Paradip",
+        "inputs": {"latitude": 20.31, "longitude": 86.61, "query": "Wind 22 knots off Paradip"},
+        "reference": {"expected_wind_speed_kt": 22.0, "expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "weather", "notes": "Caution wind tier 20-30kt"},
+    },
+    {
+        "id": "ENG_WX_03",
+        "landing_center": "Puri",
+        "inputs": {"latitude": 19.80, "longitude": 85.83, "query": "Depression cyclone alert within 150km of Puri"},
+        "reference": {"expected_cyclone_alert": True, "expected_safety_tier": "danger", "mandate_do_not_sail": True, "min_score": 0.00, "max_score": 0.50},
+        "metadata": {"category": "weather", "notes": "Cyclone <500km proximity danger"},
+    },
+    {
+        "id": "ENG_WX_04",
+        "landing_center": "Chennai",
+        "inputs": {"latitude": 13.08, "longitude": 80.27, "query": "Cyclone 800km away in deep Bay of Bengal, local weather off Chennai"},
+        "reference": {"expected_cyclone_alert": False, "expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "weather", "notes": "Cyclone far >500km, safe locally"},
+    },
+    {
+        "id": "ENG_WX_05",
+        "landing_center": "Kakinada",
+        "inputs": {"latitude": 16.98, "longitude": 82.25, "query": "Forecast with missing wind data off Kakinada"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "weather", "notes": "Missing wind data fail-open caution handling (ADR-0003)"},
+    },
+
+    # Bucket 4: Geofence Veto (~5 cases)
+    {
+        "id": "ENG_GEO_01",
+        "landing_center": "Port Blair",
+        "inputs": {"latitude": 11.53, "longitude": 92.58, "query": "Can I fish in Mahatma Gandhi Marine National Park?"},
+        "reference": {"is_mpa": True, "expected_safety_tier": "danger", "mandate_do_not_sail": True, "min_score": 0.00, "max_score": 0.50},
+        "metadata": {"category": "geofence_veto", "notes": "Inside restricted Marine Protected Area veto"},
+    },
+    {
+        "id": "ENG_GEO_02",
+        "landing_center": "International Waters",
+        "inputs": {"latitude": 8.00, "longitude": 68.00, "query": "Fishing 250 nautical miles out in international waters"},
+        "reference": {"expected_safety_tier": "danger", "mandate_do_not_sail": True, "min_score": 0.00, "max_score": 0.50},
+        "metadata": {"category": "geofence_veto", "notes": "Outside Indian EEZ veto"},
+    },
+    {
+        "id": "ENG_GEO_03",
+        "landing_center": "Palk Bay",
+        "inputs": {"latitude": 9.40, "longitude": 79.60, "query": "Within 1.5km of Sri Lanka IMBL boundary in Palk Strait"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "geofence_veto", "notes": "IMBL boundary buffer caution"},
+    },
+    {
+        "id": "ENG_GEO_04",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.05, "query": "Fishing 20km offshore Kochi inside Indian EEZ"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "geofence_veto", "notes": "Safe fishing within Indian EEZ"},
+    },
+    {
+        "id": "ENG_GEO_05",
+        "landing_center": "Rani Jhansi",
+        "inputs": {"latitude": 11.85, "longitude": 93.05, "query": "Rani Jhansi Marine National Park buffer boundary"},
+        "reference": {"is_mpa": True, "expected_safety_tier": "danger", "mandate_do_not_sail": True, "min_score": 0.00, "max_score": 0.50},
+        "metadata": {"category": "geofence_veto", "notes": "MPA reef boundary veto"},
+    },
+
+    # Bucket 5: Intent Split (~5 cases)
+    {
+        "id": "ENG_INT_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Where are the fish schools today?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "intent_split", "notes": "Fish-only intent"},
+    },
+    {
+        "id": "ENG_INT_02",
+        "landing_center": "Chennai",
+        "inputs": {"latitude": 13.08, "longitude": 80.27, "query": "Is it safe to sail today?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "intent_split", "notes": "Safety-only intent"},
+    },
+    {
+        "id": "ENG_INT_03",
+        "landing_center": "Mangalore",
+        "inputs": {"latitude": 12.91, "longitude": 74.85, "query": "Are there fish and is the sea safe off Mangalore?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "intent_split", "notes": "Fish + safety combined intent"},
+    },
+    {
+        "id": "ENG_INT_04",
+        "landing_center": "Porbandar",
+        "inputs": {"latitude": 21.64, "longitude": 69.60, "query": "What is the 3-day weather forecast for Porbandar?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "intent_split", "notes": "wants_forecast intent"},
+    },
+    {
+        "id": "ENG_INT_05",
+        "landing_center": "Goa",
+        "inputs": {"latitude": 15.49, "longitude": 73.82, "query": "Show sea surface temperature and chlorophyll maps off Goa"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "intent_split", "notes": "wants_sst and chlorophyll intent"},
+    },
+
+    # Bucket 6: Numerals (~5 cases)
+    {
+        "id": "ENG_NUM_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Heading 180 degrees at 12 knots off Kochi, check safety"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "numerals", "notes": "Bearing and knots preservation"},
+    },
+    {
+        "id": "ENG_NUM_02",
+        "landing_center": "Chennai",
+        "inputs": {"latitude": 13.08, "longitude": 80.27, "query": "Zone at 25 km bearing 240 degrees from harbor"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "numerals", "notes": "Distance in km preservation"},
+    },
+    {
+        "id": "ENG_NUM_03",
+        "landing_center": "Kanyakumari",
+        "inputs": {"latitude": 8.08, "longitude": 77.55, "query": "Condition at 8.08 N 77.55 E"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "numerals", "notes": "Decimal coordinates preservation"},
+    },
+    {
+        "id": "ENG_NUM_04",
+        "landing_center": "Visakhapatnam",
+        "inputs": {"latitude": 17.68, "longitude": 83.21, "query": "Advisory for 15 knots wind and 2.2m wave off Vizag"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "numerals", "notes": "No __M*__ placeholder leak, 2.2m wave caution"},
+    },
+    {
+        "id": "ENG_NUM_05",
+        "landing_center": "Mumbai",
+        "inputs": {"latitude": 18.92, "longitude": 72.83, "query": "Speed 7.5 knots, bearing 045, distance 14 km"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "numerals", "notes": "Standard Arabic digits 0-9"},
+    },
+
+    # Bucket 7: Adversarial (~5 cases)
+    {
+        "id": "ENG_ADV_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": ""},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.50, "max_score": 1.00},
+        "metadata": {"category": "adversarial", "notes": "Empty query handling"},
+    },
+    {
+        "id": "ENG_ADV_02",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "asdfghjk qwerty 12345"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.50, "max_score": 1.00},
+        "metadata": {"category": "adversarial", "notes": "Gibberish text input"},
+    },
+    {
+        "id": "ENG_ADV_03",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "<script>alert('xss')</script><img src=x onerror=alert(1)>"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.50, "max_score": 1.00},
+        "metadata": {"category": "adversarial", "notes": "XSS injection handling"},
+    },
+    {
+        "id": "ENG_ADV_04",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "What was the cricket score yesterday?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.50, "max_score": 1.00},
+        "metadata": {"category": "adversarial", "notes": "Out of domain question"},
+    },
+    {
+        "id": "ENG_ADV_05",
+        "landing_center": "New York",
+        "inputs": {"latitude": 40.71, "longitude": -74.00, "query": "Can I sail near Times Square NYC?"},
+        "reference": {"expected_safety_tier": "danger", "mandate_do_not_sail": True, "min_score": 0.00, "max_score": 0.50},
+        "metadata": {"category": "adversarial", "notes": "Inland foreign coordinates veto"},
+    },
+
+    # Bucket 8: Resilience (~5 cases)
+    {
+        "id": "ENG_RES_01",
+        "landing_center": "Paradip",
+        "inputs": {"latitude": 20.31, "longitude": 86.61, "query": "Simulated INCOIS fetch timeout off Paradip"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "resilience", "notes": "Timeout graceful degradation"},
+    },
+    {
+        "id": "ENG_RES_02",
+        "landing_center": "Mumbai",
+        "inputs": {"latitude": 18.92, "longitude": 72.83, "query": "Redis cache disconnected during query off Mumbai"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.50, "max_score": 1.00},
+        "metadata": {"category": "resilience", "notes": "Redis cache fallback"},
+    },
+    {
+        "id": "ENG_RES_03",
+        "landing_center": "Mangalore",
+        "inputs": {"latitude": 12.91, "longitude": 74.85, "query": "Ocean state model unavailable, weather model ok"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "resilience", "notes": "Partial upstream failure"},
+    },
+    {
+        "id": "ENG_RES_04",
+        "landing_center": "Porbandar",
+        "inputs": {"latitude": 21.64, "longitude": 69.60, "query": "Degraded data confidence 0.62 fallback advisory"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "resilience", "notes": "Degraded confidence amber status"},
+    },
+    {
+        "id": "ENG_RES_05",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Rapid repeated burst queries from single boat"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.50, "max_score": 1.00},
+        "metadata": {"category": "resilience", "notes": "Rate limit burst resilience"},
+    },
+
+    # Bucket 9: Temporal / Forecast (~5 cases)
+    {
+        "id": "ENG_TMP_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Can I go fishing tomorrow morning at 5 AM?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "temporal_forecast", "notes": "Tomorrow morning departure"},
+    },
+    {
+        "id": "ENG_TMP_02",
+        "landing_center": "Chennai",
+        "inputs": {"latitude": 13.08, "longitude": 80.27, "query": "When is the best time to leave port today?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "temporal_forecast", "notes": "Best departure window timing"},
+    },
+    {
+        "id": "ENG_TMP_03",
+        "landing_center": "Kanyakumari",
+        "inputs": {"latitude": 8.08, "longitude": 77.55, "query": "Expected weather for a 6 hour trip offshore"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "temporal_forecast", "notes": "6 hour round-trip window"},
+    },
+    {
+        "id": "ENG_TMP_04",
+        "landing_center": "Visakhapatnam",
+        "inputs": {"latitude": 17.68, "longitude": 83.21, "query": "Sea state outlook for Saturday and Sunday"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "temporal_forecast", "notes": "Weekend outlook"},
+    },
+    {
+        "id": "ENG_TMP_05",
+        "landing_center": "Mumbai",
+        "inputs": {"latitude": 18.92, "longitude": 72.83, "query": "Evening departure 6 PM returning midnight"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "temporal_forecast", "notes": "Night departure window"},
+    },
+
+    # Bucket 10: SST / Chlorophyll (~5 cases)
+    {
+        "id": "ENG_SST_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "What is the sea surface temperature near Kochi?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "sst_chlorophyll", "notes": "SST measurement advisory"},
+    },
+    {
+        "id": "ENG_SST_02",
+        "landing_center": "Chennai",
+        "inputs": {"latitude": 13.08, "longitude": 80.27, "query": "Where are the chlorophyll hotspots for tuna?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "sst_chlorophyll", "notes": "Chlorophyll hotspot query"},
+    },
+    {
+        "id": "ENG_SST_03",
+        "landing_center": "Veraval",
+        "inputs": {"latitude": 20.90, "longitude": 70.36, "query": "Is there a thermal front gradient off Veraval?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "sst_chlorophyll", "notes": "Thermal front gradient"},
+    },
+    {
+        "id": "ENG_SST_04",
+        "landing_center": "Mangalore",
+        "inputs": {"latitude": 12.91, "longitude": 74.85, "query": "Ocean color satellite imagery interpretation"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "sst_chlorophyll", "notes": "Ocean color satellite interpretation"},
+    },
+    {
+        "id": "ENG_SST_05",
+        "landing_center": "Tuticorin",
+        "inputs": {"latitude": 8.76, "longitude": 78.13, "query": "SST anomaly check off Tuticorin"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "sst_chlorophyll", "notes": "SST anomaly detection"},
+    },
+
+    # Bucket 11: Species + Depth (~5 cases)
+    {
+        "id": "ENG_SPD_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Where are sardines found and what depth?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "species_depth", "notes": "Sardine depth contour query"},
+    },
+    {
+        "id": "ENG_SPD_02",
+        "landing_center": "Mangalore",
+        "inputs": {"latitude": 12.91, "longitude": 74.85, "query": "Indian mackerel schools depth range 20-30m off Mangalore"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "species_depth", "notes": "Mackerel depth range 20-30m"},
+    },
+    {
+        "id": "ENG_SPD_03",
+        "landing_center": "Mumbai",
+        "inputs": {"latitude": 18.92, "longitude": 72.83, "query": "Pelagic seer fish / surmai fishing grounds off Mumbai"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "species_depth", "notes": "Seer fish / surmai pelagic zone"},
+    },
+    {
+        "id": "ENG_SPD_04",
+        "landing_center": "Paradip",
+        "inputs": {"latitude": 20.31, "longitude": 86.61, "query": "Coastal shrimp / prawn trawling depth off Paradip"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "species_depth", "notes": "Shrimp demersal depth"},
+    },
+    {
+        "id": "ENG_SPD_05",
+        "landing_center": "Kanyakumari",
+        "inputs": {"latitude": 8.08, "longitude": 77.55, "query": "Yellowfin tuna longline depths beyond 50m contour"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "species_depth", "notes": "Yellowfin tuna oceanic contour"},
+    },
+
+    # Bucket 12: Multi-turn / Session (~5 cases)
+    {
+        "id": "ENG_MTS_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "And what about the waves?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "multi_turn_session", "notes": "Follow-up query without explicit location"},
+    },
+    {
+        "id": "ENG_MTS_02",
+        "landing_center": "Chennai",
+        "inputs": {"latitude": 13.08, "longitude": 80.27, "query": "And tomorrow?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "multi_turn_session", "notes": "Temporal follow-up preserving session context"},
+    },
+    {
+        "id": "ENG_MTS_03",
+        "landing_center": "Chennai",
+        "inputs": {"latitude": 13.08, "longitude": 80.27, "query": "Now check for Chennai instead"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "multi_turn_session", "notes": "Location switch within active session"},
+    },
+    {
+        "id": "ENG_MTS_04",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Start new session, reset my boat coordinates"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "multi_turn_session", "notes": "Clear session and reset state"},
+    },
+    {
+        "id": "ENG_MTS_05",
+        "landing_center": "Visakhapatnam",
+        "inputs": {"latitude": 17.68, "longitude": 83.21, "query": "Repeat the coordinates you just gave me"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "multi_turn_session", "notes": "Prior response context memory recall"},
+    },
+
+    # Bucket 13: Lang Gate / Voice Typo (~5 cases)
+    {
+        "id": "ENG_LNG_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "मछली कहाँ मिलेगी? (UI language is English)"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "lang_gate_voice_typo", "notes": "UI=en with Devanagari Hindi text"},
+    },
+    {
+        "id": "ENG_LNG_02",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "machli kaha hai kochi ke paas?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "lang_gate_voice_typo", "notes": "Romanized Hindi query"},
+    },
+    {
+        "id": "ENG_LNG_03",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Check sea condition near Kohchi harbor"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "lang_gate_voice_typo", "notes": "ASR speech-to-text typo Kohchi"},
+    },
+    {
+        "id": "ENG_LNG_04",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Kochi me machli पकड़ने ke zones"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "lang_gate_voice_typo", "notes": "Mixed Latin and Devanagari script query"},
+    },
+    {
+        "id": "ENG_LNG_05",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "Kochi kadalil povan pattumo?"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "lang_gate_voice_typo", "notes": "Romanized Malayalam query"},
+    },
+
+    # Bucket 14: Data Freshness (~5 cases)
+    {
+        "id": "ENG_FSH_01",
+        "landing_center": "Kochi",
+        "inputs": {"latitude": 9.93, "longitude": 76.26, "query": "No PFZ features available in sector today"},
+        "reference": {"expected_safety_tier": "safe", "mandate_do_not_sail": False, "min_score": 0.70, "max_score": 1.00},
+        "metadata": {"category": "data_freshness", "notes": "Empty PFZ feature collection handling"},
+    },
+    {
+        "id": "ENG_FSH_02",
+        "landing_center": "Chennai",
+        "inputs": {"latitude": 13.08, "longitude": 80.27, "query": "Advisory when ocean data is older than 6 hours"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "data_freshness", "notes": "Stale data warning threshold >6h"},
+    },
+    {
+        "id": "ENG_FSH_03",
+        "landing_center": "Lakshadweep",
+        "inputs": {"latitude": 10.57, "longitude": 72.64, "query": "Querying unknown sector SEC999 off Lakshadweep"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "data_freshness", "notes": "Nonexistent sector graceful handling"},
+    },
+    {
+        "id": "ENG_FSH_04",
+        "landing_center": "Mumbai",
+        "inputs": {"latitude": 18.92, "longitude": 72.83, "query": "Malformed bounding box coordinates handling"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "data_freshness", "notes": "Invalid bbox coordinates fallback"},
+    },
+    {
+        "id": "ENG_FSH_05",
+        "landing_center": "Porbandar",
+        "inputs": {"latitude": 21.64, "longitude": 69.60, "query": "Feature with geometry: null returned from feed"},
+        "reference": {"expected_safety_tier": "caution", "mandate_do_not_sail": False, "min_score": 0.40, "max_score": 0.70},
+        "metadata": {"category": "data_freshness", "notes": "Null geometry feature payload handling"},
+    },
+]
+
 
 def _find_parquet_features_file() -> Path | None:
     base = Path(__file__).resolve().parents[3]
@@ -238,6 +758,17 @@ def load_marine_eval_dataset(limit: int | None = None) -> list[MarineEvalExample
                 "max_score": 1.00 if tier == "safe" else 0.69,
             },
             metadata={"state": c["state"], "category": "coastal_point"},
+        )
+        examples.append(ex)
+
+    # 3. Exhaustive English 14-bucket seed cases (~70 cases)
+    for item in _ENGLISH_EDGE_SEED:
+        ex = MarineEvalExample(
+            example_id=item["id"],
+            landing_center=item["landing_center"],
+            inputs=item["inputs"],
+            reference=item["reference"],
+            metadata=item["metadata"],
         )
         examples.append(ex)
 
