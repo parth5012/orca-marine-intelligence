@@ -30,9 +30,38 @@ class MarineEvalExample:
     inputs: dict[str, Any]
     reference: dict[str, Any]
     metadata: dict[str, Any] = field(default_factory=dict)
+    language: str = "en"
+    query_vernacular: str = ""
+    frozen_reply: str = ""
+    invariants: dict[str, Any] = field(
+        default_factory=lambda: {
+            "safety_tier_same": True,
+            "arabic_numerals_only": True,
+            "do_not_sail_preserved": True,
+        }
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MarineEvalExample:
+        default_invariants = {
+            "safety_tier_same": True,
+            "arabic_numerals_only": True,
+            "do_not_sail_preserved": True,
+        }
+        return cls(
+            example_id=data.get("example_id", ""),
+            landing_center=data.get("landing_center", ""),
+            inputs=data.get("inputs", {}),
+            reference=data.get("reference", {}),
+            metadata=data.get("metadata", {}),
+            language=data.get("language", "en"),
+            query_vernacular=data.get("query_vernacular", ""),
+            frozen_reply=data.get("frozen_reply", ""),
+            invariants=data.get("invariants") or default_invariants,
+        )
 
 
 _SEED_LANDING_CENTERS = [
@@ -225,6 +254,38 @@ def export_dataset_to_json(dataset: list[MarineEvalExample], output_path: str) -
     with open(path, "w", encoding="utf-8") as f:
         json.dump(records, f, indent=2)
     return len(records)
+
+
+def load_golden_v1(path: str = "data/golden_v1.json", limit: int | None = None) -> list[MarineEvalExample]:
+    """
+    Loads frozen multilingual benchmark dataset from data/golden_v1.json.
+    Falls back to load_marine_eval_dataset() with a warning if the file does not exist.
+    """
+    golden_path = Path(path)
+    if not golden_path.exists():
+        logger.warning(
+            "Golden v1 dataset file not found at %s; falling back to default marine eval dataset.",
+            golden_path,
+        )
+        return load_marine_eval_dataset(limit=limit)
+
+    try:
+        with open(golden_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        examples: list[MarineEvalExample] = [
+            MarineEvalExample.from_dict(item) for item in data
+        ]
+        if limit is not None:
+            return examples[:limit]
+        return examples
+    except Exception as exc:
+        logger.warning(
+            "Failed reading golden v1 dataset from %s (%s); falling back to default.",
+            golden_path,
+            exc,
+        )
+        return load_marine_eval_dataset(limit=limit)
 
 
 def sync_dataset_to_langsmith(

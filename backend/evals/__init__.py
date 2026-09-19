@@ -17,6 +17,7 @@ Provides:
 from backend.evals.dataset import (
     MarineEvalExample,
     load_marine_eval_dataset,
+    load_golden_v1,
     export_dataset_to_json,
     sync_dataset_to_langsmith,
 )
@@ -34,6 +35,7 @@ from backend.evals.runner import (
 __all__ = [
     "MarineEvalExample",
     "load_marine_eval_dataset",
+    "load_golden_v1",
     "export_dataset_to_json",
     "sync_dataset_to_langsmith",
     "MarineGroundednessEvaluator",
