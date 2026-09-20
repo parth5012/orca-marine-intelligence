@@ -21,19 +21,18 @@ from backend.core.bhashini import (
 
 @pytest.fixture
 def mock_200_response():
+    """Direct-inference shape: POST ?serviceId=... -> {"output": [{"source", "target"}]}."""
     resp = MagicMock()
     resp.status_code = 200
     resp.json.return_value = {
-        "pipelineResponse": [
+        "taskType": "translation",
+        "output": [
             {
-                "output": [
-                    {
-                        "source": "കൊച്ചി",
-                        "target": "Kochi",
-                    }
-                ]
+                "source": "കൊച്ചി",
+                "target": "Kochi",
             }
-        ]
+        ],
+        "config": {"language": {"sourceLanguage": "ml", "targetLanguage": "en"}},
     }
     return resp
 
@@ -177,16 +176,13 @@ async def test_translate_from_english_convenience():
     mock_ml_resp = MagicMock()
     mock_ml_resp.status_code = 200
     mock_ml_resp.json.return_value = {
-        "pipelineResponse": [
+        "taskType": "translation",
+        "output": [
             {
-                "output": [
-                    {
-                        "source": "Kochi",
-                        "target": "കൊച്ചി",
-                    }
-                ]
+                "source": "Kochi",
+                "target": "കൊച്ചി",
             }
-        ]
+        ],
     }
     with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -196,6 +192,57 @@ async def test_translate_from_english_convenience():
             assert res.source_lang == "en"
             assert res.target_lang == "ml"
             assert res.translated is True
+
+
+@pytest.mark.asyncio
+async def test_translate_uses_service_id_and_direct_schema(mock_200_response):
+    """Direct inference: serviceId query param + config/input body (no pipelineTasks)."""
+    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_200_response
+            res = await translate("കൊച്ചി", "ml", "en")
+
+            assert res.translated is True
+            _, kwargs = mock_post.call_args
+            assert kwargs["params"] == {"serviceId": "ai4bharat/indictrans-v2-all-gpu--t4"}
+            assert kwargs["json"] == {
+                "config": {"language": {"sourceLanguage": "ml", "targetLanguage": "en"}},
+                "input": [{"source": "കൊച്ചി"}],
+            }
+            assert kwargs["headers"]["Authorization"] == "test-key"
+            assert "pipelineTasks" not in kwargs["json"]
+
+
+@pytest.mark.asyncio
+async def test_translate_uncovered_pair_uses_fallback_model(mock_200_response):
+    """en->brx is outside IndicTransV2 coverage -> fallback bhashini/iiith/nmt-all."""
+    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_200_response
+            res = await translate("Hello", "en", "brx")
+
+            assert res.translated is True
+            _, kwargs = mock_post.call_args
+            assert kwargs["params"] == {"serviceId": "bhashini/iiith/nmt-all"}
+
+
+@pytest.mark.asyncio
+async def test_translate_invalid_service_retries_fallback_once(mock_200_response):
+    """400 'Invalid Service Id' -> one retry on the alternate model, then success."""
+    resp_400 = MagicMock()
+    resp_400.status_code = 400
+    resp_400.text = "Invalid Service Id"
+
+    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [resp_400, mock_200_response]
+            res = await translate("കൊച്ചി", "ml", "en")
+
+            assert res.translated is True
+            assert res.text == "Kochi"
+            assert mock_post.call_count == 2
+            _, second_kwargs = mock_post.call_args
+            assert second_kwargs["params"] == {"serviceId": "bhashini/iiith/nmt-all"}
 
 
 # ---------------------------------------------------------------------------

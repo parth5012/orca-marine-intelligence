@@ -29,6 +29,32 @@ logger = logging.getLogger("orca.bhashini")
 BHASHINI_ENDPOINT = "https://dhruva-api.bhashini.gov.in/services/inference/translation"
 CACHE_TTL = 3600  # 1 hour in seconds
 
+# Direct NMT inference: POST {BHASHINI_ENDPOINT}?serviceId=<id> with
+# {"config": {"language": {"sourceLanguage", "targetLanguage"}},
+#  "input": [{"source": text}]} and Authorization: <BHASHINI_API_KEY>.
+# Verified live 2026-09-20 (old ULCA pipelineTasks payload → 422).
+# Primary model covers en + 18 scheduled langs; fallback covers all 22.
+BHASHINI_NMT_SERVICE_ID = os.getenv(
+    "BHASHINI_NMT_SERVICE_ID", "ai4bharat/indictrans-v2-all-gpu--t4"
+)
+BHASHINI_NMT_FALLBACK_SERVICE_ID = os.getenv(
+    "BHASHINI_NMT_FALLBACK_SERVICE_ID", "bhashini/iiith/nmt-all"
+)
+# ISO codes covered by the primary IndicTransV2 model (registry
+# "Available Models for usage"; en is always covered). Pairs outside
+# this set (brx, mai, pa, ur, ...) route straight to the fallback.
+_INDICV2_COVERED = frozenset({
+    "en", "gom", "gu", "sa", "te", "mr", "hi", "or", "mni", "ml",
+    "as", "doi", "sat", "ta", "sd", "bn", "ks", "kn", "ne",
+})
+
+
+def _service_id_for(source_lang: str, target_lang: str) -> str:
+    """Pick the NMT model for a pair (primary when covered, else fallback)."""
+    if source_lang in _INDICV2_COVERED and target_lang in _INDICV2_COVERED:
+        return BHASHINI_NMT_SERVICE_ID
+    return BHASHINI_NMT_FALLBACK_SERVICE_ID
+
 # --- ULCA ASR (voice-to-text) contract — research #192 resolution ---------------
 # 2-call flow: Config resolves a per-language serviceId + callbackUrl +
 # inference key; Compute runs taskType=asr on 16kHz mono WAV (base64).
@@ -110,27 +136,28 @@ async def translate(
             cached=False,
         )
 
-    # 3. Call Bhashini Dhruva API with retry for 5xx/timeouts
+    # 3. Call Bhashini direct NMT inference with retry for 5xx/timeouts.
+    # NOTE: the ULCA pipelineTasks/inputData schema belongs on the
+    # pipeline callbackUrl, not this endpoint (it 422s here).
+    service_id = _service_id_for(source_lang, target_lang)
+    tried_fallback = service_id == BHASHINI_NMT_FALLBACK_SERVICE_ID
     payload = {
-        "pipelineTasks": [
-            {
-                "taskType": "translation",
-                "config": {
-                    "language": {
-                        "sourceLanguage": source_lang,
-                        "targetLanguage": target_lang,
-                    }
-                },
+        "config": {
+            "language": {
+                "sourceLanguage": source_lang,
+                "targetLanguage": target_lang,
             }
-        ],
-        "inputData": {
-            "input": [{"source": text}]
         },
+        "input": [{"source": text}],
     }
     headers = {
         "Content-Type": "application/json",
         "Authorization": api_key,
     }
+    logger.debug(
+        "Bhashini translate %s->%s (%d chars) via %s",
+        source_lang, target_lang, len(text), service_id,
+    )
 
     backoff_delays = [1.0, 2.0, 4.0]
     max_attempts = len(backoff_delays) + 1
@@ -138,14 +165,17 @@ async def translate(
     for attempt in range(max_attempts):
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(BHASHINI_ENDPOINT, json=payload, headers=headers)
-                
+                resp = await client.post(
+                    BHASHINI_ENDPOINT,
+                    params={"serviceId": service_id},
+                    json=payload,
+                    headers=headers,
+                )
+
                 if resp.status_code == 200:
                     data = resp.json()
                     translated_text = (
-                        data.get("pipelineResponse", [{}])[0]
-                        .get("output", [{}])[0]
-                        .get("target")
+                        data.get("output", [{}])[0].get("target")
                     )
                     if translated_text:
                         # Cache successful translation in Redis
@@ -173,7 +203,27 @@ async def translate(
                         )
 
                 elif 400 <= resp.status_code < 500:
-                    # 4xx client error (429, 401, 400, etc.) — do not retry per spec
+                    # 4xx client error (429, 401, 400, etc.) — do not retry per spec,
+                    # except an unknown-service 400 which gets one attempt on the
+                    # alternate NMT model (registry coverage can drift).
+                    body = (resp.text or "").lower()
+                    if (
+                        resp.status_code == 400
+                        and not tried_fallback
+                        and ("service" in body or "language" in body)
+                    ):
+                        tried_fallback = True
+                        rejected = service_id
+                        service_id = (
+                            BHASHINI_NMT_FALLBACK_SERVICE_ID
+                            if service_id != BHASHINI_NMT_FALLBACK_SERVICE_ID
+                            else BHASHINI_NMT_SERVICE_ID
+                        )
+                        logger.info(
+                            "Bhashini service %s rejected pair %s->%s; retrying once via %s",
+                            rejected, source_lang, target_lang, service_id,
+                        )
+                        continue
                     logger.warning("Bhashini client error status %s: %s", resp.status_code, resp.text)
                     return TranslationResult(
                         text=text,
