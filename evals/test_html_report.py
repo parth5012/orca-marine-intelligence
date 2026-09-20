@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from backend.evals.dataset import load_marine_eval_dataset
-from backend.evals.report_html import write_html_report
+from backend.evals.report_html import _slug, write_html_report
 from backend.evals.runner import run_marine_evals
 
 
@@ -49,11 +49,11 @@ def test_write_html_report_creates_dashboard_cases_and_detail_pages(tmp_path: Pa
     for r in report.results:
         eid = r["example_id"]
         assert eid in cases_html
-        assert f"case/{eid}.html" in cases_html
+        assert f"case/{_slug(eid)}.html" in cases_html
 
     # Every case page shows judge scores + reasoning.
     for r in report.results:
-        page = (out / "case" / f"{r['example_id']}.html").read_text(encoding="utf-8")
+        page = (out / "case" / f"{_slug(r['example_id'])}.html").read_text(encoding="utf-8")
         assert r["example_id"] in page
         assert "Judge reasoning" in page
         assert "Judge scores" in page
@@ -70,6 +70,6 @@ def test_case_page_escapes_html_injection(tmp_path: Path):
     report.results[0]["advisory_text"] = "<b>bold</b>"
     out = tmp_path / "evals"
     write_html_report(report, out_dir=out)
-    page = (out / "case" / f"{report.results[0]['example_id']}.html").read_text(encoding="utf-8")
+    page = (out / "case" / f"{_slug(report.results[0]['example_id'])}.html").read_text(encoding="utf-8")
     assert "<script>alert(1)</script>" not in page
     assert "&lt;script&gt;" in page

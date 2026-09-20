@@ -29,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -99,7 +100,10 @@ def _esc(v: Any) -> str:
 
 
 def _slug(example_id: str) -> str:
-    return "".join(c if (c.isalnum() or c in ("-", "_")) else "_" for c in str(example_id))
+    """Stable, collision-resistant slug: readable base + 8-hex id hash (review #214)."""
+    base = "".join(c if (c.isalnum() or c in ("-", "_")) else "_" for c in str(example_id))
+    digest = hashlib.sha1(str(example_id).encode("utf-8")).hexdigest()[:8]
+    return f"{base}_{digest}" if not base.endswith(f"_{digest}") else base
 
 
 def _judge_text(ev: dict[str, Any]) -> str:
@@ -159,8 +163,8 @@ def _metric_cards(report: Any) -> str:
         ("Language purity", f"{report.mean_language_purity_score * 100:.1f}%", "mean score", report.mean_language_purity_score),
         ("Numeral invariant", f"{report.numeral_invariant_rate * 100:.1f}%", "invariant rate", report.numeral_invariant_rate),
         ("Cross-lang tiers", f"{report.cross_lang_tier_equality_rate * 100:.1f}%", "equality rate", report.cross_lang_tier_equality_rate),
-        ("LLM quality*", f"{report.llm_quality_rate * 100:.1f}%", f"sidecar ({report.llm_judged_examples} judged)", report.llm_quality_rate),
-        ("LLM safety*", f"{report.llm_safety_rate * 100:.1f}%", f"sidecar ({report.llm_judged_examples} judged)", report.llm_safety_rate),
+        ("LLM quality*", f"{report.llm_quality_rate * 100:.1f}%", f"sidecar ({report.llm_quality_judged} judged)", report.llm_quality_rate),
+        ("LLM safety*", f"{report.llm_safety_rate * 100:.1f}%", f"sidecar ({report.llm_safety_judged} judged)", report.llm_safety_rate),
         ("Latency", f"{report.execution_time_s:.2f}s", "execution time", None),
     ]
     out = ['<div class="grid">']
@@ -334,11 +338,17 @@ def render_case(r: dict[str, Any], stamp: str) -> str:
         p = _judge_passed(ev)
         reason = _judge_text(ev)
         details = ev.get("details") if isinstance(ev, dict) else None
-        dot = '<span class="dot ok"></span>' if p else ('<span class="dot bad"></span>' if p is False else "")
+        if isinstance(ev, dict) and ev.get("skipped"):
+            # Skipped-neutral sidecar: grey, never rendered as green (review #214).
+            dot = '<span class="dot" style="background:var(--mut)"></span>'
+            score_html = '<div class="score" style="color:var(--mut)">skipped</div>'
+        else:
+            dot = '<span class="dot ok"></span>' if p else ('<span class="dot bad"></span>' if p is False else "")
+            score_html = f'<div class="score">{"" if s is None else f"{s:.2f}"}</div>'
         det = f"<pre>{_esc(json.dumps(details, indent=2, ensure_ascii=False))}</pre>" if details else ""
         cards.append(
             f'<div class="jcard"><h3>{dot} {_esc(label)}</h3>'
-            f'<div class="score">{"" if s is None else f"{s:.2f}"}</div>'
+            f'{score_html}'
             f"<p><b>Judge reasoning:</b> {_esc(reason) or '<i>—</i>'}</p>{det}</div>"
         )
     # Cross-lang group verdict is aggregate-level; show raw if present.
@@ -363,7 +373,7 @@ def render_case(r: dict[str, Any], stamp: str) -> str:
 <div><div class="k">Landing centre</div>{_esc(r.get("landing_center", ""))}</div>
 <div><div class="k">Language</div>{_esc(r.get("language", ""))}</div>
 <div><div class="k">Bucket</div>{_esc(r.get("bucket", ""))}</div>
-<div><div class="k">Verdict</div>{'passed — every judge check green' if ok else 'failed — at least one judge check red'}</div>
+<div><div class="k">Verdict</div>{'deterministic gate passed — LLM sidecars are measure-only' if ok else 'deterministic gate failed — at least one rule-based judge check red'}</div>
 </div>
 <h2>Query</h2><p>{_esc(r.get("query", ""))}</p>
 {"<h2>Query (vernacular)</h2><p>" + _esc(r.get("query_vernacular", "")) + "</p>" if r.get("query_vernacular") else ""}

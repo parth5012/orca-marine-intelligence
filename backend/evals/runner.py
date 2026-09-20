@@ -75,7 +75,8 @@ class EvaluationReport:
     cross_lang_tier_equality_rate: float = 1.0
     llm_quality_rate: float = 1.0
     llm_safety_rate: float = 1.0
-    llm_judged_examples: int = 0
+    llm_quality_judged: int = 0
+    llm_safety_judged: int = 0
     execution_time_s: float = 0.0
     results: list[dict[str, Any]] = field(default_factory=list)
     matrix: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -105,8 +106,8 @@ class EvaluationReport:
             f"Mean Language Purity Score:       {self.mean_language_purity_score * 100:.1f}%",
             f"Numeral Invariant Rate:           {self.numeral_invariant_rate * 100:.1f}%",
             f"Cross-Lang Tier Equality Rate:    {self.cross_lang_tier_equality_rate * 100:.1f}%",
-            f"LLM Quality Rate*:                {self.llm_quality_rate * 100:.1f}% ({self.llm_judged_examples} judged)",
-            f"LLM Safety Rate*:                 {self.llm_safety_rate * 100:.1f}% ({self.llm_judged_examples} judged)",
+            f"LLM Quality Rate*:                {self.llm_quality_rate * 100:.1f}% ({self.llm_quality_judged} judged)",
+            f"LLM Safety Rate*:                 {self.llm_safety_rate * 100:.1f}% ({self.llm_safety_judged} judged)",
             f"Execution Latency:                {self.execution_time_s:.2f}s",
             "------------------------------------------------------------------",
             "STATUS: " + ("PASS (All gates met)" if self.pass_rate >= 0.80 else "MEASURE-ONLY (Baseline tracked)"),
@@ -386,7 +387,8 @@ def run_marine_evals(
         cross_lang_tier_equality_rate=cross_lang_rate,
         llm_quality_rate=round(sum(llm_quality_scores) / len(llm_quality_scores), 3) if llm_quality_scores else 1.0,
         llm_safety_rate=round(sum(llm_safety_scores) / len(llm_safety_scores), 3) if llm_safety_scores else 1.0,
-        llm_judged_examples=len(llm_quality_scores),
+        llm_quality_judged=len(llm_quality_scores),
+        llm_safety_judged=len(llm_safety_scores),
         execution_time_s=elapsed,
         results=results,
         matrix=final_matrix,
