@@ -21,7 +21,7 @@ cross-language equality over `data/golden_v1.json` / generated seeds, it belongs
 here.
 
 Related implementation code (not tests): `backend/evals/` (`dataset.py`,
-`evaluators.py`, `runner.py`) plus `scripts/freeze_golden.py`.
+`evaluators.py`, `runner.py`, `llm_judge.py`) plus `scripts/freeze_golden.py`.
 
 ## Layout
 
@@ -33,7 +33,8 @@ evals/
 ├── test_multilingual_evaluators.py  ← 3 multilingual evaluators + golden offline run (#180)
 ├── test_golden_dataset.py           ← MarineEvalExample multilingual fields + golden loader (#177)
 ├── test_freeze_golden.py            ← freeze_golden.py → data/golden_v1.json (#179)
-└── test_t5_verification.py          ← T5 verify: sync + full offline eval + scorecard (#181)
+├── test_t5_verification.py          ← T5 verify: sync + full offline eval + scorecard (#181)
+└── test_llm_judge.py                ← LLM-as-judge sidecar: Groq→OpenRouter→Gemini (opt-in, mocked offline)
 ```
 
 ## The 7 evaluators (`backend/evals/evaluators.py`)
@@ -54,6 +55,24 @@ evals/
 | `LanguagePurityEvaluator` | No `__M*__` leak; non-English output contains native-script chars | Placeholder leak, empty text, or English-only text for `ml`/`ta`/… |
 | `NumeralInvariantEvaluator` | Arabic digits `0-9` only; expected numbers preserved | Regional Indic digits (e.g. `൧൨`, `१२`) |
 | `CrossLangTierEvaluator` | Same `safety_tier` + same `DO NOT SAIL` mandate across all languages of one scenario | Any divergent language |
+
+**LLM-as-judge sidecar (opt-in, `backend/evals/llm_judge.py`):**
+
+| Judge | What it scores | Fail signal |
+|---|---|---|
+| `LLMAdvisoryQualityJudge` | Fisher-facing clarity, actionability, number preservation, fluency | Vague / hallucinated advisory |
+| `LLMSafetyJudge` | Tier matches reference; `DO NOT SAIL` present iff mandated; danger never downgraded | Safety downgrade (score `0.0`) |
+
+LLM judges are **measure-only sidecars**: stored per-example as
+`llm_quality` / `llm_safety`, shown in the scorecard (`LLM Quality Rate*`)
+and HTML case pages, but they **never** affect `passed` (the deterministic
+gate above is unchanged). Provider order: Groq (`GROQ_API_KEY`,
+`ORCA_JUDGE_MODEL` default `openai/gpt-oss-120b`) → OpenRouter
+(`OPENROUTER_API_KEY`) → Gemini (`GEMINI_API_KEY`/`GOOGLE_API_KEY`,
+`gemini-2.5-flash`). Temperature `0.0`, JSON mode, timeout
+`ORCA_JUDGE_TIMEOUT_S` (default `20`). No keys / call failure /
+unparseable output → neutral `skipped` verdict (`score 1.0`,
+`passed True`), never a crash.
 
 ## Datasets (`backend/evals/dataset.py`)
 
@@ -96,6 +115,24 @@ python -m backend.evals.runner --dataset data/golden_v1.json --out reports/custo
 
 # HTML dashboard only (default --html is reports/evals/; pass empty to skip)
 python -m backend.evals.runner --html reports/evals
+```
+
+**Prefix every command with `uv run --project backend`** (repo has no root
+venv; the backend project owns `groq` / `google-genai` / `pytest`).
+
+### LLM-as-judge runs (opt-in, costs ~2 LLM calls per example)
+
+```bash
+# Sample 20 examples with real LLM judges (Groq → OpenRouter → Gemini)
+uv run --project backend python -m backend.evals.runner --llm-judge --llm-sample 20 --out reports/llm_scorecard.md
+
+# Full 150-example run (~300 calls) or env-flag equivalent
+uv run --project backend python -m backend.evals.runner --llm-judge --out reports/llm_full.md
+ORCA_ENABLE_LLM_JUDGE=1 uv run --project backend python -m pytest evals/test_llm_judge.py -q
+
+# Programmatic (inject a fake client to stay offline in tests)
+report = run_marine_evals(dataset=ds, use_llm_judge=True, llm_judge_client=fake_client_for_tests)
+report = run_marine_evals(dataset=ds, use_llm_judge=True, llm_max_examples=20)
 ```
 
 ## HTML dashboard (`reports/evals/`, auto-updated)

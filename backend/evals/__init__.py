@@ -30,6 +30,13 @@ from backend.evals.evaluators import (
     NumeralInvariantEvaluator,
     CrossLangTierEvaluator,
 )
+from backend.evals.llm_judge import (
+    LLMAdvisoryQualityJudge,
+    LLMSafetyJudge,
+    is_llm_judge_available,
+    is_llm_judge_enabled,
+    fake_client_for_tests,
+)
 from backend.evals.runner import (
     EvaluationReport,
     run_marine_evals,
@@ -49,6 +56,11 @@ __all__ = [
     "LanguagePurityEvaluator",
     "NumeralInvariantEvaluator",
     "CrossLangTierEvaluator",
+    "LLMAdvisoryQualityJudge",
+    "LLMSafetyJudge",
+    "is_llm_judge_available",
+    "is_llm_judge_enabled",
+    "fake_client_for_tests",
     "EvaluationReport",
     "run_marine_evals",
     "write_html_report",

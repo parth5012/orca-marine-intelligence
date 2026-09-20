@@ -44,6 +44,8 @@ EVALUATOR_CARDS: list[tuple[str, str]] = [
     ("risk_calibration", "Risk Calibration"),
     ("language_purity", "Language Purity"),
     ("numeral_invariant", "Numeral Invariant"),
+    ("llm_quality", "LLM Quality (sidecar)"),
+    ("llm_safety", "LLM Safety (sidecar)"),
 ]
 
 CSS = """
@@ -157,6 +159,8 @@ def _metric_cards(report: Any) -> str:
         ("Language purity", f"{report.mean_language_purity_score * 100:.1f}%", "mean score", report.mean_language_purity_score),
         ("Numeral invariant", f"{report.numeral_invariant_rate * 100:.1f}%", "invariant rate", report.numeral_invariant_rate),
         ("Cross-lang tiers", f"{report.cross_lang_tier_equality_rate * 100:.1f}%", "equality rate", report.cross_lang_tier_equality_rate),
+        ("LLM quality*", f"{report.llm_quality_rate * 100:.1f}%", f"sidecar ({report.llm_judged_examples} judged)", report.llm_quality_rate),
+        ("LLM safety*", f"{report.llm_safety_rate * 100:.1f}%", f"sidecar ({report.llm_judged_examples} judged)", report.llm_safety_rate),
         ("Latency", f"{report.execution_time_s:.2f}s", "execution time", None),
     ]
     out = ['<div class="grid">']
