@@ -28,6 +28,11 @@ from backend.evals.evaluators import (
     NumeralInvariantEvaluator,
     CrossLangTierEvaluator,
 )
+from backend.evals.llm_judge import (
+    LLMAdvisoryQualityJudge,
+    LLMSafetyJudge,
+    is_llm_judge_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +73,9 @@ class EvaluationReport:
     mean_language_purity_score: float = 1.0
     numeral_invariant_rate: float = 1.0
     cross_lang_tier_equality_rate: float = 1.0
+    llm_quality_rate: float = 1.0
+    llm_safety_rate: float = 1.0
+    llm_judged_examples: int = 0
     execution_time_s: float = 0.0
     results: list[dict[str, Any]] = field(default_factory=list)
     matrix: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -97,9 +105,12 @@ class EvaluationReport:
             f"Mean Language Purity Score:       {self.mean_language_purity_score * 100:.1f}%",
             f"Numeral Invariant Rate:           {self.numeral_invariant_rate * 100:.1f}%",
             f"Cross-Lang Tier Equality Rate:    {self.cross_lang_tier_equality_rate * 100:.1f}%",
+            f"LLM Quality Rate*:                {self.llm_quality_rate * 100:.1f}% ({self.llm_judged_examples} judged)",
+            f"LLM Safety Rate*:                 {self.llm_safety_rate * 100:.1f}% ({self.llm_judged_examples} judged)",
             f"Execution Latency:                {self.execution_time_s:.2f}s",
             "------------------------------------------------------------------",
             "STATUS: " + ("PASS (All gates met)" if self.pass_rate >= 0.80 else "MEASURE-ONLY (Baseline tracked)"),
+            "* LLM judges are measure-only sidecars; they never gate pass/fail.",
             "==================================================================",
             "",
             "## 14x23 Evaluation Matrix (Buckets x Languages)",
@@ -152,10 +163,19 @@ def run_marine_evals(
     use_langsmith: bool = True,
     wave_tolerance_m: float = 0.5,
     wind_tolerance_kt: float = 5.0,
+    use_llm_judge: bool | None = None,
+    llm_judge_client: Callable[[str], str] | None = None,
+    llm_max_examples: int | None = None,
 ) -> EvaluationReport:
     """
     Executes marine intelligence evaluations across a benchmark dataset.
     Operates seamlessly in both online LangSmith cloud environments and offline CI.
+
+    LLM-as-judge sidecar (opt-in, measure-only):
+      use_llm_judge=True (or ORCA_ENABLE_LLM_JUDGE=1) runs Groq→OpenRouter→Gemini
+      judges and stores per-example ``llm_quality`` / ``llm_safety`` verdicts.
+      They NEVER affect ``passed`` (deterministic gate unchanged). Default off
+      so ``pytest evals`` stays offline. Cap cost with llm_max_examples.
     """
     start_time = time.time()
     examples: list[MarineEvalExample] = dataset if dataset is not None else load_marine_eval_dataset()
@@ -169,6 +189,9 @@ def run_marine_evals(
     purity_eval = LanguagePurityEvaluator()
     numeral_eval = NumeralInvariantEvaluator()
     cross_lang_eval = CrossLangTierEvaluator()
+    llm_enabled = is_llm_judge_enabled(use_llm_judge)
+    llm_quality_judge = LLMAdvisoryQualityJudge() if llm_enabled else None
+    llm_safety_judge = LLMSafetyJudge() if llm_enabled else None
 
     # Cloud LangSmith execution check
     api_key = os.environ.get("LANGCHAIN_API_KEY")
@@ -189,6 +212,8 @@ def run_marine_evals(
     risk_calibrations = []
     purity_scores = []
     numeral_scores = []
+    llm_quality_scores: list[float] = []
+    llm_safety_scores: list[float] = []
     passed_count = 0
 
     # Group for cross-lang evaluation
@@ -236,6 +261,38 @@ def run_marine_evals(
         risk_calibrations.append(1.0 if r_res["passed"] else 0.0)
         purity_scores.append(l_res["score"])
         numeral_scores.append(1.0 if n_res["passed"] else 0.0)
+
+        # LLM-as-judge sidecar (measure-only; never affects example_passed).
+        idx = len(results)
+        if llm_quality_judge is not None and (llm_max_examples is None or idx < llm_max_examples):
+            try:
+                q_llm = llm_quality_judge.evaluate(
+                    ex.inputs, output, ex.reference, client=llm_judge_client, language=ex.language
+                )
+            except Exception as exc:  # never crash the suite on judge failure
+                logger.warning("LLM quality judge crashed on %s: %s", ex.example_id, exc)
+                q_llm = {"key": "llm_advisory_quality", "score": 1.0, "passed": True,
+                         "reasoning": f"judge crashed, skipped-neutral: {exc}", "skipped": True, "model": ""}
+            try:
+                s_llm = llm_safety_judge.evaluate(  # type: ignore[union-attr]
+                    ex.inputs, output, ex.reference, client=llm_judge_client
+                )
+            except Exception as exc:
+                logger.warning("LLM safety judge crashed on %s: %s", ex.example_id, exc)
+                s_llm = {"key": "llm_safety", "score": 1.0, "passed": True,
+                         "reasoning": f"judge crashed, skipped-neutral: {exc}", "skipped": True, "model": ""}
+            if not q_llm.get("skipped"):
+                llm_quality_scores.append(float(q_llm["score"]))
+            if not s_llm.get("skipped"):
+                llm_safety_scores.append(float(s_llm["score"]))
+        else:
+            q_llm = {"key": "llm_advisory_quality", "score": 1.0, "passed": True,
+                     "reasoning": "LLM judge disabled (offline default). "
+                     "Re-run with use_llm_judge=True or ORCA_ENABLE_LLM_JUDGE=1.",
+                     "skipped": True, "model": ""}
+            s_llm = {"key": "llm_safety", "score": 1.0, "passed": True,
+                     "reasoning": "LLM judge disabled (offline default).",
+                     "skipped": True, "model": ""}
 
         # Example passes if all core critical criteria pass
         example_passed = (
@@ -289,6 +346,8 @@ def run_marine_evals(
             "risk_calibration": r_res,
             "language_purity": l_res,
             "numeral_invariant": n_res,
+            "llm_quality": q_llm,
+            "llm_safety": s_llm,
             "passed": example_passed,
         })
 
@@ -325,6 +384,9 @@ def run_marine_evals(
         mean_language_purity_score=round(sum(purity_scores) / n, 3) if n > 0 else 1.0,
         numeral_invariant_rate=round(sum(numeral_scores) / n, 3) if n > 0 else 1.0,
         cross_lang_tier_equality_rate=cross_lang_rate,
+        llm_quality_rate=round(sum(llm_quality_scores) / len(llm_quality_scores), 3) if llm_quality_scores else 1.0,
+        llm_safety_rate=round(sum(llm_safety_scores) / len(llm_safety_scores), 3) if llm_safety_scores else 1.0,
+        llm_judged_examples=len(llm_quality_scores),
         execution_time_s=elapsed,
         results=results,
         matrix=final_matrix,
@@ -342,6 +404,12 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", default=None, help="Path to golden dataset JSON (or default)")
     parser.add_argument("--out", default="reports/golden_v1_scorecard.md", help="Scorecard output path")
     parser.add_argument("--html", default="reports/evals", help="HTML dashboard output dir (empty to skip)")
+    parser.add_argument("--llm-judge", action="store_true",
+                        help="Enable LLM-as-judge sidecar (Groq→OpenRouter→Gemini). "
+                        "Costs ~2 LLM calls/example; cap with --llm-sample. "
+                        "Also enabled via ORCA_ENABLE_LLM_JUDGE=1.")
+    parser.add_argument("--llm-sample", type=int, default=None,
+                        help="Judge only first N examples (cost control, e.g. --llm-sample 20).")
     args = parser.parse_args()
 
     if args.dataset:
@@ -352,7 +420,9 @@ if __name__ == "__main__":
     else:
         combined_ds = load_golden_v1() + load_marine_eval_dataset()
 
-    rep = run_marine_evals(dataset=combined_ds, use_langsmith=False)
+    rep = run_marine_evals(dataset=combined_ds, use_langsmith=False,
+                           use_llm_judge=args.llm_judge or None,
+                           llm_max_examples=args.llm_sample)
     scorecard_text = rep.generate_scorecard()
 
     out_path = Path(args.out)
