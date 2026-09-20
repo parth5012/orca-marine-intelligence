@@ -34,6 +34,7 @@ from backend.evals.runner import (
     EvaluationReport,
     run_marine_evals,
 )
+from backend.evals.report_html import write_html_report
 
 __all__ = [
     "MarineEvalExample",
@@ -50,4 +51,5 @@ __all__ = [
     "CrossLangTierEvaluator",
     "EvaluationReport",
     "run_marine_evals",
+    "write_html_report",
 ]
