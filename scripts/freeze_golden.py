@@ -26,6 +26,16 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+try:
+    from dotenv import load_dotenv
+
+    for _env_file in (BASE_DIR / ".env", BASE_DIR / "backend" / ".env", Path(".env")):
+        if _env_file.is_file():
+            load_dotenv(dotenv_path=_env_file, override=False)
+            break
+except ImportError:
+    pass
+
 from backend.core.bhashini import translate_from_english, TranslationResult
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -247,6 +257,10 @@ async def freeze_dataset(
     langs = target_langs or TARGET_LANGS
     out_file = Path(output_path)
     out_file.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "Freezing golden dataset: %d language(s), force_retranslate=%s, templates=%s → %s",
+        len(langs), force_retranslate, use_templates, out_file,
+    )
 
     # Load existing records if present
     records_map: dict[str, dict[str, Any]] = {}
@@ -263,6 +277,7 @@ async def freeze_dataset(
             logger.warning("Could not read existing file %s: %s", out_file, exc)
 
     for lang in langs:
+        n_bhashini = n_template = n_fallback = n_skipped = 0
         for scen in SCENARIOS:
             q_idx = scen["q_idx"]
             example_id = f"GOLDEN_V1_{lang.upper()}_{q_idx:02d}"
@@ -272,6 +287,7 @@ async def freeze_dataset(
                 rec = records_map[example_id]
                 if rec.get("needs_human_fix") is False:
                     logger.debug("Skipping already human-fixed record: %s", example_id)
+                    n_skipped += 1
                     continue
 
             # Query vernacular
@@ -282,6 +298,7 @@ async def freeze_dataset(
 
             # Translate reply via Bhashini
             english_reply = scen["english_reply"]
+            logger.debug("Translating %s via Bhashini (%d chars)", example_id, len(english_reply))
             trans_res: TranslationResult = await translate_from_english(
                 english_reply,
                 target_lang=lang,
@@ -290,13 +307,19 @@ async def freeze_dataset(
             if trans_res.translated:
                 frozen_reply = trans_res.text
                 needs_human_fix = False
+                n_bhashini += 1
+                logger.debug("Bhashini translated %s (%d chars)", example_id, len(frozen_reply))
             elif use_templates and lang in TEMPLATE_REPLIES and q_idx in TEMPLATE_REPLIES[lang]:
                 frozen_reply = TEMPLATE_REPLIES[lang][q_idx]
                 needs_human_fix = False
+                n_template += 1
+                logger.debug("Template fallback for %s", example_id)
             else:
                 # If translation failed or API key missing, keep English and mark for human review
                 frozen_reply = english_reply
                 needs_human_fix = True
+                n_fallback += 1
+                logger.warning("English fallback (needs_human_fix) for %s", example_id)
 
             record: dict[str, Any] = {
                 "example_id": example_id,
@@ -312,13 +335,22 @@ async def freeze_dataset(
             records_map[example_id] = record
             await asyncio.sleep(0.05)
 
+        logger.info(
+            "Language %s done: bhashini=%d template=%d english_fallback=%d skipped=%d",
+            lang, n_bhashini, n_template, n_fallback, n_skipped,
+        )
+
     records = list(records_map.values())
     tmp_file = out_file.with_suffix(".tmp")
     with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(records, f, indent=2, ensure_ascii=False)
     tmp_file.replace(out_file)
 
-    logger.info("Successfully froze %d records to %s", len(records), out_file)
+    n_fix = sum(1 for r in records if r.get("needs_human_fix"))
+    logger.info(
+        "Successfully froze %d records to %s (%d marked needs_human_fix)",
+        len(records), out_file, n_fix,
+    )
     return len(records)
 
 
@@ -346,8 +378,15 @@ def main() -> None:
         action="store_true",
         help="Force re-translation of records even if needs_human_fix is false",
     )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log verbosity (default INFO; DEBUG shows per-record source).",
+    )
 
     args = parser.parse_args()
+    logging.getLogger().setLevel(getattr(logging, args.log_level, logging.INFO))
 
     if args.check:
         valid, err = verify_golden_file(args.out)

@@ -18,6 +18,17 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
+try:
+    from dotenv import load_dotenv
+
+    _base_dir = Path(__file__).resolve().parents[2]
+    for _env_file in (_base_dir / ".env", _base_dir / "backend" / ".env", Path(".env")):
+        if _env_file.is_file():
+            load_dotenv(dotenv_path=_env_file, override=False)
+            break
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -772,6 +783,10 @@ def load_marine_eval_dataset(limit: int | None = None) -> list[MarineEvalExample
         )
         examples.append(ex)
 
+    logger.info(
+        "Built marine eval dataset: %d examples%s",
+        len(examples), f" (limit {limit})" if limit is not None else "",
+    )
     if limit is not None:
         return examples[:limit]
     return examples
@@ -815,6 +830,10 @@ def load_golden_v1(path: str = "data/golden_v1.json", limit: int | None = None) 
         examples: list[MarineEvalExample] = [
             MarineEvalExample.from_dict(item) for item in data
         ]
+        logger.info(
+            "Loaded golden v1 dataset: %d records from %s%s",
+            len(examples), golden_path, f" (limit {limit})" if limit is not None else "",
+        )
         if limit is not None:
             return examples[:limit]
         return examples
@@ -890,12 +909,24 @@ if __name__ == "__main__":
     parser.add_argument("--sync", action="store_true", help="Sync dataset to LangSmith")
     parser.add_argument("--name", default="orca-golden-v1", help="LangSmith dataset name")
     parser.add_argument("--dataset", default=None, help="Path to golden dataset JSON")
+    parser.add_argument("--log-level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="Log verbosity (default INFO).")
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level, logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
 
     if args.sync:
         if args.dataset:
+            logger.info("Loading golden dataset from %s", args.dataset)
             ds = load_golden_v1(args.dataset)
         else:
+            logger.info("Loading default dataset (golden v1 if present, else English seed)")
             ds = load_golden_v1() if Path("data/golden_v1.json").exists() else load_marine_eval_dataset()
+        logger.info("Syncing %d examples to LangSmith dataset '%s'", len(ds), args.name)
         res = sync_dataset_to_langsmith(dataset_name=args.name, dataset=ds)
         print(f"Sync result: {res}")

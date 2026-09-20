@@ -24,7 +24,20 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+from pathlib import Path
 from typing import Any, Callable
+
+try:
+    from dotenv import load_dotenv
+
+    _base_dir = Path(__file__).resolve().parents[2]
+    for _env_file in (_base_dir / ".env", _base_dir / "backend" / ".env", Path(".env")):
+        if _env_file.is_file():
+            load_dotenv(dotenv_path=_env_file, override=False)
+            break
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +258,7 @@ def _call_judge_llm(
     (callers convert it to a skipped-neutral verdict).
     """
     if client is not None:
+        logger.debug("LLM judge using injected test client (prompt %d chars)", len(prompt))
         return str(client(prompt)), "test-fake"
     chain: list[tuple[str, Callable[[str, str], tuple[str, str]]]] = []
     if _key_present("GROQ_API_KEY"):
@@ -253,15 +267,30 @@ def _call_judge_llm(
         chain.append(("openrouter", _call_openrouter))
     if _key_present("GEMINI_API_KEY") or _key_present("GOOGLE_API_KEY"):
         chain.append(("gemini", _call_gemini))
+    # Provider names only — never log key values.
+    logger.debug(
+        "LLM judge provider chain: %s (prompt %d chars, timeout %.0fs)",
+        [n for n, _ in chain] or ["<none>"], len(prompt), _resolve_timeout(),
+    )
     if not chain:
+        logger.info("LLM judge skipped: no GROQ/OPENROUTER/GEMINI key configured")
         raise JudgeSkipped("LLM judge skipped: no GROQ/GEMINI/OPENROUTER key configured")
     errors: list[str] = []
     for name, fn in chain:
+        attempt_start = time.perf_counter()
         try:
-            return fn(prompt, system)
+            raw, model = fn(prompt, system)
+            logger.info(
+                "LLM judge provider %s succeeded (model %s, %.2fs, %d chars in)",
+                name, model, time.perf_counter() - attempt_start, len(prompt),
+            )
+            return raw, model
         except Exception as exc:
             errors.append(f"{name}: {exc}")
-            logger.warning("LLM judge provider %s failed (%s); trying next", name, exc)
+            logger.warning(
+                "LLM judge provider %s failed after %.2fs (%s); trying next",
+                name, time.perf_counter() - attempt_start, exc,
+            )
     raise RuntimeError(f"All LLM judge providers failed — {'; '.join(errors)}")
 
 
@@ -301,14 +330,23 @@ class LLMAdvisoryQualityJudge:
             f"mandate_do_not_sail={reference.get('mandate_do_not_sail', '?')}\n</reference>\n"
             f"<advisory>\n{advisory}\n</advisory>"
         )
+        logger.debug(
+            "Quality judge start (lang %s, query %d chars, advisory %d chars)",
+            lang, len(query), len(advisory),
+        )
         try:
             raw, model = _call_judge_llm(prompt, QUALITY_SYSTEM, client)
             parsed = _parse_judge_json(raw)
+            logger.info(
+                "Quality judge verdict: score %.3f passed=%s model=%s (lang %s)",
+                parsed["score"], parsed["passed"], model, lang,
+            )
             return {
                 "key": self.key, "score": parsed["score"], "passed": parsed["passed"],
                 "reasoning": parsed["reasoning"], "skipped": False, "model": model,
             }
         except JudgeSkipped as exc:
+            logger.debug("Quality judge skipped-neutral: %s", exc)
             return _skipped(self.key, str(exc))
         except Exception as exc:  # never crash evals on LLM/parse failure
             logger.warning("LLM quality judge failed (%s); marking skipped-neutral", exc)
@@ -337,14 +375,23 @@ class LLMSafetyJudge:
             f"is_mpa={reference.get('is_mpa', False)}\n</reference>\n"
             f"<advisory>\n{advisory}\n</advisory>"
         )
+        logger.debug(
+            "Safety judge start (expected tier %s, predicted %s, advisory %d chars)",
+            reference.get("expected_safety_tier", "?"), pred_tier, len(advisory),
+        )
         try:
             raw, model = _call_judge_llm(prompt, SAFETY_SYSTEM, client)
             parsed = _parse_judge_json(raw)
+            logger.info(
+                "Safety judge verdict: score %.3f passed=%s model=%s",
+                parsed["score"], parsed["passed"], model,
+            )
             return {
                 "key": self.key, "score": parsed["score"], "passed": parsed["passed"],
                 "reasoning": parsed["reasoning"], "skipped": False, "model": model,
             }
         except JudgeSkipped as exc:
+            logger.debug("Safety judge skipped-neutral: %s", exc)
             return _skipped(self.key, str(exc))
         except Exception as exc:
             logger.warning("LLM safety judge failed (%s); marking skipped-neutral", exc)

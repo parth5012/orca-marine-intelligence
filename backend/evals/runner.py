@@ -18,6 +18,17 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Callable
 
+try:
+    from dotenv import load_dotenv
+
+    _base_dir = Path(__file__).resolve().parents[2]
+    for _env_file in (_base_dir / ".env", _base_dir / "backend" / ".env", Path(".env")):
+        if _env_file.is_file():
+            load_dotenv(dotenv_path=_env_file, override=False)
+            break
+except ImportError:
+    pass
+
 from backend.evals.dataset import MarineEvalExample, load_marine_eval_dataset
 from backend.evals.evaluators import (
     MarineGroundednessEvaluator,
@@ -203,8 +214,19 @@ def run_marine_evals(
         and os.environ.get("LANGCHAIN_TRACING_V2") == "true"
     )
 
+    logger.info(
+        "Starting marine evals: %d examples | llm_judge=%s (max %s) | "
+        "tolerances wave=%.1fm wind=%.1fkt | langsmith=%s | target=%s",
+        len(examples), llm_enabled,
+        llm_max_examples if llm_max_examples is not None else "all",
+        wave_tolerance_m, wind_tolerance_kt,
+        "on" if is_langsmith_enabled else "off",
+        "custom" if target_fn is not None else "simulated-reference",
+    )
     if is_langsmith_enabled:
         logger.info("LangSmith configured — running with active cloud telemetry.")
+    elif use_langsmith:
+        logger.debug("LangSmith offline: LANGCHAIN_API_KEY/TRACING_V2 not configured; staying local.")
 
     results: list[dict[str, Any]] = []
     groundedness_scores = []
@@ -226,7 +248,9 @@ def run_marine_evals(
         b: {l: [] for l in ALL_LANGS} for b in BUCKET_NAMES
     }
 
-    for ex in examples:
+    for _ex_idx, ex in enumerate(examples, 1):
+        if _ex_idx == 1 or _ex_idx % 25 == 0 or _ex_idx == len(examples):
+            logger.info("Evaluating example %d/%d ...", _ex_idx, len(examples))
         # Generate output from target_fn or simulate reference output
         if target_fn is not None:
             output = target_fn(ex.inputs)
@@ -286,7 +310,19 @@ def run_marine_evals(
                 llm_quality_scores.append(float(q_llm["score"]))
             if not s_llm.get("skipped"):
                 llm_safety_scores.append(float(s_llm["score"]))
+            logger.info(
+                "LLM sidecar %s: quality score=%.3f (skipped=%s, model=%s) | "
+                "safety score=%.3f (skipped=%s, model=%s)",
+                ex.example_id, q_llm["score"], q_llm.get("skipped"),
+                q_llm.get("model", ""), s_llm["score"], s_llm.get("skipped"),
+                s_llm.get("model", ""),
+            )
         else:
+            if idx == 0:
+                logger.debug(
+                    "LLM sidecar disabled — deterministic gate only "
+                    "(enable with use_llm_judge=True or ORCA_ENABLE_LLM_JUDGE=1)."
+                )
             q_llm = {"key": "llm_advisory_quality", "score": 1.0, "passed": True,
                      "reasoning": "LLM judge disabled (offline default). "
                      "Re-run with use_llm_judge=True or ORCA_ENABLE_LLM_JUDGE=1.",
@@ -315,6 +351,14 @@ def run_marine_evals(
                 groups[group_key] = {}
                 group_refs[group_key] = ex.reference
             groups[group_key][ex.language] = output
+
+        logger.debug(
+            "Evaluated %s (lang %s, %s): passed=%s | grounded=%.2f safety=%s "
+            "preserv=%.2f risk=%s purity=%s numeral=%s",
+            ex.example_id, ex.language, ex.landing_center, example_passed,
+            g_res["score"], s_res["passed"], p_res["score"],
+            r_res["passed"], l_res["passed"], n_res["passed"],
+        )
 
         # Matrix tracking
         bucket = ex.metadata.get("category")
@@ -394,7 +438,21 @@ def run_marine_evals(
         matrix=final_matrix,
     )
 
-    logger.info("Evaluation complete: %d/%d passed in %.2fs", passed_count, n, elapsed)
+    logger.info(
+        "Evaluation complete: %d/%d passed (%.1f%%) in %.2fs | grounded=%.3f "
+        "safety=%.3f preserv=%.3f risk=%.3f purity=%.3f numeral=%.3f "
+        "xlang=%.3f (%d groups) | llm quality=%.3f (%d judged) safety=%.3f (%d judged)",
+        passed_count, n, (passed_count / n * 100.0 if n else 100.0), elapsed,
+        report.mean_groundedness_score, report.safety_adherence_rate,
+        report.metric_preservation_rate, report.risk_calibration_rate,
+        report.mean_language_purity_score, report.numeral_invariant_rate,
+        report.cross_lang_tier_equality_rate, total_groups,
+        report.llm_quality_rate, report.llm_quality_judged,
+        report.llm_safety_rate, report.llm_safety_judged,
+    )
+    failed_ids = [r["example_id"] for r in results if not r.get("passed")][:10]
+    if failed_ids:
+        logger.info("Top failing examples: %s", failed_ids)
     return report
 
 
@@ -412,7 +470,23 @@ if __name__ == "__main__":
                         "Also enabled via ORCA_ENABLE_LLM_JUDGE=1.")
     parser.add_argument("--llm-sample", type=int, default=None,
                         help="Judge only first N examples (cost control, e.g. --llm-sample 20).")
+    parser.add_argument("--log-level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="Log verbosity (default INFO; DEBUG shows per-example scores).")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Shortcut for --log-level DEBUG.")
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else getattr(logging, args.log_level, logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
+    logger.info(
+        "Runner CLI: dataset=%s out=%s html=%s llm_judge=%s llm_sample=%s",
+        args.dataset or "<default golden+seed>", args.out, args.html or "<skip>",
+        args.llm_judge, args.llm_sample,
+    )
 
     if args.dataset:
         ds = load_golden_v1(args.dataset)
