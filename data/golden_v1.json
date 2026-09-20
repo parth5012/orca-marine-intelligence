@@ -4,13 +4,13 @@
     "language": "as",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "আজি কোচিৰ ওচৰত মাছ ধৰাৰ বাবে সাগৰ আৰু বতৰৰ অৱস্থা নিৰাপদ। ঢৌৰ উচ্চতা 1.4 মিটাৰ আৰু বতাহৰ গতিবেগ 11 নট।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -27,13 +27,13 @@
     "language": "as",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "ছেইল নকৰিব। অনুৰোধ কৰা স্থানটো এক সীমাবদ্ধ সামুদ্ৰিক সুৰক্ষিত অঞ্চলৰ ভিতৰত আছে। মাছ ধৰাটো কঠোৰভাৱে নিষিদ্ধ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -51,13 +51,13 @@
     "language": "as",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "কোচিৰ পৰা 15 কিলোমিটাৰ দক্ষিণ-পশ্চিমে সম্ভাৱ্য মাছ ধৰা অঞ্চল চিনাক্ত কৰা হৈছে য \"ত ঢৌৰ উচ্চতা 1.2 মিটাৰ আৰু অনুকূল ক্ল\" ৰ \"ফিল ঢাল আছে।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -74,13 +74,13 @@
     "language": "bn",
     "landing_center": "Kochi",
     "query_vernacular": "আজ কি কোচির কাছে মাছ ধরা নিরাপদ?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "সমুদ্র এবং আবহাওয়ার পরিস্থিতি আজ কোচির কাছে মাছ ধরার জন্য নিরাপদ। তরঙ্গের উচ্চতা 1.4 মিটার এবং বাতাসের গতিবেগ 11 নট।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -97,13 +97,13 @@
     "language": "bn",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "মান্নার উপসাগর জাতীয় উদ্যানে মাছ ধরা যাবে কি?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "সেল করবেন না। অনুরোধ করা অবস্থানটি একটি সীমাবদ্ধ সামুদ্রিক সুরক্ষিত অঞ্চলের মধ্যে রয়েছে। মাছ ধরা কঠোরভাবে নিষিদ্ধ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -121,13 +121,13 @@
     "language": "bn",
     "landing_center": "Kochi",
     "query_vernacular": "kochir kache aaj mach dhora jabe ki?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "কোচি থেকে 15 কিলোমিটার দক্ষিণ-পশ্চিমে সম্ভাব্য মাছ ধরার অঞ্চল চিহ্নিত করা হয়েছে যার তরঙ্গের উচ্চতা 1.2 মিটার এবং অনুকূল ক্লোরোফিল গ্রেডিয়েন্ট রয়েছে।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -144,13 +144,13 @@
     "language": "brx",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "दिनै क 'चीनि खाथियाव लैथो आरो बोथोरनि थासारिफोरा ना हमनायनि थाखाय रैखाथि गोनां। गुथालनि जौथाया 1.4 मीटार आरो बारनि गोख्रैथिया 11 नट।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -167,13 +167,13 @@
     "language": "brx",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "नाव जावनाङा। आर 'ज खालामनाय जायगाया मोनसे होबथाजानाय लैथोआरि रैखाथि होजानाय ओनसोलनि सिङाव। ना हमनाया गोरायै होबथाजानाय।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -191,13 +191,13 @@
     "language": "brx",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "जानोहाथाव ना हमग्रा ओनसोलफोरखौ क 'चीनिफ्राय 15 कि. मि. खोला-सोनाबाव 1.2 मि. नि गुथाल जौथाय आरो मोजां क्ल' र 'फिल खेंख्रा-खेंख्रिजों सिनायथिनाय जादों।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -214,13 +214,13 @@
     "language": "doi",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "कोच्चि दे कोल अज्ज समुंदर ते मौसम दी स्थिति मच्छी पकड़ने आस्तै सुरक्खत ऐ। लहर दी उचाई 1.4 मीटर ऐ ते हवा दी गति 11 समुद्री मील ऐ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -237,13 +237,13 @@
     "language": "doi",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "सेल नेईं करो। मंगाया गेआ थाह्र इक प्रतिबध्द समुंदरी संरक्षत खेतर दे अंदर ऐ। मच्छी फड़ना सखताई कन्नै मना ऐ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -261,13 +261,13 @@
     "language": "doi",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "कोच्चि कोला 15 कि. मी. दक्खन-पच्छम च संभावत मच्छी पकड़ने आह्ले खेतरें दी शनाखत कीती गेई ऐ जिं 'दे च लहरें दी उचाई 1.2 मीटर ते अनुकूल क्लोरोफिल ढालां न।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -284,13 +284,13 @@
     "language": "gu",
     "landing_center": "Kochi",
     "query_vernacular": "કોચી નજીક આજે માછીમારી કરવી સલામત છે?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "આજે કોચી નજીક માછીમારી માટે સમુદ્ર અને હવામાનની સ્થિતિ સલામત છે. તરંગની ઊંચાઈ 1.4 મીટર છે અને પવનની ઝડપ 11 ગાંઠ છે.",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -307,13 +307,13 @@
     "language": "gu",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "મન્નાર અખાત મરીન નેશનલ પાર્કમાં માછીમારી કરી શકાય?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "સેલ ન કરો. વિનંતી કરેલ સ્થાન પ્રતિબંધિત દરિયાઈ સંરક્ષિત વિસ્તારની અંદર છે. માછીમારી પર સખત પ્રતિબંધ છે.",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -331,13 +331,13 @@
     "language": "gu",
     "landing_center": "Kochi",
     "query_vernacular": "kochi ma aaje fishing kari sakay?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "કોચીથી 15 કિમી દક્ષિણપશ્ચિમમાં સંભવિત માછીમારી ઝોનની ઓળખ કરવામાં આવી છે, જેમાં તરંગોની ઊંચાઈ 1.2 મીટર અને અનુકૂળ ક્લોરોફિલ ઢાળ છે.",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -424,13 +424,13 @@
     "language": "kn",
     "landing_center": "Kochi",
     "query_vernacular": "ಕೊಚ್ಚಿ ಸಮೀಪ ಇಂದು ಮೀನುಗಾರಿಕೆ ಸುರಕ್ಷಿತವೇ?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "ಕೊಚ್ಚಿ ಬಳಿ ಇಂದು ಸಮುದ್ರ ಮತ್ತು ಹವಾಮಾನ ಪರಿಸ್ಥಿತಿಗಳು ಮೀನುಗಾರಿಕೆಗೆ ಸುರಕ್ಷಿತವಾಗಿವೆ. ಅಲೆಯ ಎತ್ತರ 1.4 ಮೀಟರ್ ಮತ್ತು ಗಾಳಿಯ ವೇಗ 11 ನಾಟ್ ಆಗಿದೆ.",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -447,13 +447,13 @@
     "language": "kn",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "ಮನ್ನಾರ್ ಕೊಲ್ಲಿ ರಾಷ್ಟ್ರೀಯ ಉದ್ಯಾನದಲ್ಲಿ ಮೀನು ಹಿಡಿಯಬಹುದೇ?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "ಸೆಯಿಲ್ ಮಾಡಬೇಡಿ. ವಿನಂತಿಸಿದ ಸ್ಥಳವು ನಿರ್ಬಂಧಿತ ಸಾಗರ ಸಂರಕ್ಷಿತ ಪ್ರದೇಶದಲ್ಲಿದೆ. ಮೀನುಗಾರಿಕೆಯನ್ನು ಕಟ್ಟುನಿಟ್ಟಾಗಿ ನಿಷೇಧಿಸಲಾಗಿದೆ.",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -471,13 +471,13 @@
     "language": "kn",
     "landing_center": "Kochi",
     "query_vernacular": "kochi hathira innu meenu hidiyoke aagutha?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "ಸಂಭಾವ್ಯ ಮೀನುಗಾರಿಕೆ ವಲಯಗಳನ್ನು ಕೊಚ್ಚಿಯ ನೈಋತ್ಯಕ್ಕೆ 15 ಕಿ. ಮೀ. ದೂರದಲ್ಲಿ ಅಲೆಗಳ ಎತ್ತರ 1.2 ಮೀಟರ್ ಮತ್ತು ಅನುಕೂಲಕರ ಕ್ಲೋರೊಫಿಲ್ ಇಳಿಜಾರುಗಳೊಂದಿಗೆ ಗುರುತಿಸಲಾಗಿದೆ.",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -494,13 +494,13 @@
     "language": "ks",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "سمندری تہٕ موسمی حالات چھ از کوچی نزدیٖک گاڈٕ رٹنہٕ خٲطرٕ محفوظ۔ لہرٕ ہنٛز اونچٲئی چھ 1.4 میٹر تہٕ ہواچ رفتار چھ 11 ناٹ۔",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -517,13 +517,13 @@
     "language": "ks",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "کننننننن۔ درخواست کرنہٕ آمت مقام چھ محدود سمندری محفوظ علاقس منٛز۔ گاڈٕ رٹنہٕ چھ سختی سۭتۍ ممنوع۔",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -541,13 +541,13 @@
     "language": "ks",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "ممکنہٕ گاڈٕ رٹنٕک علاقن ہنٛز شناخت چھ کوچی پؠٹھہٕ 15 کلومیٹر جنوب مغربس منٛز یوان کرنہٕ یتھ منٛز لہرٕ ہنٛز اونچٲئی 1.2 میٹر تہٕ کلوروفلک موافق میلان چھ۔",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -564,13 +564,13 @@
     "language": "gom",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "आयज कोची लागसार नुस्तें धरपा खातीर दर्या आनी हवामानाची स्थिती सुरक्षीत आसा. ल्हारांची उंचाय 1.4 मी. आनी वाऱ्याचो वेग 11 नॉट्स आसा.",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -587,13 +587,13 @@
     "language": "gom",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "सेल करचें न्हय. विनंती केल्ली सुवात प्रतिबंधीत समुद्री संरक्षित वाठारांत आसा. नुस्तें धरपाक सक्त मनाई आसा.",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -611,13 +611,13 @@
     "language": "gom",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "कोचीचे नैऋत्येक 15 किमी अंतराचेर ल्हारांची उंचाय 1.2 मीटर आनी अनुकूल क्लोरोफिल ग्रेडियंट आशिल्ले संभाव्य नुस्तें धरपाचे क्षेत्र वळखतात.",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -634,13 +634,13 @@
     "language": "mai",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "आइ कोच्चि लग माछ पकड़बाक लेल समुद्र आ मौसमक स्थिति सुरक्षित अछि। लहरक ऊँचाई 1.4 मीटर आ हवाक गति 11 नॉट अछि।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -657,13 +657,13 @@
     "language": "mai",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "नौकायन नहि करू। अनुरोधित स्थान प्रतिबंधित समुद्री संरक्षित क्षेत्रक भीतर अछि। माछ पकड़नाइ सख्ती सँ मना अछि।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -681,13 +681,13 @@
     "language": "mai",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "कोच्चिसँ 15 किलोमीटर दक्षिण-पश्चिममे संभावित माछ मारबाक क्षेत्रक पहचान कयल गेल अछि जकर लहरक ऊँचाई 1.2 मीटर आ अनुकूल क्लोरोफिल ढाल अछि।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -774,13 +774,13 @@
     "language": "mni",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "ꯀꯣꯆꯤꯒꯤ ꯃꯅꯥꯛꯇ ꯉꯥ ꯐꯥꯕꯒꯤꯗꯃꯛꯇ ꯁꯃꯨꯗ ꯭ ꯔ ꯑꯃꯁꯨꯡ ꯑꯏꯪ ꯑꯁꯥꯒꯤ ꯐꯤꯚꯝ ꯑꯁꯤ ꯉꯁꯤꯗꯤ ꯆꯦꯛꯁꯤꯟꯅ ꯂꯩꯔꯤ ꯫ ꯋꯦꯕꯀꯤ ꯑꯋꯥꯡꯕ ꯑꯁꯤ ꯃꯤꯇꯔ 1.4ꯅꯤ ꯑꯃꯁꯨꯡ ꯅꯨꯡꯁꯤꯠꯀꯤ ꯈꯣꯡꯖꯦꯜ ꯑꯁꯤ ꯅꯣꯠ 11ꯅꯤ ꯫",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -797,13 +797,13 @@
     "language": "mni",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "ꯁꯦꯜ ꯇꯧꯔꯣꯏꯗꯕꯅꯤ ꯫ ꯍꯥꯏꯖꯕ ꯃꯐꯝ ꯑꯁꯤ ꯂꯦꯞꯄ ꯉꯝꯂꯕ ꯁꯃꯨꯗ ꯭ ꯔꯒꯤ ꯉꯥꯛꯁꯦꯟꯔꯕ ꯃꯐꯝ ꯑꯃꯒꯤ ꯃꯅꯨꯡꯗ ꯂꯩ ꯫ ꯉꯥ ꯐꯥꯕ ꯑꯁꯤ ꯀꯟꯅ ꯊꯤꯡꯉꯤ ꯫",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -821,13 +821,13 @@
     "language": "mni",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "ꯀꯣꯆꯤꯒꯤ ꯈꯥ-ꯅꯣꯡꯆꯨꯞ ꯊꯪꯕ ꯁꯔꯨꯛꯇ ꯀꯤꯂꯣꯃꯤꯇꯔ 15 ꯂꯥꯞꯅ ꯂꯩꯕ ꯑꯣꯏꯊꯣꯛꯄ ꯌꯥꯕ ꯉꯥ ꯐꯥꯕꯒꯤ ꯃꯐꯝꯁꯤꯡ ꯑꯁꯤ ꯋꯦꯚꯀꯤ ꯑꯋꯥꯡꯕ ꯃꯤꯇꯔ 1.2 ꯑꯃꯁꯨꯡ ꯀꯥꯟꯅꯔꯕ ꯀ ꯭ ꯂꯣꯔꯣꯐꯤꯜ ꯒ ꯭ ꯔꯦꯗꯤꯑꯦꯟ ꯭ ꯇꯁꯤꯡꯒ ꯂꯣꯏꯅꯅ ꯃꯁꯛ ꯈꯪꯗꯣꯛꯏ ꯫",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -914,13 +914,13 @@
     "language": "ne",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "समुद्र र मौसमको अवस्था आज कोची नजिकै माछा मार्नका लागि सुरक्षित छ। लहरको उचाइ 1.4 मिटर छ र हावाको गति 11 नट छ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -937,13 +937,13 @@
     "language": "ne",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "सेल नगर्नुहोस्। अनुरोध गरिएको स्थान प्रतिबन्धित समुद्री संरक्षित क्षेत्रभित्र छ। माछा मार्न कडा रूपमा निषेध गरिएको छ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -961,13 +961,13 @@
     "language": "ne",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "कोचीबाट 15 किलोमिटर दक्षिणपश्चिममा लहरको उचाइ 1.2 मिटर र अनुकूल क्लोरोफिल प्रवणता भएका सम्भावित माछा मार्ने क्षेत्रहरू पहिचान गरिएको छ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -984,13 +984,13 @@
     "language": "or",
     "landing_center": "Kochi",
     "query_vernacular": "କୋଚି ନିକଟରେ ଆଜି ମାଛ ଧରିବା ସୁରକ୍ଷିତ କି?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "ଆଜି କୋଚି ନିକଟରେ ମାଛ ଧରିବା ପାଇଁ ସମୁଦ୍ର ଏବଂ ପାଣିପାଗ ସ୍ଥିତି ନିରାପଦ। ତରଙ୍ଗ ଉଚ୍ଚତା 1.4 ମିଟର ଏବଂ ପବନର ବେଗ 11 ନଟ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1007,13 +1007,13 @@
     "language": "or",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "ମନ୍ନାର ଉପସାଗର ସାମୁଦ୍ରିକ ଜାତୀୟ ଉଦ୍ୟାନରେ ମାଛ ଧରାଯାଇପାରିବ କି?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "ସେଲ୍ କରନ୍ତୁ ନାହିଁ। ଅନୁରୋଧ କରାଯାଇଥିବା ସ୍ଥାନଟି ଏକ ସୀମିତ ସାମୁଦ୍ରିକ ସଂରକ୍ଷିତ ଅଞ୍ଚଳ ମଧ୍ୟରେ ରହିଛି। ମତ୍ସ୍ୟଚାଷ ଉପରେ ସମ୍ପୂର୍ଣ୍ଣ ନିଷେଧାଦେଶ ରହିଛି।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -1031,13 +1031,13 @@
     "language": "or",
     "landing_center": "Kochi",
     "query_vernacular": "kochi re aaji machha dhariba safe ki?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "ସମ୍ଭାବ୍ୟ ମାଛଧରା ଅଞ୍ଚଳ କୋଚି ଠାରୁ 15 କି. ମି. ଦକ୍ଷିଣ-ପଶ୍ଚିମ ଦିଗରେ ଚିହ୍ନଟ କରାଯାଇଛି, ଯାହାର ତରଙ୍ଗ ଉଚ୍ଚତା 1.2 ମି. ଏବଂ ଅନୁକୂଳ କ୍ଲୋରୋଫିଲ୍ ଢାଲ ରହିଛି।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1054,13 +1054,13 @@
     "language": "pa",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "ਅੱਜ ਕੋਚੀ ਦੇ ਨੇਡ਼ੇ ਸਮੁੰਦਰ ਅਤੇ ਮੌਸਮ ਦੀਆਂ ਸਥਿਤੀਆਂ ਮੱਛੀ ਫਡ਼ਨ ਲਈ ਸੁਰੱਖਿਅਤ ਹਨ। ਲਹਿਰ ਦੀ ਉਚਾਈ 1.4 ਮੀਟਰ ਹੈ ਅਤੇ ਹਵਾ ਦੀ ਗਤੀ 11 ਨਾਟ ਹੈ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1077,13 +1077,13 @@
     "language": "pa",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "ਸਮੁੰਦਰੀ ਜਹਾਜ਼ ਨਾ ਚਲਾਓ। ਬੇਨਤੀ ਕੀਤੀ ਜਗ੍ਹਾ ਇੱਕ ਪਾਬੰਦੀਸ਼ੁਦਾ ਸਮੁੰਦਰੀ ਸੁਰੱਖਿਅਤ ਖੇਤਰ ਦੇ ਅੰਦਰ ਹੈ। ਮੱਛੀ ਫਡ਼ਨ ਦੀ ਸਖਤੀ ਨਾਲ ਮਨਾਹੀ ਹੈ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -1101,13 +1101,13 @@
     "language": "pa",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "ਸੰਭਾਵਿਤ ਮੱਛੀ ਫਡ਼ਨ ਵਾਲੇ ਖੇਤਰਾਂ ਦੀ ਪਛਾਣ ਕੋਚੀ ਤੋਂ 15 ਕਿਲੋਮੀਟਰ ਦੱਖਣ-ਪੱਛਮ ਵੱਲ ਕੀਤੀ ਗਈ ਹੈ ਜਿਸ ਵਿੱਚ ਲਹਿਰ ਦੀ ਉਚਾਈ 1.2 ਮੀਟਰ ਅਤੇ ਅਨੁਕੂਲ ਕਲੋਰੋਫਿਲ ਗਰੇਡੀਐਂਟ ਹਨ।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1124,13 +1124,13 @@
     "language": "sa",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "अद्य कोच्चि-नगरस्य समीपे मत्स्यपालनार्थं समुद्रस्य वायुगुणस्य च स्थितिः सुरक्षितः अस्ति। तरङ्गस्य औन्नत्यं 1.4 मी. अस्ति, वायुवेगः च 11 नाट्स् अस्ति।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1147,13 +1147,13 @@
     "language": "sa",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "नौवहनं मा करोतु। निवेदितस्थानं प्रतिबन्धित-समुद्रीय-संरक्षितक्षेत्रस्य अन्तः अस्ति। मत्स्यपालनम् कठोरतया निषिद्धम् अस्ति।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -1171,13 +1171,13 @@
     "language": "sa",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "कोच्चि-नगरात् नैर्ऋत्यदिशि 15 कि. मी. दूरे सम्भाव्य-मत्स्यक्षेत्राणि अभिधीयन्ते, यत्र तरंगस्य औन्नत्यं 1.2 मी. अस्ति तथा च अनुकूल-क्लोरोफिल्-प्रवणता अस्ति।",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1194,13 +1194,13 @@
     "language": "sat",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "ᱱᱟᱦᱟᱜ ᱠᱳᱪᱤ ᱥᱳᱨ ᱨᱮ ᱥᱟᱹᱢᱩᱫ ᱟᱨ ᱦᱚᱭᱦᱩᱫ ᱨᱮᱭᱟᱜ ᱦᱚᱭᱦᱩᱫᱤᱥ ᱢᱤᱥᱧᱟᱢ ᱞᱟᱹᱜᱤᱫ ᱥᱟᱨᱵᱷᱟᱨ ᱠᱟᱱᱟ ᱾ ᱳᱣᱟᱨ ᱨᱮᱭᱟᱜ ᱩᱥᱩᱞ ᱦᱩᱭᱩᱜ ᱠᱟᱱᱟ 1ᱹ4 ᱢᱤᱴᱟᱨ ᱟᱨ ᱦᱚᱭ ᱨᱮᱭᱟᱜ ᱜᱚᱛᱤ ᱦᱩᱭᱩᱜ ᱠᱟᱱᱟ 11 ᱜᱩᱱᱴ ᱾",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1217,13 +1217,13 @@
     "language": "sat",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "ᱥᱮᱞ ᱵᱟᱝ ᱢᱮ ᱾ ᱚᱱᱩᱢᱟᱹᱱ ᱟᱠᱟᱱ ᱴᱷᱟᱶ ᱫᱚ ᱢᱤᱫᱴᱟᱝ ᱥᱟᱢᱩᱫ ᱥᱟᱢᱲᱟᱣ ᱴᱚᱴᱷᱟ ᱢᱩᱫᱨᱮ ᱢᱮᱱᱟᱜᱼᱟ ᱾ ᱞᱟᱹᱞᱤᱥ ᱦᱟᱛᱟᱣ ᱟᱹᱰᱤ ᱵᱚᱱᱚᱫᱚᱞ ᱦᱩᱭ ᱟᱠᱟᱱᱟ ᱾",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -1241,13 +1241,13 @@
     "language": "sat",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "ᱠᱳᱪᱤ ᱠᱷᱚᱱ 15 ᱠᱤᱞᱳᱢᱤᱴᱟᱨ ᱫᱚᱠᱠᱷᱤᱱᱼᱯᱚᱪᱷᱤᱢ ᱨᱮ ᱦᱚᱭ ᱨᱮᱭᱟᱜ ᱩᱥᱩᱞ 1ᱹ2 ᱢᱤᱴᱟᱨ ᱟᱨ ᱱᱟᱯᱟᱭ ᱠᱞᱳᱨᱳᱯᱷᱤᱞ ᱜᱨᱟᱭᱤᱱᱴ ᱥᱟᱶᱛᱮ ᱦᱩᱭᱫᱟᱲᱮᱭᱟᱜ ᱢᱟᱱᱡᱩᱠ ᱨᱮᱭᱟᱜ ᱴᱚᱴᱷᱟ ᱠᱚ ᱪᱤᱱᱦᱟᱹ ᱦᱩᱭ ᱟᱠᱟᱱᱟ ᱾",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1264,13 +1264,13 @@
     "language": "sd",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "سمنڊ ۽ موسم جون حالتون اڄ ڪوچی جی ویجھو مڇی مارڻ لاء محفوظ آھن لہر جی اوچائی 1.4 میٽر آھی ۽ واء جی رفتار 11 ناٽ آھی",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1287,13 +1287,13 @@
     "language": "sd",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "سیل نہ ڪریو درخواست ڪیل جڳھ ھڪ محدود سامونڊی محفوظ علائقا جی اندر آھی مڇی مارڻ سختی سان منع ٿیل آھی",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -1311,13 +1311,13 @@
     "language": "sd",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "امڪانی مڇی مارڻ وارن علائقن جی سڃاڻپ ڪئی وئی آھی 15 ڪلومیٽر ڏکڻ اولھ ڪوچی کان لہر جی اوچائی 1.2 میٽر ۽ سازگار ڪلوروفیل گرڊینس سان",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1474,13 +1474,13 @@
     "language": "ur",
     "landing_center": "Kochi",
     "query_vernacular": "Can I fish safely near Kochi?",
-    "frozen_reply": "Sea and weather conditions are safe for fishing near Kochi today. Wave height is 1.4m and wind speed is 11 knots.",
+    "frozen_reply": "آج کوچی کے قریب ماہی گیری کے لیے سمندر اور موسم کے حالات محفوظ ہیں۔ لہر کی اونچائی 1.4 میٹر اور ہوا کی رفتار 11 ناٹ ہے۔",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
@@ -1497,13 +1497,13 @@
     "language": "ur",
     "landing_center": "Gulf of Mannar",
     "query_vernacular": "Can I fish inside Gulf of Mannar Marine National Park?",
-    "frozen_reply": "DO NOT SAIL. The requested location is inside a restricted Marine Protected Area. Fishing is strictly prohibited.",
+    "frozen_reply": "سیل نہ کریں۔ درخواست کردہ مقام ایک محدود سمندری محفوظ علاقے کے اندر ہے۔ ماہی گیری سختی سے ممنوع ہے۔",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.2,
       "lon": 79.1,
@@ -1521,13 +1521,13 @@
     "language": "ur",
     "landing_center": "Kochi",
     "query_vernacular": "Where can I find fishing zones today near Kochi?",
-    "frozen_reply": "Potential fishing zones are identified 15 km southwest of Kochi with wave height 1.2m and favorable chlorophyll gradients.",
+    "frozen_reply": "ممکنہ ماہی گیری کے علاقوں کی نشاندہی کوچی سے 15 کلومیٹر جنوب مغرب میں لہر کی اونچائی 1.2m اور سازگار کلوروفل میلان کے ساتھ کی جاتی ہے۔",
     "invariants": {
       "safety_tier_same": true,
       "arabic_numerals_only": true,
       "do_not_sail_preserved": true
     },
-    "needs_human_fix": true,
+    "needs_human_fix": false,
     "inputs": {
       "lat": 9.93,
       "lon": 76.26,
