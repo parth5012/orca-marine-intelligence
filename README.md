@@ -206,17 +206,22 @@ Open `http://localhost:3000` in your browser.
 
 ## 🧪 Testing & Verification
 
-ORCA enforces strict test-driven development with full mock and live data validation:
+ORCA separates **unit/integration tests** (CI gate — must be green to merge)
+from **LLM quality evals** (measure-only LangSmith harness — tracks baselines,
+never blocks). See [`evals/README.md`](evals/README.md) for the eval guide.
 
 ```bash
-# Run complete test suite (140+ unit and integration tests)
-python -m pytest
+# Unit + API + integration tests (35 files, fully mocked, fast)
+python -m pytest tests -q
 
-# Run live data fetcher tests specifically
-python -m pytest tests/test_live_fetchers.py
+# LLM quality evals (5 files, offline, 7 evaluators over 146+ examples)
+python -m pytest evals -q
 
-# Run agent reasoning verification
-python -m pytest tests/test_agents.py tests/test_dynamic_agents.py
+# Everything
+python -m pytest tests evals -q
+
+# Full offline scorecard (14 buckets × 23 languages matrix)
+python -m backend.evals.runner --out reports/golden_v1_scorecard.md
 ```
 
 ---
