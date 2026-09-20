@@ -275,6 +275,14 @@ def run_marine_evals(
         results.append({
             "example_id": ex.example_id,
             "landing_center": ex.landing_center,
+            "language": ex.language,
+            "bucket": bucket,
+            "query": ex.inputs.get("query", "") or ex.query_vernacular or "",
+            "query_vernacular": ex.query_vernacular,
+            "inputs": dict(ex.inputs),
+            "reference": dict(ex.reference),
+            "output": {k: v for k, v in output.items()},
+            "advisory_text": output.get("advisory_text") or output.get("text") or "",
             "groundedness": g_res,
             "safety": s_res,
             "preservation": p_res,
@@ -333,6 +341,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run ORCA Marine Offline Evaluations")
     parser.add_argument("--dataset", default=None, help="Path to golden dataset JSON (or default)")
     parser.add_argument("--out", default="reports/golden_v1_scorecard.md", help="Scorecard output path")
+    parser.add_argument("--html", default="reports/evals", help="HTML dashboard output dir (empty to skip)")
     args = parser.parse_args()
 
     if args.dataset:
@@ -353,3 +362,9 @@ if __name__ == "__main__":
 
     print(f"Evaluation report written to {out_path}")
     print(scorecard_text)
+
+    if args.html:
+        from backend.evals.report_html import write_html_report
+
+        paths = write_html_report(rep, out_dir=args.html)
+        print(f"HTML dashboard written to {paths['dashboard']} ({paths['pages']} case pages)")
