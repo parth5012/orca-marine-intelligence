@@ -12,6 +12,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useApp } from '@/context/AppContext';
 import SafetyBadge from '@/map/SafetyBadge';
 
 interface Weather {
@@ -31,6 +32,8 @@ interface Props {
 const FALLBACK: Weather = { waves: null, wind: null, danger: 'unknown', badge: 'amber', status: 'Sea state unavailable (backend offline)' };
 
 export default function SafetyBanner({ lat, lon }: Props) {
+  const { themeMode } = useApp();
+  const isLight = themeMode === 'light';
   const [w, setW] = useState<Weather>(FALLBACK);
 
   useEffect(() => {
@@ -53,9 +56,16 @@ export default function SafetyBanner({ lat, lon }: Props) {
   }, [lat, lon]);
 
   return (
-    <div data-testid="officer-safety-banner" className="flex items-center gap-3 px-4 py-2 bg-slate-900/60 border-b border-slate-800 text-xs text-slate-300">
+    <div
+      data-testid="officer-safety-banner"
+      className={`flex items-center gap-3 px-4 py-2 text-xs transition-colors ${
+        isLight
+          ? 'glass-panel-light border-b border-cyan-100 text-slate-700'
+          : 'glass-panel-dark border-b border-cyan-900/40 text-slate-300'
+      }`}
+    >
       <SafetyBadge waves={w.waves} wind={w.wind} danger={w.danger} badge={w.badge} compact />
-      <span>{w.status}</span>
+      <span className={isLight ? 'text-slate-600' : 'text-slate-300'}>{w.status}</span>
     </div>
   );
 }

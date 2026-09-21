@@ -13,6 +13,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useApp } from '@/context/AppContext';
 import type { OfficerRole } from './OfficerTopBar';
 import type { DepartureRow } from './RegisterTable';
 
@@ -40,6 +41,8 @@ function isAlert(d: DepartureRow): boolean {
 }
 
 export default function AlertsFeed({ portId, role, onSelect }: Props) {
+  const { themeMode } = useApp();
+  const isLight = themeMode === 'light';
   const [rows, setRows] = useState<DepartureRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,26 +74,46 @@ export default function AlertsFeed({ portId, role, onSelect }: Props) {
   const alerts = rows.filter(isAlert);
 
   return (
-    <div data-testid="alerts-feed" className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-200">
-      <h2 className="text-sm font-bold text-white">Alerts (silent)</h2>
+    <div
+      data-testid="alerts-feed"
+      className={`rounded-2xl p-4 text-xs transition-colors border shadow-sm ${
+        isLight
+          ? 'glass-panel border-cyan-100 text-slate-800'
+          : 'glass-panel-dark border-cyan-900/40 text-slate-200'
+      }`}
+    >
+      <h2 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>Alerts (silent)</h2>
       <dl className="mt-1 flex gap-4">
-        <div><dt className="inline text-slate-500">Overdue </dt><dd data-testid="alert-count-overdue" className="inline font-bold text-white">{overdue}</dd></div>
-        <div><dt className="inline text-slate-500">MPA </dt><dd data-testid="alert-count-mpa" className="inline font-bold text-white">{mpa}</dd></div>
-        <div><dt className="inline text-slate-500">Weather-flip </dt><dd data-testid="alert-count-weather" className="inline font-bold text-white">{weatherFlip}</dd></div>
+        <div>
+          <dt className={`inline ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Overdue </dt>
+          <dd data-testid="alert-count-overdue" className={`inline font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{overdue}</dd>
+        </div>
+        <div>
+          <dt className={`inline ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>MPA </dt>
+          <dd data-testid="alert-count-mpa" className={`inline font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{mpa}</dd>
+        </div>
+        <div>
+          <dt className={`inline ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Weather-flip </dt>
+          <dd data-testid="alert-count-weather" className={`inline font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{weatherFlip}</dd>
+        </div>
       </dl>
-      {error && <p className="mt-1 text-slate-500">{error}</p>}
+      {error && <p className={`mt-1 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{error}</p>}
       <ul data-testid="alerts-rows" className="mt-2 flex flex-col gap-1">
-        {alerts.length === 0 && <li className="text-slate-500">No active alerts.</li>}
+        {alerts.length === 0 && <li className={isLight ? 'text-slate-500' : 'text-slate-400'}>No active alerts.</li>}
         {alerts.map((d) => (
           <li key={d.id}>
             <button
               type="button"
               data-testid={`alert-row-${d.id}`}
               onClick={() => onSelect?.(d.id)}
-              className="w-full rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-left hover:border-cyan-600"
+              className={`w-full rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
+                isLight
+                  ? 'border-cyan-100 bg-white/80 hover:border-cyan-400 hover:bg-white text-slate-800'
+                  : 'border-cyan-900/40 bg-slate-800/60 hover:border-cyan-500 hover:bg-slate-800/80 text-slate-200'
+              }`}
             >
-              <span className="font-semibold text-white">{d.boat_id}</span>
-              <span className="ml-2 text-slate-400">
+              <span className={`font-semibold ${isLight ? 'text-slate-900' : 'text-white'}`}>{d.boat_id}</span>
+              <span className={`ml-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
                 {[d.overdue_status !== 'none' ? `overdue ${d.overdue_mins}m` : null,
                   d.geofence_flag !== 'none' ? d.geofence_flag : null,
                   d.weather_flag === 'flip' ? 'weather-flip' : null].filter(Boolean).join(' · ')}

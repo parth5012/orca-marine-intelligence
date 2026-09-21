@@ -13,6 +13,7 @@
 'use client';
 
 import MapView from '@/map/MapView';
+import { useApp } from '@/context/AppContext';
 
 interface Props {
   center: [number, number];
@@ -21,8 +22,18 @@ interface Props {
 }
 
 export default function OfficerMiniMap({ center, zoom, sector }: Props) {
+  const { themeMode } = useApp();
+  const isLight = themeMode === 'light';
+
   return (
-    <div data-testid="officer-mini-map" className="h-80 w-full overflow-hidden rounded-xl border border-slate-800">
+    <div
+      data-testid="officer-mini-map"
+      className={`h-80 w-full overflow-hidden rounded-2xl border transition-colors shadow-sm ${
+        isLight
+          ? 'glass-panel border-cyan-100'
+          : 'glass-panel-dark border-cyan-900/40'
+      }`}
+    >
       <MapView center={center} zoom={zoom} sector={sector} />
     </div>
   );

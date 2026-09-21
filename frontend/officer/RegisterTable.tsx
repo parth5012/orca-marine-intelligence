@@ -15,6 +15,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useApp } from '@/context/AppContext';
 import type { OfficerPort } from './ports';
 import type { OfficerRole } from './OfficerTopBar';
 
@@ -68,10 +69,14 @@ const GEOFENCE_LABEL: Record<DepartureRow['geofence_flag'], string | null> = {
   outside_eez: 'OUTSIDE EEZ',
 };
 
-function rowTone(d: DepartureRow): string {
-  if (d.overdue_status === 'red') return 'border-red-800 bg-red-950/40';
-  if (d.overdue_status === 'amber') return 'border-amber-800 bg-amber-950/30';
-  return 'border-slate-800 bg-slate-900/40';
+function rowTone(d: DepartureRow, isLight: boolean): string {
+  if (d.overdue_status === 'red') {
+    return isLight ? 'border-rose-300 bg-rose-50/70 text-slate-800' : 'border-rose-900/60 bg-rose-950/40 text-slate-200';
+  }
+  if (d.overdue_status === 'amber') {
+    return isLight ? 'border-amber-300 bg-amber-50/70 text-slate-800' : 'border-amber-900/60 bg-amber-950/30 text-slate-200';
+  }
+  return isLight ? 'border-cyan-100 bg-white/70 text-slate-800' : 'border-cyan-900/40 bg-slate-800/40 text-slate-200';
 }
 
 function toLocalInput(iso: string): string {
@@ -82,6 +87,8 @@ function toLocalInput(iso: string): string {
 }
 
 export default function RegisterTable({ port, role, highlightId }: Props) {
+  const { themeMode } = useApp();
+  const isLight = themeMode === 'light';
   const watch = role === 'watch';
   const [rows, setRows] = useState<DepartureRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -164,9 +171,24 @@ export default function RegisterTable({ port, role, highlightId }: Props) {
     Number.isFinite(Number(form.dest_lat)) &&
     Number.isFinite(Number(form.dest_lon));
 
+  const inputClass = `rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+    isLight
+      ? 'border-cyan-200 bg-white/90 text-slate-900 placeholder:text-slate-400'
+      : 'border-cyan-900/40 bg-slate-800/60 text-slate-100 placeholder:text-slate-500'
+  }`;
+
   return (
-    <div data-testid="register-table" className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-200">
-      <h2 className="text-sm font-bold text-white">Departure register — {watch ? 'all ports' : port.name}</h2>
+    <div
+      data-testid="register-table"
+      className={`rounded-2xl p-4 text-xs transition-colors border shadow-sm ${
+        isLight
+          ? 'glass-panel border-cyan-100 text-slate-800'
+          : 'glass-panel-dark border-cyan-900/40 text-slate-200'
+      }`}
+    >
+      <h2 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+        Departure register — {watch ? 'all ports' : port.name}
+      </h2>
       {!watch && (
         <form
           data-testid="register-form"
@@ -176,21 +198,21 @@ export default function RegisterTable({ port, role, highlightId }: Props) {
             if (formOk) submit();
           }}
         >
-          <input aria-label="Boat ID" data-testid="register-boat" value={form.boat_id} onChange={(e) => set('boat_id', e.target.value)} placeholder="Boat ID" className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5" />
-          <input aria-label="Crew" data-testid="register-crew" value={form.crew} onChange={(e) => set('crew', e.target.value)} placeholder="Crew" inputMode="numeric" className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5" />
-          <input aria-label="Time out" data-testid="register-timeout" type="datetime-local" value={form.time_out} onChange={(e) => set('time_out', e.target.value)} className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5" />
-          <input aria-label="Expected in" data-testid="register-expected" type="datetime-local" value={form.expected_in} onChange={(e) => set('expected_in', e.target.value)} className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5" />
-          <input aria-label="Dest lat" data-testid="register-lat" value={form.dest_lat} onChange={(e) => set('dest_lat', e.target.value)} placeholder="Dest lat" inputMode="decimal" className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5" />
-          <input aria-label="Dest lon" data-testid="register-lon" value={form.dest_lon} onChange={(e) => set('dest_lon', e.target.value)} placeholder="Dest lon" inputMode="decimal" className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5" />
-          <button type="submit" data-testid="register-submit" disabled={!formOk || posting} className="col-span-2 rounded bg-cyan-600 px-3 py-1.5 font-semibold text-white disabled:opacity-50 sm:col-span-3">
+          <input aria-label="Boat ID" data-testid="register-boat" value={form.boat_id} onChange={(e) => set('boat_id', e.target.value)} placeholder="Boat ID" className={inputClass} />
+          <input aria-label="Crew" data-testid="register-crew" value={form.crew} onChange={(e) => set('crew', e.target.value)} placeholder="Crew" inputMode="numeric" className={inputClass} />
+          <input aria-label="Time out" data-testid="register-timeout" type="datetime-local" value={form.time_out} onChange={(e) => set('time_out', e.target.value)} className={inputClass} />
+          <input aria-label="Expected in" data-testid="register-expected" type="datetime-local" value={form.expected_in} onChange={(e) => set('expected_in', e.target.value)} className={inputClass} />
+          <input aria-label="Dest lat" data-testid="register-lat" value={form.dest_lat} onChange={(e) => set('dest_lat', e.target.value)} placeholder="Dest lat" inputMode="decimal" className={inputClass} />
+          <input aria-label="Dest lon" data-testid="register-lon" value={form.dest_lon} onChange={(e) => set('dest_lon', e.target.value)} placeholder="Dest lon" inputMode="decimal" className={inputClass} />
+          <button type="submit" data-testid="register-submit" disabled={!formOk || posting} className="col-span-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors disabled:opacity-50 sm:col-span-3">
             {posting ? 'Logging…' : 'Log departure'}
           </button>
         </form>
       )}
-      {watch && <p className="mt-1 text-slate-500">Watch role: read-only.</p>}
-      {error && <p data-testid="register-error" className="mt-2 text-red-400">{error}</p>}
+      {watch && <p className={`mt-1 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Watch role: read-only.</p>}
+      {error && <p data-testid="register-error" className={`mt-2 ${isLight ? 'text-rose-600' : 'text-red-400'}`}>{error}</p>}
       <ul data-testid="register-rows" className="mt-2 flex flex-col gap-2">
-        {rows.length === 0 && <li className="text-slate-500">No departures logged.</li>}
+        {rows.length === 0 && <li className={isLight ? 'text-slate-500' : 'text-slate-400'}>No departures logged.</li>}
         {rows.map((d) => {
           const badge = GEOFENCE_LABEL[d.geofence_flag];
           const hot = highlightId === d.id;
@@ -199,35 +221,35 @@ export default function RegisterTable({ port, role, highlightId }: Props) {
               key={d.id}
               id={`departure-${d.id}`}
               data-testid={`departure-${d.id}`}
-              className={`rounded-lg border p-2 ${rowTone(d)} ${hot ? 'ring-2 ring-cyan-400' : ''}`}
+              className={`rounded-lg border p-2.5 transition-colors ${rowTone(d, isLight)} ${hot ? 'ring-2 ring-cyan-400' : ''}`}
             >
               {d.weather_flag === 'flip' && (
-                <p data-testid={`weather-banner-${d.id}`} className="mb-1 rounded bg-red-600 px-2 py-1 font-semibold text-white">
+                <p data-testid={`weather-banner-${d.id}`} className="mb-1 rounded bg-rose-600 px-2 py-1 font-semibold text-white">
                   Weather flipped green→red after departure
                 </p>
               )}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="font-bold text-white">{d.boat_id}</span>
-                <span className="text-slate-400">crew {d.crew}</span>
-                <span className="text-slate-400">
+                <span className={`font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{d.boat_id}</span>
+                <span className={isLight ? 'text-slate-500' : 'text-slate-400'}>crew {d.crew}</span>
+                <span className={isLight ? 'text-slate-500' : 'text-slate-400'}>
                   out {toLocalInput(d.time_out)} → in {toLocalInput(d.expected_in)}
                 </span>
                 {d.overdue_status !== 'none' && (
-                  <span data-testid={`overdue-${d.id}`} className={d.overdue_status === 'red' ? 'font-semibold text-red-400' : 'font-semibold text-amber-400'}>
+                  <span data-testid={`overdue-${d.id}`} className={d.overdue_status === 'red' ? (isLight ? 'font-semibold text-rose-600' : 'font-semibold text-red-400') : (isLight ? 'font-semibold text-amber-700' : 'font-semibold text-amber-400')}>
                     overdue {d.overdue_mins}m
                   </span>
                 )}
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-slate-400">
+              <div className={`mt-1 flex flex-wrap items-center gap-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
                 <span>
                   dest {d.dest_lat.toFixed(3)}, {d.dest_lon.toFixed(3)}
                 </span>
                 {badge && (
-                  <span data-testid={`geofence-${d.id}`} title="Risky destination flagged at log time" className="rounded bg-red-600 px-1.5 py-0.5 font-semibold text-white">
+                  <span data-testid={`geofence-${d.id}`} title="Risky destination flagged at log time" className="rounded bg-rose-600 px-1.5 py-0.5 font-semibold text-white text-[10px]">
                     {badge}
                   </span>
                 )}
-                <span className="text-slate-600">{d.port_id}</span>
+                <span className={isLight ? 'text-slate-400' : 'text-slate-500'}>{d.port_id}</span>
               </div>
             </li>
           );
