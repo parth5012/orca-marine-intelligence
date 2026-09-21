@@ -409,7 +409,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // cookies so /officer can attach X-Officer-Token. Never blocks shell.
       try {
         if (typeof document !== 'undefined') {
-          const cookieBase = 'Path=/; Max-Age=43200; SameSite=Lax';
+          const isHttps =
+            typeof location !== 'undefined' && location.protocol === 'https:';
+          const cookieBase = `Path=/; Max-Age=43200; SameSite=Lax${isHttps ? '; Secure' : ''}`;
           document.cookie = `officer_role=port; ${cookieBase}`;
           const existing =
             typeof document.cookie === 'string'
