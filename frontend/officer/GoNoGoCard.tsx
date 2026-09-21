@@ -199,7 +199,7 @@ export default function GoNoGoCard({ port, role }: Props) {
                 data-testid={`gonogo-${d.toLowerCase()}`}
                 aria-pressed={choice === d}
                 onClick={() => setChoice(d)}
-                className={`rounded-lg px-3 py-1.5 font-semibold transition-all ${
+                className={`rounded-lg px-3 py-1.5 font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 ${
                   choice === d
                     ? d === 'HOLD'
                       ? 'bg-rose-600 text-white shadow-sm'
@@ -213,25 +213,29 @@ export default function GoNoGoCard({ port, role }: Props) {
               </button>
             ))}
           </div>
+          <label htmlFor="gonogo-reason" className="sr-only">
+            Override reason
+          </label>
           <textarea
+            id="gonogo-reason"
             aria-label="Override reason"
             data-testid="gonogo-reason"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder={overriding ? 'Reason required — you are overriding the auto-suggest' : 'Reason required'}
             rows={2}
-            className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+            className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 ${
               isLight
                 ? 'border-cyan-200 bg-white/90 text-slate-900 placeholder:text-slate-400'
                 : 'border-cyan-900/40 bg-slate-800/60 text-slate-100 placeholder:text-slate-500'
             }`}
           />
           <button
-            type="button"
+            type="submit"
             data-testid="gonogo-submit"
             disabled={!reasonOk || posting}
             onClick={submit}
-            className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors disabled:opacity-50"
+            className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1"
           >
             {posting ? 'Saving…' : `Record ${choice}`}
           </button>

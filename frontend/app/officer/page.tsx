@@ -16,6 +16,7 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useApp } from '@/context/AppContext';
 import OfficerTopBar, { OfficerRole } from '@/officer/OfficerTopBar';
 import SafetyBanner from '@/officer/SafetyBanner';
@@ -25,6 +26,7 @@ import RegisterTable from '@/officer/RegisterTable';
 import AlertsFeed from '@/officer/AlertsFeed';
 import BroadcastBox from '@/officer/BroadcastBox';
 import DayClose from '@/officer/DayClose';
+import OfficerBottomNav from '@/officer/OfficerBottomNav';
 import { PORTS, INDIA_CENTER, PORT_ZOOM, WATCH_ZOOM, getPortById } from '@/officer/ports';
 
 function readCookie(name: string): string | null {
@@ -57,6 +59,7 @@ function OfficerShell() {
   const center: [number, number] = watch ? INDIA_CENTER : [port.lat, port.lon];
   const zoom = watch ? WATCH_ZOOM : PORT_ZOOM;
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const shouldReduceMotion = useReducedMotion();
 
   const hasRoleCookie = readCookie('officer_role') !== null;
 
@@ -108,24 +111,45 @@ function OfficerShell() {
               All-ports watch: {PORTS.length} ports · {states} states · read-only (no per-boat edit)
             </p>
           )}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_320px]">
-            <div id="gonogo" data-testid="slot-gonogo" className={gonogoEnabled ? '' : 'hidden'}>
-              {gonogoEnabled ? <GoNoGoCard port={port} role={role} /> : null}
-            </div>
-            <section className="flex flex-col gap-4">
-              <OfficerMiniMap center={center} zoom={zoom} sector={watch ? undefined : port.incois_sector} />
-              <div id="register" data-testid="slot-register">
-                <RegisterTable port={port} role={role} highlightId={highlightId} />
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={`${role}-${port.id}`}
+              initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
+              animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+              exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -12 }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.22, ease: 'easeOut' }}
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[280px_1fr_320px] gap-4">
+                <div
+                  id="gonogo"
+                  data-testid="slot-gonogo"
+                  className={gonogoEnabled ? 'md:order-2 lg:order-none md:col-span-1 lg:col-span-1' : 'hidden'}
+                >
+                  {gonogoEnabled ? <GoNoGoCard port={port} role={role} /> : null}
+                </div>
+                <section className="flex flex-col gap-4 md:order-1 lg:order-none md:col-span-2 lg:col-span-1">
+                  <OfficerMiniMap center={center} zoom={zoom} sector={watch ? undefined : port.incois_sector} />
+                  <div id="register" data-testid="slot-register">
+                    <RegisterTable port={port} role={role} highlightId={highlightId} />
+                  </div>
+                </section>
+                <div
+                  id="alerts"
+                  data-testid="slot-alerts"
+                  className={`flex flex-col gap-4 ${
+                    gonogoEnabled ? 'md:order-3 md:col-span-1' : 'md:order-2 md:col-span-2'
+                  } lg:order-none lg:col-span-1`}
+                >
+                  <AlertsFeed portId={watch ? undefined : port.id} role={role} onSelect={setHighlightId} />
+                  <BroadcastBox port={port} role={role} />
+                  <DayClose port={port} role={role} />
+                </div>
               </div>
-            </section>
-            <div id="alerts" data-testid="slot-alerts" className="flex flex-col gap-4">
-              <AlertsFeed portId={watch ? undefined : port.id} role={role} onSelect={setHighlightId} />
-              <BroadcastBox port={port} role={role} />
-              <DayClose port={port} role={role} />
-            </div>
-          </div>
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
+      <OfficerBottomNav gonogoEnabled={gonogoEnabled} />
     </div>
   );
 }

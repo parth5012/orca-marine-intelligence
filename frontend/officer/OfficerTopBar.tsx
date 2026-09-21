@@ -12,7 +12,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import {
   Navigation,
   Radio,
@@ -54,6 +54,7 @@ export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTop
     setActiveTab,
   } = useApp();
 
+  const shouldReduceMotion = useReducedMotion();
   const isLight = themeMode === 'light';
   const groups = groupPortsByState();
   const watch = role === 'watch';
@@ -79,7 +80,7 @@ export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTop
             id="nav-brand-link"
             data-testid="nav-brand-link"
             aria-label="ORCA Home"
-            className="flex items-center gap-3 hover:opacity-95 transition-opacity shrink-0 order-1"
+            className="flex items-center gap-3 hover:opacity-95 transition-opacity shrink-0 order-1 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2"
             onClick={() => setActiveTab('home')}
           >
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center shadow-md shadow-cyan-500/20 shrink-0">
@@ -128,13 +129,17 @@ export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTop
           {/* Port Selector + Role Switcher Controls */}
           <div className="flex items-center gap-2.5 order-3 lg:order-2 w-full lg:w-auto justify-between sm:justify-center shrink-0">
             <div className="relative">
+              <label htmlFor="officer-port-select" className="sr-only">
+                Port selector
+              </label>
               <select
+                id="officer-port-select"
                 aria-label="Port selector"
                 data-testid="officer-port-select"
                 disabled={watch}
                 value={watch ? '' : selectedPort.id}
                 onChange={(e) => router.push(`/officer?role=port&port=${e.target.value}`)}
-                className={`rounded-xl px-3 py-1.5 text-xs font-medium border transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500/40 disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`rounded-xl px-3 py-1.5 text-xs font-medium border transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus-visible:ring-2 focus-visible:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed ${
                   isLight
                     ? 'bg-white border-slate-200 text-slate-800 hover:border-cyan-300 shadow-sm'
                     : 'bg-slate-900/90 border-slate-800 text-slate-100 hover:border-cyan-700/60'
@@ -172,7 +177,7 @@ export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTop
               <Link
                 href={`/officer?role=port&port=${selectedPort.id}`}
                 aria-current={watch ? undefined : 'page'}
-                className={`relative px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                className={`relative px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 ${
                   !watch
                     ? isLight
                       ? 'text-cyan-950 font-bold'
@@ -190,7 +195,7 @@ export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTop
                         ? 'bg-white border border-cyan-200 shadow-sm'
                         : 'bg-cyan-500/20 border border-cyan-500/40 shadow-inner'
                     }`}
-                    transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                    transition={shouldReduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 30 }}
                   />
                 )}
                 <span className="relative z-10">Port</span>
@@ -198,7 +203,7 @@ export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTop
               <Link
                 href="/officer?role=watch"
                 aria-current={watch ? 'page' : undefined}
-                className={`relative px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                className={`relative px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 ${
                   watch
                     ? isLight
                       ? 'text-cyan-950 font-bold'
@@ -216,7 +221,7 @@ export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTop
                         ? 'bg-white border border-cyan-200 shadow-sm'
                         : 'bg-cyan-500/20 border border-cyan-500/40 shadow-inner'
                     }`}
-                    transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                    transition={shouldReduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 30 }}
                   />
                 )}
                 <span className="relative z-10">Watch</span>
@@ -254,7 +259,7 @@ export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTop
               whileTap={{ scale: 0.9 }}
               onClick={toggleThemeMode}
               data-testid="theme-toggle"
-              className={`p-2 rounded-xl border transition-all flex items-center justify-center ${
+              className={`p-2 rounded-xl border transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 ${
                 isLight
                   ? 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
                   : 'bg-slate-900 border-slate-800 text-amber-300 hover:bg-slate-800'

@@ -12,6 +12,7 @@
 
 'use client';
 
+import { useEffect, useRef } from 'react';
 import MapView from '@/map/MapView';
 import { useApp } from '@/context/AppContext';
 
@@ -24,9 +25,50 @@ interface Props {
 export default function OfficerMiniMap({ center, zoom, sector }: Props) {
   const { themeMode } = useApp();
   const isLight = themeMode === 'light';
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || typeof ResizeObserver === 'undefined') return;
+
+    const triggerInvalidate = () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('resize'));
+      }
+      const leafletEl = containerRef.current?.querySelector('.leaflet-container') as any;
+      if (leafletEl && leafletEl._leaflet_map) {
+        try {
+          leafletEl._leaflet_map.invalidateSize();
+        } catch {}
+      }
+    };
+
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(triggerInvalidate);
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  // Ensure invalidateSize after role/port motion transitions (0.22s easeOut)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('resize'));
+      }
+      const leafletEl = containerRef.current?.querySelector('.leaflet-container') as any;
+      if (leafletEl && leafletEl._leaflet_map) {
+        try {
+          leafletEl._leaflet_map.invalidateSize();
+        } catch {}
+      }
+    }, 260);
+    return () => clearTimeout(timer);
+  }, [center, zoom, sector]);
 
   return (
     <div
+      ref={containerRef}
       data-testid="officer-mini-map"
       className={`h-80 w-full overflow-hidden rounded-2xl border transition-colors shadow-sm ${
         isLight

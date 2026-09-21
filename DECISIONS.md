@@ -11,3 +11,12 @@
   - Current bands at 1.5/2.5kt vs 2.0/3.0kt: user elected 2.0/3.0kt to match INCOIS operational notices.
 - **Invariants**:
   - Code Trumps LLM, Fail-Open Caution on missing data, Single canonical module.
+
+## 2026-09-21: ADR-0004 Officer Mobile Navigation & Responsive Parity (#216, #222)
+- **Decision**: Reuse the `BottomNavigation` architectural pattern by implementing `OfficerBottomNav` as a bottom-docked navigation bar on mobile (`md:hidden fixed bottom-0`), instead of collapsing the sticky top bar into hamburger or multi-tiered dropdowns.
+- **Alternatives Considered**:
+  - Collapse TopBar into hamburger drawer or dropdown on mobile: rejected because TopBar already hosts brand, state/port selectors, role switcher, GPS, theme toggle, and status badges. Cramming section anchors into the top bar causes vertical viewport crowding on mobile screens and violates ergonomic thumb-reach navigation on handheld devices.
+  - No mobile navigation (reliance on document scrolling): rejected because the 7-card dashboard is long on mobile viewports; officers need instant 1-tap jumps between Decision, Register, Alerts, and Fisherman Home.
+- **Invariants**:
+  - Motion transitions respect `prefers-reduced-motion` across all components (scroll behavior and Framer Motion spring/fade durations collapse to immediate).
+  - Zero modifications to fisherman routes, layouts, or `frontend/app/page.tsx`.

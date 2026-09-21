@@ -106,7 +106,7 @@ export default function AlertsFeed({ portId, role, onSelect }: Props) {
               type="button"
               data-testid={`alert-row-${d.id}`}
               onClick={() => onSelect?.(d.id)}
-              className={`w-full rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
+              className={`w-full rounded-lg border px-2.5 py-1.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${
                 isLight
                   ? 'border-cyan-100 bg-white/80 hover:border-cyan-400 hover:bg-white text-slate-800'
                   : 'border-cyan-900/40 bg-slate-800/60 hover:border-cyan-500 hover:bg-slate-800/80 text-slate-200'
