@@ -3,10 +3,12 @@ module.exports = {
   darkMode: 'class',
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './app/officer/**/*.{js,ts,jsx,tsx,mdx}',
     './chat/**/*.{js,ts,jsx,tsx,mdx}',
     './map/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
     './context/**/*.{js,ts,jsx,tsx,mdx}',
+    './officer/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
     extend: {

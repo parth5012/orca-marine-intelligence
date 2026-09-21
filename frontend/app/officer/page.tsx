@@ -16,6 +16,7 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { useApp } from '@/context/AppContext';
 import OfficerTopBar, { OfficerRole } from '@/officer/OfficerTopBar';
 import SafetyBanner from '@/officer/SafetyBanner';
 import OfficerMiniMap from '@/officer/OfficerMiniMap';
@@ -44,6 +45,8 @@ function resolveRole(param: string | null): OfficerRole {
 }
 
 function OfficerShell() {
+  const { themeMode } = useApp();
+  const isLight = themeMode === 'light';
   const searchParams = useSearchParams();
   const role = resolveRole(searchParams.get('role'));
   const watch = role === 'watch';
@@ -58,7 +61,13 @@ function OfficerShell() {
   const hasRoleCookie = readCookie('officer_role') !== null;
 
   return (
-    <div className="min-h-screen bg-slate-950 font-sans text-slate-100">
+    <div
+      className={`min-h-screen font-sans transition-colors duration-300 relative ${
+        isLight
+          ? 'bg-[#edf6ff] text-slate-900 selection:bg-cyan-200 selection:text-cyan-900'
+          : 'bg-[#070d18] text-slate-100 selection:bg-cyan-500 selection:text-slate-950'
+      }`}
+    >
       <OfficerTopBar selectedPort={port} role={role} />
       {!hasRoleCookie && (
         <div
@@ -106,7 +115,7 @@ function OfficerShell() {
 
 export default function OfficerPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
+    <Suspense fallback={<div className="min-h-screen bg-[#edf6ff] dark:bg-[#070d18]" />}>
       <OfficerShell />
     </Suspense>
   );
