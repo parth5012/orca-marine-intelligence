@@ -14,6 +14,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import OfficerTopBar, { OfficerRole } from '@/officer/OfficerTopBar';
 import SafetyBanner from '@/officer/SafetyBanner';
@@ -54,9 +55,29 @@ function OfficerShell() {
   const zoom = watch ? WATCH_ZOOM : PORT_ZOOM;
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
+  const hasRoleCookie = readCookie('officer_role') !== null;
+
   return (
     <div className="min-h-screen bg-slate-950 font-sans text-slate-100">
       <OfficerTopBar selectedPort={port} role={role} />
+      {!hasRoleCookie && (
+        <div
+          data-testid="officer-auth-hint"
+          className="mx-4 mt-3 rounded-xl border border-amber-500/40 bg-amber-950/40 px-4 py-3 text-sm text-amber-200"
+        >
+          <p className="font-semibold">
+            Official access required — session expired or not set. Use Official Access from the
+            home shell to set your role session.
+          </p>
+          <Link
+            href="/"
+            data-testid="officer-back-home"
+            className="mt-1 inline-block underline hover:text-amber-100"
+          >
+            Back to fisherman home
+          </Link>
+        </div>
+      )}
       <SafetyBanner lat={center[0]} lon={center[1]} />
       {watch && (
         <p data-testid="officer-watch-counts" className="px-4 py-2 text-xs text-slate-400">

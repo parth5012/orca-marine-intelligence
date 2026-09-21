@@ -35,10 +35,16 @@ import {
   Info,
   Mic,
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 
 export const AuthOnboardingOverlay: React.FC = () => {
   const { authStep, setAuthStep, loginAsOfficial, loginAsPublic } = useApp();
+  const router = useRouter();
+  const officialEntry = (email?: string, org?: string) => {
+    loginAsOfficial(email, org);
+    router.push('/officer');
+  };
 
   const [email, setEmail] = useState('officer@incois.gov.in');
   const [password, setPassword] = useState('••••••••••••');
@@ -253,7 +259,7 @@ export const AuthOnboardingOverlay: React.FC = () => {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  loginAsOfficial(email, org);
+                  officialEntry(email, org);
                 }}
                 className="space-y-4 pt-4"
               >
@@ -306,7 +312,7 @@ export const AuthOnboardingOverlay: React.FC = () => {
               <div className="mt-4 pt-3 border-t border-slate-900">
                 <button
                   type="button"
-                  onClick={() => loginAsOfficial(email, org)}
+                  onClick={() => officialEntry(email, org)}
                   data-testid="auth-demo-access"
                   className="w-full py-2.5 rounded-xl bg-cyan-950/60 border border-cyan-800/80 text-cyan-300 text-xs font-bold hover:bg-cyan-900/60 transition-colors flex items-center justify-center gap-2"
                 >
@@ -323,7 +329,7 @@ export const AuthOnboardingOverlay: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => loginAsOfficial('sso.officer@nic.in', 'NIC Maritime SSO Portal')}
+                    onClick={() => officialEntry('sso.officer@nic.in', 'NIC Maritime SSO Portal')}
                     className="py-2 px-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 text-[11px] font-medium transition-colors flex items-center justify-center gap-2"
                   >
                     <Lock className="w-3.5 h-3.5 text-cyan-400" />
@@ -333,7 +339,7 @@ export const AuthOnboardingOverlay: React.FC = () => {
                   <button
                     type="button"
                     onClick={() =>
-                      loginAsOfficial('dept.maritime@gov.in', 'Government Maritime Directorate')
+                      officialEntry('dept.maritime@gov.in', 'Government Maritime Directorate')
                     }
                     className="py-2 px-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 text-[11px] font-medium transition-colors flex items-center justify-center gap-2"
                   >

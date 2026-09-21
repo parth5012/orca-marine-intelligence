@@ -21,6 +21,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   Compass,
@@ -64,10 +65,11 @@ export const Navbar: React.FC<NavbarProps> = ({ safety }) => {
     toggleThemeMode,
     t,
     userRole,
-    setAuthStep,
+    loginAsOfficial,
     selectedLanguage,
     setSelectedLanguage,
   } = useApp();
+  const router = useRouter();
 
   const isLight = themeMode === 'light';
 
@@ -206,11 +208,15 @@ export const Navbar: React.FC<NavbarProps> = ({ safety }) => {
 
           {/* Right Section: GPS + Role Badge + Theme Toggle + Safety + Language */}
           <div className="flex items-center gap-2.5">
-            {/* Auth Role Badge (passthrough — stays authenticated) */}
+            {/* Official Access entry → /officer (additive, never blocks shell) */}
             <button
               type="button"
-              onClick={() => setAuthStep('role-select')}
-              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-extrabold transition-transform hover:scale-105 ${
+              data-testid="nav-official-access"
+              onClick={() => {
+                loginAsOfficial();
+                router.push('/officer');
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-extrabold transition-transform hover:scale-105 ${
                 userRole === 'official'
                   ? isLight
                     ? 'bg-cyan-100 border-cyan-300 text-cyan-900'
@@ -219,7 +225,7 @@ export const Navbar: React.FC<NavbarProps> = ({ safety }) => {
                     ? 'bg-emerald-100 border-emerald-300 text-emerald-900'
                     : 'bg-emerald-950/80 border-emerald-700 text-emerald-300'
               }`}
-              title="ORCA access mode (forced authenticated)"
+              title="Open officer dashboard"
             >
               {userRole === 'official' ? (
                 <>

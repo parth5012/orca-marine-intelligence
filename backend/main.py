@@ -244,7 +244,14 @@ app.add_middleware(
     allow_origin_regex=_preview_regex,
     allow_credentials=allow_credentials,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Requested-With"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Request-ID",
+        "X-Requested-With",
+        "X-User-Role",
+        "X-Officer-Token",
+    ],
 )
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
