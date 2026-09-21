@@ -14,6 +14,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useApp } from '@/context/AppContext';
 import type { OfficerPort } from './ports';
 import type { OfficerRole } from './OfficerTopBar';
 
@@ -61,6 +62,8 @@ const CARDS: { key: keyof Omit<DayCloseSummary, 'port_id' | 'date'>; label: stri
 ];
 
 export default function DayClose({ port, role }: Props) {
+  const { themeMode } = useApp();
+  const isLight = themeMode === 'light';
   const watch = role === 'watch';
   const [dateStr, setDateStr] = useState(() => new Date().toISOString().slice(0, 10));
   const [summary, setSummary] = useState<DayCloseSummary | null>(null);
@@ -115,13 +118,20 @@ export default function DayClose({ port, role }: Props) {
   }
 
   return (
-    <div data-testid="dayclose" className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-200">
-      <h2 className="text-sm font-bold text-white">
+    <div
+      data-testid="dayclose"
+      className={`rounded-2xl p-4 text-xs transition-colors border shadow-sm ${
+        isLight
+          ? 'glass-panel border-cyan-100 text-slate-800'
+          : 'glass-panel-dark border-cyan-900/40 text-slate-200'
+      }`}
+    >
+      <h2 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
         Day-close — {watch ? 'all ports' : port.name}
-        <span className="ml-2 font-normal text-slate-500">({port.language})</span>
+        <span className={`ml-2 font-normal ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>({port.language})</span>
       </h2>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-2 text-slate-400">
+        <label className={`flex items-center gap-2 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
           Date
           <input
             aria-label="Day-close date"
@@ -129,14 +139,18 @@ export default function DayClose({ port, role }: Props) {
             type="date"
             value={dateStr}
             onChange={(e) => setDateStr(e.target.value)}
-            className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100"
+            className={`rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+              isLight
+                ? 'border-cyan-200 bg-white/90 text-slate-900'
+                : 'border-cyan-900/40 bg-slate-800/60 text-slate-100'
+            }`}
           />
         </label>
         <button
           type="button"
           data-testid="dayclose-download"
           onClick={downloadCsv}
-          className="rounded bg-cyan-600 px-3 py-1.5 font-semibold text-white"
+          className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors"
         >
           Download CSV
         </button>
@@ -144,19 +158,30 @@ export default function DayClose({ port, role }: Props) {
           type="button"
           data-testid="dayclose-print"
           onClick={() => window.print()}
-          className="rounded bg-slate-700 px-3 py-1.5 font-semibold text-white"
+          className={`rounded-lg px-3 py-1.5 font-semibold transition-colors ${
+            isLight
+              ? 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+              : 'bg-slate-700 hover:bg-slate-600 text-white'
+          }`}
         >
           Print
         </button>
       </div>
-      {loading && <p className="mt-2 text-slate-500">Loading…</p>}
-      {error && <p data-testid="dayclose-error" className="mt-2 text-red-400">{error}</p>}
+      {loading && <p className={`mt-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Loading…</p>}
+      {error && <p data-testid="dayclose-error" className={`mt-2 ${isLight ? 'text-rose-600' : 'text-red-400'}`}>{error}</p>}
       {summary && (
         <dl data-testid="dayclose-summary" className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
           {CARDS.map((c) => (
-            <div key={c.key} className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1.5">
-              <dt className="text-slate-500">{c.label}</dt>
-              <dd data-testid={`dayclose-${c.key}`} className="text-lg font-bold text-white">{summary[c.key]}</dd>
+            <div
+              key={c.key}
+              className={`rounded-xl border p-2.5 transition-colors ${
+                isLight
+                  ? 'border-cyan-100 bg-white/80 shadow-sm'
+                  : 'border-cyan-900/40 bg-slate-800/60'
+              }`}
+            >
+              <dt className={`text-[11px] font-medium ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{c.label}</dt>
+              <dd data-testid={`dayclose-${c.key}`} className={`text-lg font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{summary[c.key]}</dd>
             </div>
           ))}
         </dl>

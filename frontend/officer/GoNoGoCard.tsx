@@ -14,6 +14,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useApp } from '@/context/AppContext';
 import type { OfficerPort } from './ports';
 import type { OfficerRole } from './OfficerTopBar';
 
@@ -73,6 +74,8 @@ export function isGoNoGoEnabled(): boolean {
 }
 
 export default function GoNoGoCard({ port, role }: Props) {
+  const { themeMode } = useApp();
+  const isLight = themeMode === 'light';
   const enabled = isGoNoGoEnabled();
   const watch = role === 'watch';
   const today = new Date().toISOString().slice(0, 10);
@@ -153,18 +156,37 @@ export default function GoNoGoCard({ port, role }: Props) {
   }
 
   return (
-    <div data-testid="gonogo-card" className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-200">
-      <h2 className="text-sm font-bold text-white">Go / No-Go — {port.name}</h2>
-      <p data-testid="gonogo-suggest" className={`mt-1 font-semibold ${suggestion.decision === 'HOLD' ? 'text-red-400' : 'text-green-400'}`}>
+    <div
+      data-testid="gonogo-card"
+      className={`rounded-2xl p-4 text-xs transition-colors border shadow-sm ${
+        isLight
+          ? 'glass-panel border-cyan-100 text-slate-800'
+          : 'glass-panel-dark border-cyan-900/40 text-slate-200'
+      }`}
+    >
+      <h2 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+        Go / No-Go — {port.name}
+      </h2>
+      <p
+        data-testid="gonogo-suggest"
+        className={`mt-1 font-semibold ${
+          suggestion.decision === 'HOLD'
+            ? isLight ? 'text-rose-600' : 'text-red-400'
+            : isLight ? 'text-emerald-600' : 'text-green-400'
+        }`}
+      >
         Auto-suggest: {suggestion.decision}
       </p>
-      <p className="mt-0.5 text-slate-400">{suggestion.note}</p>
+      <p className={`mt-0.5 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{suggestion.note}</p>
       {sea && (
-        <dl data-testid="gonogo-numbers" className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-slate-300">
-          <div><dt className="inline text-slate-500">Wave </dt><dd className="inline">{sea.wave ?? '—'} m</dd></div>
-          <div><dt className="inline text-slate-500">Wind </dt><dd className="inline">{sea.wind ?? '—'} kt</dd></div>
-          <div><dt className="inline text-slate-500">Pressure </dt><dd className="inline">{sea.pressure ?? '—'} hPa</dd></div>
-          <div><dt className="inline text-slate-500">Cyclone </dt><dd className="inline">{sea.cycloneAlert ?? 'none'}</dd></div>
+        <dl
+          data-testid="gonogo-numbers"
+          className={`mt-2 grid grid-cols-2 gap-x-3 gap-y-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}
+        >
+          <div><dt className={`inline ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Wave </dt><dd className="inline">{sea.wave ?? '—'} m</dd></div>
+          <div><dt className={`inline ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Wind </dt><dd className="inline">{sea.wind ?? '—'} kt</dd></div>
+          <div><dt className={`inline ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Pressure </dt><dd className="inline">{sea.pressure ?? '—'} hPa</dd></div>
+          <div><dt className={`inline ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Cyclone </dt><dd className="inline">{sea.cycloneAlert ?? 'none'}</dd></div>
         </dl>
       )}
       {!watch ? (
@@ -177,7 +199,15 @@ export default function GoNoGoCard({ port, role }: Props) {
                 data-testid={`gonogo-${d.toLowerCase()}`}
                 aria-pressed={choice === d}
                 onClick={() => setChoice(d)}
-                className={`rounded px-3 py-1.5 font-semibold ${choice === d ? (d === 'HOLD' ? 'bg-red-600 text-white' : 'bg-green-600 text-white') : 'bg-slate-800 text-slate-300'}`}
+                className={`rounded-lg px-3 py-1.5 font-semibold transition-all ${
+                  choice === d
+                    ? d === 'HOLD'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-emerald-600 text-white shadow-sm'
+                    : isLight
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                }`}
               >
                 {d}
               </button>
@@ -190,28 +220,56 @@ export default function GoNoGoCard({ port, role }: Props) {
             onChange={(e) => setReason(e.target.value)}
             placeholder={overriding ? 'Reason required — you are overriding the auto-suggest' : 'Reason required'}
             rows={2}
-            className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100"
+            className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+              isLight
+                ? 'border-cyan-200 bg-white/90 text-slate-900 placeholder:text-slate-400'
+                : 'border-cyan-900/40 bg-slate-800/60 text-slate-100 placeholder:text-slate-500'
+            }`}
           />
           <button
             type="button"
             data-testid="gonogo-submit"
             disabled={!reasonOk || posting}
             onClick={submit}
-            className="rounded bg-cyan-600 px-3 py-1.5 font-semibold text-white disabled:opacity-50"
+            className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors disabled:opacity-50"
           >
             {posting ? 'Saving…' : `Record ${choice}`}
           </button>
-          {postError && <p data-testid="gonogo-error" className="text-red-400">{postError}</p>}
+          {postError && (
+            <p data-testid="gonogo-error" className={`text-xs ${isLight ? 'text-rose-600' : 'text-red-400'}`}>
+              {postError}
+            </p>
+          )}
         </div>
       ) : (
-        <p className="mt-2 text-slate-500">Watch role: read-only.</p>
+        <p className={`mt-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Watch role: read-only.</p>
       )}
-      <ul data-testid="gonogo-overrides" className="mt-2 flex flex-col gap-1 border-t border-slate-800 pt-2">
-        {rows.length === 0 && <li className="text-slate-500">No overrides recorded for {today}.</li>}
+      <ul
+        data-testid="gonogo-overrides"
+        className={`mt-2 flex flex-col gap-1 border-t pt-2 ${
+          isLight ? 'border-cyan-100' : 'border-cyan-900/40'
+        }`}
+      >
+        {rows.length === 0 && (
+          <li className={isLight ? 'text-slate-500' : 'text-slate-400'}>
+            No overrides recorded for {today}.
+          </li>
+        )}
         {rows.map((r) => (
           <li key={r.id} className="flex justify-between gap-2">
-            <span className={r.decision === 'HOLD' ? 'text-red-300' : 'text-green-300'}>{r.decision}</span>
-            <span className="flex-1 truncate text-slate-400">{r.reason} <span className="text-slate-600">({r.by_role})</span></span>
+            <span
+              className={
+                r.decision === 'HOLD'
+                  ? isLight ? 'text-rose-600 font-semibold' : 'text-red-300 font-semibold'
+                  : isLight ? 'text-emerald-600 font-semibold' : 'text-green-300 font-semibold'
+              }
+            >
+              {r.decision}
+            </span>
+            <span className={`flex-1 truncate ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+              {r.reason}{' '}
+              <span className={isLight ? 'text-slate-400' : 'text-slate-500'}>({r.by_role})</span>
+            </span>
           </li>
         ))}
       </ul>

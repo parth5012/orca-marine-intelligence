@@ -22,6 +22,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useApp } from '@/context/AppContext';
 import type { OfficerPort } from './ports';
 import type { OfficerRole } from './OfficerTopBar';
 
@@ -90,6 +91,8 @@ function zoneFromFeature(f: { properties?: Record<string, unknown> }): PfzTopZon
 }
 
 export default function BroadcastBox({ port, role }: Props) {
+  const { themeMode } = useApp();
+  const isLight = themeMode === 'light';
   const watch = role === 'watch';
   const today = new Date().toISOString().slice(0, 10);
   const [decision, setDecision] = useState('HOLD');
@@ -192,30 +195,47 @@ export default function BroadcastBox({ port, role }: Props) {
   }
 
   return (
-    <div data-testid="broadcast-box" className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-200">
-      <h2 className="text-sm font-bold text-white">Broadcast — {port.name}</h2>
+    <div
+      data-testid="broadcast-box"
+      className={`rounded-2xl p-4 text-xs transition-colors border shadow-sm ${
+        isLight
+          ? 'glass-panel border-cyan-100 text-slate-800'
+          : 'glass-panel-dark border-cyan-900/40 text-slate-200'
+      }`}
+    >
+      <h2 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+        Broadcast — {port.name}
+      </h2>
       <div className="mt-2 flex gap-2">
-        <label className="flex flex-1 flex-col gap-1 text-slate-400">
+        <label className={`flex flex-1 flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
           Decision
           <select
             aria-label="Broadcast decision"
             data-testid="broadcast-decision"
             value={decision}
             onChange={(e) => setDecision(e.target.value)}
-            className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100"
+            className={`rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+              isLight
+                ? 'border-cyan-200 bg-white/90 text-slate-900'
+                : 'border-cyan-900/40 bg-slate-800/60 text-slate-100'
+            }`}
           >
             <option value="GO">GO</option>
             <option value="HOLD">HOLD</option>
           </select>
         </label>
-        <label className="flex flex-1 flex-col gap-1 text-slate-400">
+        <label className={`flex flex-1 flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
           Sea status
           <select
             aria-label="Broadcast sea status"
             data-testid="broadcast-sea"
             value={seaStatus}
             onChange={(e) => setSeaStatus(e.target.value)}
-            className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100"
+            className={`rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+              isLight
+                ? 'border-cyan-200 bg-white/90 text-slate-900'
+                : 'border-cyan-900/40 bg-slate-800/60 text-slate-100'
+            }`}
           >
             {['safe', 'caution', 'danger', 'unknown'].map((s) => (
               <option key={s} value={s}>{s}</option>
@@ -223,7 +243,7 @@ export default function BroadcastBox({ port, role }: Props) {
           </select>
         </label>
       </div>
-      <label className="mt-2 flex flex-col gap-1 text-slate-400">
+      <label className={`mt-2 flex flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
         English draft (editable)
         <textarea
           aria-label="Broadcast English draft"
@@ -231,11 +251,15 @@ export default function BroadcastBox({ port, role }: Props) {
           value={draftEn}
           onChange={(e) => setDraftEn(e.target.value)}
           rows={3}
-          className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100"
+          className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+            isLight
+              ? 'border-cyan-200 bg-white/90 text-slate-900 placeholder:text-slate-400'
+              : 'border-cyan-900/40 bg-slate-800/60 text-slate-100 placeholder:text-slate-500'
+          }`}
         />
       </label>
       {translationWarning && (
-        <label className="mt-2 flex flex-col gap-1 text-slate-400">
+        <label className={`mt-2 flex flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
           Local draft ({port.language}, editable — no auto-translation)
           <textarea
             aria-label="Broadcast local draft"
@@ -243,9 +267,16 @@ export default function BroadcastBox({ port, role }: Props) {
             value={draftLocal}
             onChange={(e) => setDraftLocal(e.target.value)}
             rows={3}
-            className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100"
+            className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+              isLight
+                ? 'border-cyan-200 bg-white/90 text-slate-900 placeholder:text-slate-400'
+                : 'border-cyan-900/40 bg-slate-800/60 text-slate-100 placeholder:text-slate-500'
+            }`}
           />
-          <span data-testid="broadcast-translation-warning" className="text-amber-400">
+          <span
+            data-testid="broadcast-translation-warning"
+            className={isLight ? 'text-amber-700' : 'text-amber-400'}
+          >
             translation_warning: showing English fallback — edit manually before copying.
           </span>
         </label>
@@ -255,7 +286,11 @@ export default function BroadcastBox({ port, role }: Props) {
           type="button"
           data-testid="broadcast-copy"
           onClick={copy}
-          className="rounded bg-slate-700 px-3 py-1.5 font-semibold text-white"
+          className={`rounded-lg px-3 py-1.5 font-semibold transition-colors ${
+            isLight
+              ? 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+              : 'bg-slate-700 hover:bg-slate-600 text-white'
+          }`}
         >
           {copied ? 'Copied!' : 'Copy'}
         </button>
@@ -265,19 +300,41 @@ export default function BroadcastBox({ port, role }: Props) {
             data-testid="broadcast-save"
             disabled={posting || !draftEn.trim()}
             onClick={save}
-            className="rounded bg-cyan-600 px-3 py-1.5 font-semibold text-white disabled:opacity-50"
+            className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors disabled:opacity-50"
           >
             {posting ? 'Saving…' : 'Save broadcast'}
           </button>
         )}
       </div>
-      {error && <p data-testid="broadcast-error" className="mt-2 text-red-400">{error}</p>}
-      <ul data-testid="broadcast-history" className="mt-2 flex flex-col gap-1 border-t border-slate-800 pt-2">
-        {history.length === 0 && <li className="text-slate-500">No broadcasts yet.</li>}
+      {error && (
+        <p data-testid="broadcast-error" className={`mt-2 ${isLight ? 'text-rose-600' : 'text-red-400'}`}>
+          {error}
+        </p>
+      )}
+      <ul
+        data-testid="broadcast-history"
+        className={`mt-2 flex flex-col gap-1 border-t pt-2 ${
+          isLight ? 'border-cyan-100' : 'border-cyan-900/40'
+        }`}
+      >
+        {history.length === 0 && (
+          <li className={isLight ? 'text-slate-500' : 'text-slate-400'}>No broadcasts yet.</li>
+        )}
         {history.map((b) => (
-          <li key={b.id} className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5">
-            <span className="text-slate-100">{b.text_en}</span>
-            {b.text_local && <span className="block text-slate-400">{b.text_local}</span>}
+          <li
+            key={b.id}
+            className={`rounded-lg border px-2.5 py-1.5 ${
+              isLight
+                ? 'border-cyan-100 bg-white/80'
+                : 'border-cyan-900/40 bg-slate-800/60'
+            }`}
+          >
+            <span className={isLight ? 'text-slate-900' : 'text-slate-100'}>{b.text_en}</span>
+            {b.text_local && (
+              <span className={`block ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                {b.text_local}
+              </span>
+            )}
           </li>
         ))}
       </ul>
