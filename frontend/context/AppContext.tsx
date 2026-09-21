@@ -221,7 +221,7 @@ interface AppContextType {
   setAuthStep: (step: AuthStep) => void;
   userRole: UserRole;
   userProfile: UserProfile;
-  loginAsOfficial: (email?: string, org?: string, name?: string) => void;
+  loginAsOfficial: (email?: string, org?: string, name?: string, token?: string) => void;
   loginAsPublic: (initialAction?: 'chat' | 'map' | 'voice') => void;
   logoutOrSwitchRole: () => void;
 }
@@ -403,9 +403,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAuthStepState('authenticated');
   }, []);
 
-  const loginAsOfficial = useCallback(() => {
-    setAuthStepState('authenticated');
-  }, []);
+  const loginAsOfficial = useCallback(
+    (_email?: string, _org?: string, _name?: string, token?: string) => {
+      // Official entry: bootstrap officer_role (+ preserve/passed officer_token)
+      // cookies so /officer can attach X-Officer-Token. Never blocks shell.
+      try {
+        if (typeof document !== 'undefined') {
+          const cookieBase = 'Path=/; Max-Age=43200; SameSite=Lax';
+          document.cookie = `officer_role=port; ${cookieBase}`;
+          const existing =
+            typeof document.cookie === 'string'
+              ? document.cookie.match(/(?:^|; )officer_token=([^;]*)/)?.[1]
+              : undefined;
+          const toWrite = token ?? (existing ? decodeURIComponent(existing) : '');
+          if (toWrite) {
+            document.cookie = `officer_token=${encodeURIComponent(toWrite)}; ${cookieBase}`;
+          }
+        }
+      } catch {
+        // Cookie write is best-effort; shell must stay usable.
+      }
+      setAuthStepState('authenticated');
+    },
+    []
+  );
 
   const loginAsPublic = useCallback(
     (initialAction?: 'chat' | 'map' | 'voice') => {
