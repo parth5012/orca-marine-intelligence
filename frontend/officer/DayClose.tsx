@@ -131,15 +131,16 @@ export default function DayClose({ port, role }: Props) {
         <span className={`ml-2 font-normal ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>({port.language})</span>
       </h2>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <label className={`flex items-center gap-2 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+        <label htmlFor="dayclose-date-input" className={`flex items-center gap-2 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
           Date
           <input
+            id="dayclose-date-input"
             aria-label="Day-close date"
             data-testid="dayclose-date"
             type="date"
             value={dateStr}
             onChange={(e) => setDateStr(e.target.value)}
-            className={`rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+            className={`rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 ${
               isLight
                 ? 'border-cyan-200 bg-white/90 text-slate-900'
                 : 'border-cyan-900/40 bg-slate-800/60 text-slate-100'
@@ -150,7 +151,7 @@ export default function DayClose({ port, role }: Props) {
           type="button"
           data-testid="dayclose-download"
           onClick={downloadCsv}
-          className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors"
+          className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1"
         >
           Download CSV
         </button>
@@ -158,7 +159,7 @@ export default function DayClose({ port, role }: Props) {
           type="button"
           data-testid="dayclose-print"
           onClick={() => window.print()}
-          className={`rounded-lg px-3 py-1.5 font-semibold transition-colors ${
+          className={`rounded-lg px-3 py-1.5 font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 ${
             isLight
               ? 'bg-slate-200 hover:bg-slate-300 text-slate-800'
               : 'bg-slate-700 hover:bg-slate-600 text-white'
@@ -170,11 +171,11 @@ export default function DayClose({ port, role }: Props) {
       {loading && <p className={`mt-2 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Loading…</p>}
       {error && <p data-testid="dayclose-error" className={`mt-2 ${isLight ? 'text-rose-600' : 'text-red-400'}`}>{error}</p>}
       {summary && (
-        <dl data-testid="dayclose-summary" className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <dl data-testid="dayclose-summary" className="mt-2 grid grid-cols-2 gap-2 print:grid-cols-5">
           {CARDS.map((c) => (
             <div
               key={c.key}
-              className={`rounded-xl border p-2.5 transition-colors ${
+              className={`rounded-xl border p-2.5 transition-colors [&:last-child:nth-child(odd)]:col-span-2 print:[&:last-child:nth-child(odd)]:col-span-1 ${
                 isLight
                   ? 'border-cyan-100 bg-white/80 shadow-sm'
                   : 'border-cyan-900/40 bg-slate-800/60'

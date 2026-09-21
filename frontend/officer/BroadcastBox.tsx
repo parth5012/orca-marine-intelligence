@@ -207,14 +207,15 @@ export default function BroadcastBox({ port, role }: Props) {
         Broadcast — {port.name}
       </h2>
       <div className="mt-2 flex gap-2">
-        <label className={`flex flex-1 flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+        <label htmlFor="broadcast-decision" className={`flex flex-1 flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
           Decision
           <select
+            id="broadcast-decision"
             aria-label="Broadcast decision"
             data-testid="broadcast-decision"
             value={decision}
             onChange={(e) => setDecision(e.target.value)}
-            className={`rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+            className={`rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 ${
               isLight
                 ? 'border-cyan-200 bg-white/90 text-slate-900'
                 : 'border-cyan-900/40 bg-slate-800/60 text-slate-100'
@@ -224,14 +225,15 @@ export default function BroadcastBox({ port, role }: Props) {
             <option value="HOLD">HOLD</option>
           </select>
         </label>
-        <label className={`flex flex-1 flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+        <label htmlFor="broadcast-sea" className={`flex flex-1 flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
           Sea status
           <select
+            id="broadcast-sea"
             aria-label="Broadcast sea status"
             data-testid="broadcast-sea"
             value={seaStatus}
             onChange={(e) => setSeaStatus(e.target.value)}
-            className={`rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+            className={`rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 ${
               isLight
                 ? 'border-cyan-200 bg-white/90 text-slate-900'
                 : 'border-cyan-900/40 bg-slate-800/60 text-slate-100'
@@ -243,15 +245,16 @@ export default function BroadcastBox({ port, role }: Props) {
           </select>
         </label>
       </div>
-      <label className={`mt-2 flex flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+      <label htmlFor="broadcast-en" className={`mt-2 flex flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
         English draft (editable)
         <textarea
+          id="broadcast-en"
           aria-label="Broadcast English draft"
           data-testid="broadcast-en"
           value={draftEn}
           onChange={(e) => setDraftEn(e.target.value)}
           rows={3}
-          className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+          className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 ${
             isLight
               ? 'border-cyan-200 bg-white/90 text-slate-900 placeholder:text-slate-400'
               : 'border-cyan-900/40 bg-slate-800/60 text-slate-100 placeholder:text-slate-500'
@@ -259,15 +262,16 @@ export default function BroadcastBox({ port, role }: Props) {
         />
       </label>
       {translationWarning && (
-        <label className={`mt-2 flex flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+        <label htmlFor="broadcast-local" className={`mt-2 flex flex-col gap-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
           Local draft ({port.language}, editable — no auto-translation)
           <textarea
+            id="broadcast-local"
             aria-label="Broadcast local draft"
             data-testid="broadcast-local"
             value={draftLocal}
             onChange={(e) => setDraftLocal(e.target.value)}
             rows={3}
-            className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+            className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 ${
               isLight
                 ? 'border-cyan-200 bg-white/90 text-slate-900 placeholder:text-slate-400'
                 : 'border-cyan-900/40 bg-slate-800/60 text-slate-100 placeholder:text-slate-500'
@@ -286,7 +290,7 @@ export default function BroadcastBox({ port, role }: Props) {
           type="button"
           data-testid="broadcast-copy"
           onClick={copy}
-          className={`rounded-lg px-3 py-1.5 font-semibold transition-colors ${
+          className={`rounded-lg px-3 py-1.5 font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 ${
             isLight
               ? 'bg-slate-200 hover:bg-slate-300 text-slate-800'
               : 'bg-slate-700 hover:bg-slate-600 text-white'
@@ -300,7 +304,7 @@ export default function BroadcastBox({ port, role }: Props) {
             data-testid="broadcast-save"
             disabled={posting || !draftEn.trim()}
             onClick={save}
-            className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors disabled:opacity-50"
+            className="rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1"
           >
             {posting ? 'Saving…' : 'Save broadcast'}
           </button>

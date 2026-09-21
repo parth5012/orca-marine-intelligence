@@ -121,7 +121,13 @@ export default function RegisterTable({ port, role, highlightId }: Props) {
 
   useEffect(() => {
     if (!highlightId) return;
-    document.getElementById(`departure-${highlightId}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    const prefersReduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    document.getElementById(`departure-${highlightId}`)?.scrollIntoView({
+      block: 'nearest',
+      behavior: prefersReduced ? 'auto' : 'smooth',
+    });
   }, [highlightId]);
 
   function set<K extends keyof typeof form>(key: K, value: string) {
@@ -171,7 +177,7 @@ export default function RegisterTable({ port, role, highlightId }: Props) {
     Number.isFinite(Number(form.dest_lat)) &&
     Number.isFinite(Number(form.dest_lon));
 
-  const inputClass = `rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
+  const inputClass = `rounded-lg border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 ${
     isLight
       ? 'border-cyan-200 bg-white/90 text-slate-900 placeholder:text-slate-400'
       : 'border-cyan-900/40 bg-slate-800/60 text-slate-100 placeholder:text-slate-500'
@@ -192,19 +198,37 @@ export default function RegisterTable({ port, role, highlightId }: Props) {
       {!watch && (
         <form
           data-testid="register-form"
-          className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3"
+          className="mt-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (formOk) submit();
           }}
         >
-          <input aria-label="Boat ID" data-testid="register-boat" value={form.boat_id} onChange={(e) => set('boat_id', e.target.value)} placeholder="Boat ID" className={inputClass} />
-          <input aria-label="Crew" data-testid="register-crew" value={form.crew} onChange={(e) => set('crew', e.target.value)} placeholder="Crew" inputMode="numeric" className={inputClass} />
-          <input aria-label="Time out" data-testid="register-timeout" type="datetime-local" value={form.time_out} onChange={(e) => set('time_out', e.target.value)} className={inputClass} />
-          <input aria-label="Expected in" data-testid="register-expected" type="datetime-local" value={form.expected_in} onChange={(e) => set('expected_in', e.target.value)} className={inputClass} />
-          <input aria-label="Dest lat" data-testid="register-lat" value={form.dest_lat} onChange={(e) => set('dest_lat', e.target.value)} placeholder="Dest lat" inputMode="decimal" className={inputClass} />
-          <input aria-label="Dest lon" data-testid="register-lon" value={form.dest_lon} onChange={(e) => set('dest_lon', e.target.value)} placeholder="Dest lon" inputMode="decimal" className={inputClass} />
-          <button type="submit" data-testid="register-submit" disabled={!formOk || posting} className="col-span-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors disabled:opacity-50 sm:col-span-3">
+          <div>
+            <label htmlFor="register-boat" className="sr-only">Boat ID</label>
+            <input id="register-boat" aria-label="Boat ID" data-testid="register-boat" value={form.boat_id} onChange={(e) => set('boat_id', e.target.value)} placeholder="Boat ID" className={`w-full ${inputClass}`} />
+          </div>
+          <div>
+            <label htmlFor="register-crew" className="sr-only">Crew</label>
+            <input id="register-crew" aria-label="Crew" data-testid="register-crew" value={form.crew} onChange={(e) => set('crew', e.target.value)} placeholder="Crew" inputMode="numeric" className={`w-full ${inputClass}`} />
+          </div>
+          <div>
+            <label htmlFor="register-timeout" className="sr-only">Time out</label>
+            <input id="register-timeout" aria-label="Time out" data-testid="register-timeout" type="datetime-local" value={form.time_out} onChange={(e) => set('time_out', e.target.value)} className={`w-full ${inputClass}`} />
+          </div>
+          <div>
+            <label htmlFor="register-expected" className="sr-only">Expected in</label>
+            <input id="register-expected" aria-label="Expected in" data-testid="register-expected" type="datetime-local" value={form.expected_in} onChange={(e) => set('expected_in', e.target.value)} className={`w-full ${inputClass}`} />
+          </div>
+          <div>
+            <label htmlFor="register-lat" className="sr-only">Dest lat</label>
+            <input id="register-lat" aria-label="Dest lat" data-testid="register-lat" value={form.dest_lat} onChange={(e) => set('dest_lat', e.target.value)} placeholder="Dest lat" inputMode="decimal" className={`w-full ${inputClass}`} />
+          </div>
+          <div>
+            <label htmlFor="register-lon" className="sr-only">Dest lon</label>
+            <input id="register-lon" aria-label="Dest lon" data-testid="register-lon" value={form.dest_lon} onChange={(e) => set('dest_lon', e.target.value)} placeholder="Dest lon" inputMode="decimal" className={`w-full ${inputClass}`} />
+          </div>
+          <button type="submit" data-testid="register-submit" disabled={!formOk || posting} className="col-span-1 sm:col-span-2 md:col-span-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 px-3 py-1.5 font-semibold text-white transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500">
             {posting ? 'Logging…' : 'Log departure'}
           </button>
         </form>
