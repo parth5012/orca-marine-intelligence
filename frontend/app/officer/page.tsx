@@ -62,53 +62,70 @@ function OfficerShell() {
 
   return (
     <div
-      className={`min-h-screen font-sans transition-colors duration-300 relative ${
+      className={`min-h-screen flex flex-col font-sans transition-colors duration-300 relative ${
         isLight
           ? 'bg-[#edf6ff] text-slate-900 selection:bg-cyan-200 selection:text-cyan-900'
           : 'bg-[#070d18] text-slate-100 selection:bg-cyan-500 selection:text-slate-950'
       }`}
     >
       <OfficerTopBar selectedPort={port} role={role} />
-      {!hasRoleCookie && (
-        <div
-          data-testid="officer-auth-hint"
-          className="mx-4 mt-3 rounded-xl border border-amber-500/40 bg-amber-950/40 px-4 py-3 text-sm text-amber-200"
-        >
-          <p className="font-semibold">
-            Official access required — session expired or not set. Use Official Access from the
-            home shell to set your role session.
-          </p>
-          <Link
-            href="/"
-            data-testid="officer-back-home"
-            className="mt-1 inline-block underline hover:text-amber-100"
-          >
-            Back to fisherman home
-          </Link>
-        </div>
-      )}
       <SafetyBanner lat={center[0]} lon={center[1]} />
-      {watch && (
-        <p data-testid="officer-watch-counts" className="px-4 py-2 text-xs text-slate-400">
-          All-ports watch: {PORTS.length} ports · {states} states · read-only (no per-boat edit)
-        </p>
-      )}
-      <main className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-[280px_1fr_320px]">
-        <div id="gonogo" data-testid="slot-gonogo" className={gonogoEnabled ? '' : 'hidden'}>
-          {gonogoEnabled ? <GoNoGoCard port={port} role={role} /> : null}
-        </div>
-        <section className="flex flex-col gap-4">
-          <OfficerMiniMap center={center} zoom={zoom} sector={watch ? undefined : port.incois_sector} />
-          <div id="register" data-testid="slot-register">
-            <RegisterTable port={port} role={role} highlightId={highlightId} />
+      <div className="flex-1 relative z-10">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-20 lg:pb-6 relative z-10 space-y-4">
+          {!hasRoleCookie && (
+            <div
+              data-testid="officer-auth-hint"
+              className={`rounded-2xl px-4 py-3 text-sm transition-colors ${
+                isLight
+                  ? 'glass-panel-light border border-amber-400/50 bg-amber-50/80 text-amber-900 shadow-sm'
+                  : 'glass-panel-dark border border-amber-500/40 bg-amber-950/40 text-amber-200 shadow-sm'
+              }`}
+            >
+              <p className="font-semibold">
+                Official access required — session expired or not set. Use Official Access from the
+                home shell to set your role session.
+              </p>
+              <Link
+                href="/"
+                data-testid="officer-back-home"
+                className={`mt-1 inline-block underline ${
+                  isLight ? 'text-amber-800 hover:text-amber-950' : 'text-amber-200 hover:text-amber-100'
+                }`}
+              >
+                Back to fisherman home
+              </Link>
+            </div>
+          )}
+          {watch && (
+            <p
+              data-testid="officer-watch-counts"
+              className={`rounded-xl px-4 py-2 text-xs transition-colors ${
+                isLight
+                  ? 'glass-panel-light text-slate-700'
+                  : 'glass-panel-dark text-slate-300'
+              }`}
+            >
+              All-ports watch: {PORTS.length} ports · {states} states · read-only (no per-boat edit)
+            </p>
+          )}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_320px]">
+            <div id="gonogo" data-testid="slot-gonogo" className={gonogoEnabled ? '' : 'hidden'}>
+              {gonogoEnabled ? <GoNoGoCard port={port} role={role} /> : null}
+            </div>
+            <section className="flex flex-col gap-4">
+              <OfficerMiniMap center={center} zoom={zoom} sector={watch ? undefined : port.incois_sector} />
+              <div id="register" data-testid="slot-register">
+                <RegisterTable port={port} role={role} highlightId={highlightId} />
+              </div>
+            </section>
+            <div id="alerts" data-testid="slot-alerts" className="flex flex-col gap-4">
+              <AlertsFeed portId={watch ? undefined : port.id} role={role} onSelect={setHighlightId} />
+              <BroadcastBox port={port} role={role} />
+              <DayClose port={port} role={role} />
+            </div>
           </div>
-        </section>
-        <div id="alerts" data-testid="slot-alerts" className="flex flex-col gap-4">
-          <AlertsFeed portId={watch ? undefined : port.id} role={role} onSelect={setHighlightId} />
-          <BroadcastBox port={port} role={role} />
-          <DayClose port={port} role={role} />
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
