@@ -101,6 +101,7 @@ export const VOICE_ERROR_MESSAGES: Record<string, string> = {
   NO_SPEECH_DETECTED: 'No speech was detected. Please hold the microphone and speak clearly.',
   BHASHINI_UPSTREAM_ERROR: 'Voice recognition service is temporarily unavailable. Please retry or type your message.',
   ASR_TIMEOUT: 'Voice transcription request timed out. Please try again.',
+  PROXY_CONNECTION_FAILED: 'Failed to connect to voice proxy service. Please retry or type your message.',
   AUDIO_PROCESSING_ERROR: 'Audio could not be processed. Please try recording again.',
   AUDIO_TOO_LARGE: 'Audio file exceeds 25MB limit. Please record a shorter message.',
 };
@@ -1087,14 +1088,19 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
           proxyNetworkErr = proxyErr;
         }
 
+        const isProxyConnectionFailure =
+          Boolean(proxyNetworkErr) ||
+          (proxyRes?.status === 502 &&
+            proxyRes?.headers?.get('x-orca-proxy-error') === 'connection-failed');
+
         if (proxyRes && proxyRes.ok) {
           res = proxyRes;
-        } else if (proxyRes && proxyRes.status !== 502) {
-          // Definitive application error (503 ASR_CONFIG_MISSING, 422 NO_SPEECH_DETECTED, 504, 413, etc.)
-          // Do NOT needlessly retry direct backend.
+        } else if (proxyRes && !isProxyConnectionFailure) {
+          // Response came from backend (including backend 502/503/504/422).
+          // Do not repeat request directly to backend.
           res = proxyRes;
         } else {
-          // Only fall back to direct backend on connection failure or proxy 502
+          // Only fall back to direct backend on proxy connection failure
           if (directUsable) {
             try {
               res = await fetch(endpoint, {

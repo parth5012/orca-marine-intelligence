@@ -171,29 +171,34 @@ export const VoiceModal: React.FC = () => {
       let res: Response | null = null;
       let proxyRes: Response | null = null;
 
-      // Bound uploads with timeout
-      const postWithTimeout = (url: string, ms = 35_000): Promise<Response> => {
+      // Bound uploads with timeout (exceeding proxy's 35s deadline)
+      const postWithTimeout = (url: string, ms = 40_000): Promise<Response> => {
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), ms);
         return fetch(url, { method: 'POST', body: formData, signal: controller.signal })
           .finally(() => window.clearTimeout(timer));
       };
 
-      // Same-origin proxy FIRST; fallback to direct backend on connection failure or 502
+      // Same-origin proxy FIRST; fallback to direct backend ONLY on proxy connection failure
+      let proxyNetworkErr: any = null;
       try {
         proxyRes = await postWithTimeout('/api/chat/voice');
-      } catch {
-        // network failure on proxy
+      } catch (err) {
+        proxyNetworkErr = err;
       }
+
+      const isProxyConnectionError =
+        Boolean(proxyNetworkErr) ||
+        (proxyRes?.status === 502 &&
+          proxyRes?.headers?.get('x-orca-proxy-error') === 'connection-failed');
 
       if (proxyRes && proxyRes.ok) {
         res = proxyRes;
-      } else if (proxyRes && proxyRes.status !== 502) {
-        // Definitive application error (503 ASR_CONFIG_MISSING, 422 NO_SPEECH_DETECTED, 504, 413, etc.)
-        // Do not needlessly retry direct backend.
+      } else if (proxyRes && !isProxyConnectionError) {
+        // Definitive response from backend — do not repeat request.
         res = proxyRes;
       } else {
-        // Only fall back to direct backend on connection failure or proxy 502
+        // Fall back to direct backend only on proxy connection failure
         try {
           res = await postWithTimeout(`${getBackendBase()}/api/chat/voice`);
         } catch {
@@ -247,9 +252,11 @@ export const VoiceModal: React.FC = () => {
         setIsConfigMissing(false);
       }
     } catch (err: unknown) {
-      setVoiceError(
-        err instanceof Error ? err.message : VOICE_ERROR_MESSAGES.AUDIO_PROCESSING_ERROR
-      );
+      const isAbort = (err as any)?.name === 'AbortError';
+      const msg = isAbort
+        ? VOICE_ERROR_MESSAGES.ASR_TIMEOUT
+        : (err instanceof Error ? err.message : VOICE_ERROR_MESSAGES.AUDIO_PROCESSING_ERROR);
+      setVoiceError(msg);
       setIsRetryable(true);
       setIsConfigMissing(false);
     } finally {

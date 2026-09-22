@@ -449,6 +449,25 @@ class TestVoiceTranscriptionEndpoint:
                 body = resp.json()
                 assert "unavailable" in body.get("detail", "").lower()
 
+    def test_voice_transcribe_exception_maps_to_upstream_error(self, client):
+        """Unexpected exception escaping transcribe() maps to 502, not ASR_CONFIG_MISSING."""
+        with patch.dict(
+            os.environ,
+            {"BHASHINI_API_KEY": "test-key", "BHASHINI_ULCA_USER_ID": "test-user"},
+        ):
+            with patch(
+                "backend.routers.chat.transcribe",
+                new=AsyncMock(side_effect=RuntimeError("boom")),
+            ):
+                files = {"audio": ("query.wav", b"AUDIOBYTES", "audio/wav")}
+                resp = client.post("/api/chat/voice", files=files)
+
+                assert resp.status_code == 502
+                body = resp.json()
+                assert body["error_code"] == "BHASHINI_UPSTREAM_ERROR"
+                assert body["retryable"] is True
+                assert "boom" in body["detail"]
+
     def test_voice_oversized_file_returns_413(self, client):
         """Verify audio file exceeding 25MB returns 413 HTTP status."""
         oversized_data = b"x" * (25 * 1024 * 1024 + 1024)
