@@ -21,6 +21,7 @@ Session tradeoff (documented per ticket, minimal break):
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -30,6 +31,8 @@ from typing import Deque, Dict, Tuple
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+
+logger = logging.getLogger(__name__)
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
 
@@ -78,23 +81,46 @@ def get_client_ip(request: Request) -> str:
     """Best-effort client IP (TestClient reports 'testclient').
 
     Behind Render/Vercel the socket IP is the egress proxy shared by ALL
-    users — without X-Forwarded-For every user shares one 30/min bucket and
-    the chat 429s for everyone after a few messages. Trust the leftmost
-    XFF entry (closest to the client as appended by our proxies).
+    users — without proxy headers every user shares one 30/min bucket and
+    the chat 429s for everyone after a few messages.
+
+    Trust order (CodeRabbit #229: raw XFF leftmost is client-spoofable —
+    Render appends to, not replaces, incoming XFF, so a direct-to-origin
+    caller can rotate the first value per request and dodge the bucket):
+      1. ``CF-Connecting-IP`` / ``True-Client-IP`` — set (overwritten) by
+         the Cloudflare edge in front of Render; not client-forgeable on
+         the normal path.
+      2. Leftmost ``X-Forwarded-For`` entry — correct behind our proxies,
+         spoofable only by direct-to-origin callers (accepted MVP tradeoff;
+         full fix = allowlisted proxy ranges / ingress secret, post-MVP).
+      3. Socket IP, else ``"unknown"``.
     """
     try:
-        xff = request.headers.get("x-forwarded-for")
+        headers = request.headers
+    except Exception as exc:
+        logger.debug("get_client_ip: headers unavailable (%s)", exc)
+        headers = {}
+    for header in ("cf-connecting-ip", "true-client-ip"):
+        try:
+            value = headers.get(header) if hasattr(headers, "get") else None
+        except Exception as exc:
+            logger.debug("get_client_ip: %s read failed (%s)", header, exc)
+            continue
+        if value and str(value).strip():
+            return str(value).strip()
+    try:
+        xff = headers.get("x-forwarded-for") if hasattr(headers, "get") else None
         if xff:
-            first = xff.split(",")[0].strip()
+            first = str(xff).split(",")[0].strip()
             if first:
                 return first
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("get_client_ip: x-forwarded-for parse failed (%s)", exc)
     try:
         if request.client is not None and request.client.host:
             return request.client.host
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("get_client_ip: socket ip unavailable (%s)", exc)
     return "unknown"
 
 
