@@ -909,3 +909,177 @@ def test_isro_r8_latency_and_performance_sla(client: TestClient, primed_pfz_cach
     t_route = (time.perf_counter() - t0) * 1000
     assert r_resp.status_code == 404
     assert t_route < 50.0
+
+
+# ==============================================================================
+# 6. US-VOICE-503: Complete End-to-End Voice Integration Flow
+# ==============================================================================
+
+@pytest.mark.isro
+class TestVoiceE2EIntegrationUSVoice503:
+    """
+    US-VOICE-503: End-to-end integration verification for voice audio upload,
+    error taxonomy, latency constraints, and fail-closed security properties.
+    """
+
+    def test_voice_upload_missing_credentials_fast_fail_503(self, client: TestClient):
+        """
+        Voice audio upload -> missing creds fast-fail 503 (<300ms) with structured error
+        (error_code="ASR_CONFIG_MISSING", retryable=False).
+        """
+        with patch.dict(os.environ, {}, clear=True):
+            dummy_wav = b"RIFF" + b"\x00" * 36 + b"WAVEfmt " + b"\x00" * 100
+            files = {"file": ("fisherman_voice.wav", dummy_wav, "audio/wav")}
+            data = {"language": "ml", "session_id": "e2e-fast-fail-sess"}
+
+            t0 = time.perf_counter()
+            resp = client.post("/api/chat/voice", files=files, data=data)
+            duration_ms = (time.perf_counter() - t0) * 1000
+
+            assert resp.status_code == 503
+            assert duration_ms < 300.0, f"Expected <300ms fast-fail, took {duration_ms:.2f}ms"
+
+            body = resp.json()
+            assert body["error_code"] == "ASR_CONFIG_MISSING"
+            assert body["retryable"] is False
+            assert "detail" in body
+            assert "transcription" not in body or not body.get("transcription")
+
+    def test_voice_empty_audio_returns_422(self, client: TestClient):
+        """
+        Empty audio -> 422 with error_code="NO_SPEECH_DETECTED", retryable=False.
+        """
+        files = {"file": ("empty_recording.wav", b"", "audio/wav")}
+        data = {"language": "ta"}
+
+        t0 = time.perf_counter()
+        resp = client.post("/api/chat/voice", files=files, data=data)
+        duration_ms = (time.perf_counter() - t0) * 1000
+
+        assert resp.status_code == 422
+        assert duration_ms < 300.0, f"Expected <300ms, took {duration_ms:.2f}ms"
+
+        body = resp.json()
+        assert body["error_code"] == "NO_SPEECH_DETECTED"
+        assert body["retryable"] is False
+        assert "empty" in body["detail"].lower() or "speech" in body["detail"].lower()
+
+    def test_voice_upstream_error_simulation_returns_502(self, client: TestClient):
+        """
+        Upstream error simulation -> 502 with error_code="BHASHINI_UPSTREAM_ERROR".
+        """
+        from backend.core.bhashini import TranscriptionResult
+
+        mock_upstream_err = TranscriptionResult(
+            text="",
+            source_lang="ml",
+            transcribed=False,
+            error_code="BHASHINI_UPSTREAM_ERROR",
+            error_detail="Bhashini Dhruva gateway returned 502 Bad Gateway.",
+            retryable=True,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"BHASHINI_API_KEY": "test-key", "BHASHINI_ULCA_USER_ID": "test-user"},
+        ):
+            with patch("backend.routers.chat.transcribe", new=AsyncMock(return_value=mock_upstream_err)):
+                files = {"file": ("query.wav", b"RIFFDUMMYAUDIO12345", "audio/wav")}
+                resp = client.post("/api/chat/voice", files=files, data={"language": "ml"})
+
+                assert resp.status_code == 502
+                body = resp.json()
+                assert body["error_code"] == "BHASHINI_UPSTREAM_ERROR"
+                assert body["retryable"] is True
+                assert "gateway" in body["detail"].lower() or "upstream" in body["detail"].lower()
+
+    def test_voice_timeout_simulation_returns_504(self, client: TestClient):
+        """
+        Timeout simulation -> 504 with error_code="ASR_TIMEOUT", retryable=True.
+        """
+        from backend.core.bhashini import TranscriptionResult
+
+        mock_timeout = TranscriptionResult(
+            text="",
+            source_lang="ml",
+            transcribed=False,
+            error_code="ASR_TIMEOUT",
+            error_detail="ASR request timed out after 15 seconds.",
+            retryable=True,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"BHASHINI_API_KEY": "test-key", "BHASHINI_ULCA_USER_ID": "test-user"},
+        ):
+            with patch("backend.routers.chat.transcribe", new=AsyncMock(return_value=mock_timeout)):
+                files = {"file": ("query.wav", b"RIFFDUMMYAUDIO12345", "audio/wav")}
+                resp = client.post("/api/chat/voice", files=files, data={"language": "ml"})
+
+                assert resp.status_code == 504
+                body = resp.json()
+                assert body["error_code"] == "ASR_TIMEOUT"
+                assert body["retryable"] is True
+                assert "timed out" in body["detail"].lower()
+
+    def test_voice_fail_closed_never_hallucinates_or_mocks(self, client: TestClient):
+        """
+        Fail-closed verification: ensure under no conditions does the system mock
+        or hallucinate transcription text.
+        """
+        from backend.core.bhashini import TranscriptionResult
+
+        # Condition 1: Missing credentials must never produce mock transcription text
+        with patch.dict(os.environ, {}, clear=True):
+            resp1 = client.post(
+                "/api/chat/voice",
+                files={"file": ("test.wav", b"RIFFAUDIO", "audio/wav")},
+            )
+            assert resp1.status_code == 503
+            body1 = resp1.json()
+            assert "transcription" not in body1
+            assert body1.get("mock") is not True
+
+        # Condition 2: Upstream failure must never fall back to fake mock string
+        with patch.dict(
+            os.environ,
+            {"BHASHINI_API_KEY": "test-key", "BHASHINI_ULCA_USER_ID": "test-user"},
+        ):
+            mock_fail = TranscriptionResult(
+                text="",
+                source_lang="en",
+                transcribed=False,
+                error_code="BHASHINI_UPSTREAM_ERROR",
+                error_detail="Service unreachable",
+                retryable=False,
+            )
+            with patch("backend.routers.chat.transcribe", new=AsyncMock(return_value=mock_fail)):
+                resp2 = client.post(
+                    "/api/chat/voice",
+                    files={"file": ("test.wav", b"RIFFAUDIO", "audio/wav")},
+                )
+                assert resp2.status_code == 502
+                body2 = resp2.json()
+                assert "transcription" not in body2
+                assert body2.get("mock") is not True
+
+        # Condition 3: Success path returns explicit mock=False and authentic text
+        with patch.dict(
+            os.environ,
+            {"BHASHINI_API_KEY": "test-key", "BHASHINI_ULCA_USER_ID": "test-user"},
+        ):
+            mock_success = TranscriptionResult(
+                text="യഥാർത്ഥ ശബ്ദം (Authentic audio transcription)",
+                source_lang="ml",
+                transcribed=True,
+                cached=False,
+            )
+            with patch("backend.routers.chat.transcribe", new=AsyncMock(return_value=mock_success)):
+                resp3 = client.post(
+                    "/api/chat/voice",
+                    files={"file": ("test.wav", b"RIFFAUDIO", "audio/wav")},
+                )
+                assert resp3.status_code == 200
+                body3 = resp3.json()
+                assert body3["transcription"] == "യഥാർത്ഥ ശബ്ദം (Authentic audio transcription)"
+                assert body3["mock"] is False

@@ -457,6 +457,62 @@ class TestVoiceTranscriptionEndpoint:
         assert resp.status_code == 413
         assert "25MB" in resp.json()["detail"]
 
+    def test_voice_empty_content_returns_422(self, client):
+        """Verify 0-byte audio file returns 422 with NO_SPEECH_DETECTED."""
+        files = {"file": ("empty.wav", b"", "audio/wav")}
+        resp = client.post("/api/chat/voice", files=files)
+        assert resp.status_code == 422
+        body = resp.json()
+        assert body["error_code"] == "NO_SPEECH_DETECTED"
+        assert body["retryable"] is False
+        assert "empty" in body["detail"].lower()
+
+    def test_voice_audio_conversion_failure_returns_400(self, client):
+        """Verify audio conversion failure (empty wav_bytes) returns 400 with AUDIO_PROCESSING_ERROR."""
+        with patch("backend.routers.chat._convert_to_16k_mono_wav", return_value=b""):
+            files = {"file": ("corrupt.unknown", b"corruptdata", "application/octet-stream")}
+            resp = client.post("/api/chat/voice", files=files)
+            assert resp.status_code == 400
+            body = resp.json()
+            assert body["error_code"] == "AUDIO_PROCESSING_ERROR"
+            assert body["retryable"] is False
+            assert "invalid audio format" in body["detail"].lower()
+
+    def test_voice_error_codes_status_mapping(self, client):
+        """Verify transcribe error_code mapping to HTTP status codes."""
+        from backend.core.bhashini import TranscriptionResult
+
+        cases = [
+            ("ASR_CONFIG_MISSING", 503, False),
+            ("NO_SPEECH_DETECTED", 422, False),
+            ("BHASHINI_UPSTREAM_ERROR", 502, True),
+            ("ASR_TIMEOUT", 504, True),
+            ("AUDIO_PROCESSING_ERROR", 400, False),
+        ]
+
+        with patch.dict(
+            os.environ,
+            {"BHASHINI_API_KEY": "test-key", "BHASHINI_ULCA_USER_ID": "test-user"},
+        ):
+            for err_code, expected_status, retryable in cases:
+                mock_result = TranscriptionResult(
+                    text="",
+                    source_lang="ml",
+                    transcribed=False,
+                    error_code=err_code,
+                    error_detail=f"Error occurred: {err_code}",
+                    retryable=retryable,
+                )
+                with patch("backend.routers.chat.transcribe", new=AsyncMock(return_value=mock_result)):
+                    files = {"file": ("test.wav", b"AUDIOBYTES", "audio/wav")}
+                    resp = client.post("/api/chat/voice", files=files)
+                    assert resp.status_code == expected_status, f"Failed for {err_code}"
+                    body = resp.json()
+                    assert body["error_code"] == err_code
+                    assert body["retryable"] is retryable
+                    assert body["detail"] == f"Error occurred: {err_code}"
+
+
 
 class TestChatIntegrationEndToEnd:
     """End-to-end integration test with dynamic agent graph streaming."""

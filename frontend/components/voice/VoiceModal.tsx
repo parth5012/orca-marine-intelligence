@@ -23,6 +23,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, MicOff, X, Sparkles, Radio, RotateCcw, ArrowRight } from 'lucide-react';
 import { useApp, KOCHI_FALLBACK } from '@/context/AppContext';
 import { INDIAN_LANGUAGES } from '@/lib/translations';
+import {
+  parseVoiceError,
+  VOICE_ERROR_MESSAGES,
+} from '@/chat/useSSEChat';
 
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
@@ -57,6 +61,9 @@ export const VoiceModal: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [isRetryable, setIsRetryable] = useState(false);
+  const [isConfigMissing, setIsConfigMissing] = useState(false);
+  const [lastAudio, setLastAudio] = useState<{ blob: Blob; mimeType: string } | null>(null);
   const [transcriptText, setTranscriptText] = useState('');
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
@@ -88,6 +95,9 @@ export const VoiceModal: React.FC = () => {
 
   const closeModal = () => {
     releaseMicrophone();
+    setIsRetryable(false);
+    setIsConfigMissing(false);
+    setLastAudio(null);
     setVoiceModalOpen(false);
   };
 
@@ -97,6 +107,9 @@ export const VoiceModal: React.FC = () => {
     if (voiceModalOpen) {
       setTranscriptText('');
       setVoiceError(null);
+      setIsRetryable(false);
+      setIsConfigMissing(false);
+      setLastAudio(null);
       setIsTranscribing(false);
       setRecordingSeconds(0);
       return;
@@ -130,14 +143,17 @@ export const VoiceModal: React.FC = () => {
   }, []);
 
   const uploadAndTranscribe = async (audioBlob: Blob, mimeType: string) => {
+    setLastAudio({ blob: audioBlob, mimeType });
     if (audioBlob.size > MAX_AUDIO_BYTES) {
-      setVoiceError(
-        'Audio file exceeds 25MB. Please record a shorter message and try again.'
-      );
+      setVoiceError(VOICE_ERROR_MESSAGES.AUDIO_TOO_LARGE);
+      setIsRetryable(false);
+      setIsConfigMissing(false);
       return;
     }
     setIsTranscribing(true);
     setVoiceError(null);
+    setIsRetryable(false);
+    setIsConfigMissing(false);
     try {
       const lat = userLocation?.lat ?? KOCHI_FALLBACK.lat;
       const lon = userLocation?.lon ?? KOCHI_FALLBACK.lon;
@@ -152,43 +168,68 @@ export const VoiceModal: React.FC = () => {
       formData.append('lon', String(lon));
       formData.append('language', selectedLanguage || 'en');
 
-      let res: Response;
-      // Bound both uploads so a hung connection still reaches `finally`
-      // (which re-enables the mic). AbortController+setTimeout for compat.
-      const postWithTimeout = (url: string, ms = 60_000): Promise<Response> => {
+      let res: Response | null = null;
+      let proxyRes: Response | null = null;
+
+      // Bound uploads with timeout
+      const postWithTimeout = (url: string, ms = 35_000): Promise<Response> => {
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), ms);
         return fetch(url, { method: 'POST', body: formData, signal: controller.signal })
           .finally(() => window.clearTimeout(timer));
       };
+
+      // Same-origin proxy FIRST; fallback to direct backend on connection failure or 502
       try {
-        res = await postWithTimeout(`${getBackendBase()}/api/chat/voice`);
+        proxyRes = await postWithTimeout('/api/chat/voice');
       } catch {
-        // Direct backend unreachable — fall back to the Next.js proxy.
-        res = await postWithTimeout('/api/chat/voice');
+        // network failure on proxy
       }
 
-      if (res.status === 413) {
-        setVoiceError(
-          'Audio file exceeds 25MB. Please record a shorter message and try again.'
-        );
+      if (proxyRes && proxyRes.ok) {
+        res = proxyRes;
+      } else if (proxyRes && proxyRes.status !== 502) {
+        // Definitive application error (503 ASR_CONFIG_MISSING, 422 NO_SPEECH_DETECTED, 504, 413, etc.)
+        // Do not needlessly retry direct backend.
+        res = proxyRes;
+      } else {
+        // Only fall back to direct backend on connection failure or proxy 502
+        try {
+          res = await postWithTimeout(`${getBackendBase()}/api/chat/voice`);
+        } catch {
+          if (proxyRes) {
+            res = proxyRes;
+          }
+        }
+      }
+
+      if (!res) {
+        setVoiceError(VOICE_ERROR_MESSAGES.BHASHINI_UPSTREAM_ERROR);
+        setIsRetryable(true);
+        setIsConfigMissing(false);
         return;
       }
-      if (res.status === 503) {
-        setVoiceError(
-          'Voice transcription unavailable right now (service 503). Please try text input or retry shortly.'
-        );
-        return;
-      }
-      if (res.status === 422) {
-        setVoiceError(
-          'No speech detected in audio. Please record again and speak clearly.'
-        );
-        return;
-      }
+
       if (!res.ok) {
-        throw new Error(`Voice transcription failed: ${res.status}`);
+        const { payload, message } = await parseVoiceError(res);
+        setVoiceError(message);
+        const code = payload?.error_code;
+        const retry =
+          typeof payload?.retryable === 'boolean'
+            ? payload.retryable
+            : (code === 'ASR_TIMEOUT' ||
+               code === 'BHASHINI_UPSTREAM_ERROR' ||
+               code === 'NO_SPEECH_DETECTED' ||
+               code === 'AUDIO_PROCESSING_ERROR' ||
+               res.status === 502 ||
+               res.status === 504 ||
+               res.status === 422);
+
+        setIsRetryable(Boolean(retry));
+        setIsConfigMissing(code === 'ASR_CONFIG_MISSING' || (res.status === 503 && !retry));
+        return;
       }
+
       const data = await res.json();
       const transcription: string = String(data?.transcription ?? '').trim();
       if (data?.session_id && typeof window !== 'undefined') {
@@ -201,12 +242,16 @@ export const VoiceModal: React.FC = () => {
       if (transcription) {
         setTranscriptText(transcription);
       } else {
-        setVoiceError('No speech detected in audio.');
+        setVoiceError(VOICE_ERROR_MESSAGES.NO_SPEECH_DETECTED);
+        setIsRetryable(true);
+        setIsConfigMissing(false);
       }
     } catch (err: unknown) {
       setVoiceError(
-        err instanceof Error ? err.message : 'Voice transcription failed.'
+        err instanceof Error ? err.message : VOICE_ERROR_MESSAGES.AUDIO_PROCESSING_ERROR
       );
+      setIsRetryable(true);
+      setIsConfigMissing(false);
     } finally {
       setIsTranscribing(false);
     }
@@ -224,6 +269,9 @@ export const VoiceModal: React.FC = () => {
       return;
     }
     setVoiceError(null);
+    setIsRetryable(false);
+    setIsConfigMissing(false);
+    setLastAudio(null);
     setTranscriptText('');
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -402,7 +450,7 @@ export const VoiceModal: React.FC = () => {
                 <Radio className="w-3.5 h-3.5 animate-pulse" />
                 <span data-testid="voice-status">
                   {isTranscribing
-                    ? 'Transcribing via Whisper...'
+                    ? 'Transcribing audio via Bhashini...'
                     : isRecording
                     ? `Recording ${formatTimer(recordingSeconds)} — tap mic to stop & transcribe`
                     : transcriptText
@@ -416,9 +464,45 @@ export const VoiceModal: React.FC = () => {
               <div
                 data-testid="voice-error"
                 role="alert"
-                className="p-3 rounded-2xl border text-left text-xs font-semibold bg-rose-950/60 border-rose-500/40 text-rose-200"
+                className="p-3.5 rounded-2xl border text-left text-xs font-semibold bg-rose-950/60 border-rose-500/40 text-rose-200 space-y-2"
               >
-                {voiceError}
+                <div>{voiceError}</div>
+                {(isRetryable || isConfigMissing) && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {isRetryable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (lastAudio) {
+                            void uploadAndTranscribe(lastAudio.blob, lastAudio.mimeType);
+                          } else {
+                            void handleMicClick();
+                          }
+                        }}
+                        disabled={isTranscribing}
+                        data-testid="voice-retry-button"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-900/70 hover:bg-rose-800/80 border border-rose-400/40 text-rose-100 text-xs font-bold transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Retry Transcription</span>
+                      </button>
+                    )}
+                    {isConfigMissing && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          closeModal();
+                          setActiveTab('chat');
+                        }}
+                        data-testid="voice-switch-to-text-button"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-200 text-xs font-bold transition-colors cursor-pointer"
+                      >
+                        <span>Switch to Text Chat</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

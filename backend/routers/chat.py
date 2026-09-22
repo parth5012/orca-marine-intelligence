@@ -355,6 +355,27 @@ def _convert_to_16k_mono_wav(raw: bytes, filename: Optional[str] = None) -> byte
         return raw
 
 
+class VoiceTranscriptionException(HTTPException):
+    """Exception raised when voice transcription fails, preserving structured error metadata."""
+
+    def __init__(
+        self,
+        status_code: int,
+        detail: str,
+        error_code: str,
+        retryable: bool = False,
+        headers: Optional[Dict[str, str]] = None,
+    ):
+        super().__init__(
+            status_code=status_code,
+            detail={"detail": detail, "error_code": error_code, "retryable": retryable},
+            headers=headers,
+        )
+        self.error_detail = detail
+        self.error_code = error_code
+        self.retryable = retryable
+
+
 @router.post("/chat/voice")
 async def chat_voice(
     request: Request,
@@ -377,9 +398,19 @@ async def chat_voice(
     resolved_session_id = sanitize_session_id(session_id)
     transcription_text = ""
     MAX_AUDIO_BYTES = VOICE_MAX_AUDIO_BYTES
+    result = None
 
     try:
         content = await upload_file.read(MAX_AUDIO_BYTES + 1)
+        if len(content) == 0:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "detail": "Audio file is empty",
+                    "error_code": "NO_SPEECH_DETECTED",
+                    "retryable": False,
+                },
+            )
         if len(content) > MAX_AUDIO_BYTES:
             raise HTTPException(
                 status_code=413,
@@ -391,6 +422,15 @@ async def chat_voice(
         wav_bytes = await asyncio.to_thread(
             _convert_to_16k_mono_wav, content, safe_filename
         )
+        if not wav_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "detail": "Audio processing failed: invalid audio format.",
+                    "error_code": "AUDIO_PROCESSING_ERROR",
+                    "retryable": False,
+                },
+            )
         redis_client = None
         try:
             redis_client = await get_redis_client()
@@ -406,11 +446,28 @@ async def chat_voice(
     finally:
         await upload_file.close()
 
-    if not transcription_text:
-        raise HTTPException(
-            status_code=503,
-            detail="Voice transcription unavailable: no transcription produced (Bhashini ASR unavailable or no speech detected).",
+    if not result or not result.transcribed or not transcription_text:
+        err_code = (result.error_code if result and result.error_code else None) or "ASR_CONFIG_MISSING"
+        err_detail = (
+            (result.error_detail if result and result.error_detail else None)
+            or "Voice transcription unavailable"
         )
+        retryable = result.retryable if result else False
+
+        STATUS_MAP = {
+            "ASR_CONFIG_MISSING": 503,
+            "NO_SPEECH_DETECTED": 422,
+            "BHASHINI_UPSTREAM_ERROR": 502,
+            "ASR_TIMEOUT": 504,
+            "AUDIO_PROCESSING_ERROR": 400,
+        }
+        code = STATUS_MAP.get(err_code, 503)
+        detail_obj = {
+            "detail": err_detail,
+            "error_code": err_code,
+            "retryable": retryable,
+        }
+        raise HTTPException(status_code=code, detail=detail_obj)
 
     return {
         "transcription": transcription_text,
