@@ -35,6 +35,74 @@ def client():
 
 
 # ==============================================================================
+# 0. Hermetic guard: endpoint tests must never hit the live INCOIS portal nor
+#    rewrite the committed data/pfz-today.geojson fallback file.
+# ==============================================================================
+
+def _fake_ingest_doc():
+    """Deterministic INCOIS-shaped doc (Kerala + Maharashtra, 6 features)."""
+    def _feat(place, sector, sector_name, lon, lat, bearing):
+        return {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            "properties": {
+                "place": place,
+                "sector": sector,
+                "sector_name": sector_name,
+                "bearing": bearing,
+                "distance": "14-19",
+                "depth": "55-60",
+                "lat_dms": "8 33 18 N",
+                "lon_dms": "76 10 02 E",
+                "suitability": "high",
+                "timestamp": "2026-09-20T06:49:07+00:00",
+            },
+        }
+
+    features = [
+        _feat("Gholvad", "SEC002", "MAHARASHTRA", 72.41083, 20.12083, 315),
+        _feat("Dahanu", "SEC002", "MAHARASHTRA", 72.35, 19.95, 300),
+        _feat("Versova", "SEC002", "MAHARASHTRA", 72.45, 19.10, 270),
+        _feat("Pallithottam", "SEC005", "KERALA", 76.167, 8.555, 232),
+        _feat("Kuzhuppilly", "SEC005", "KERALA", 76.05, 10.05, 250),
+        _feat("Malipuram", "SEC005", "KERALA", 75.79833, 9.86194, 249),
+    ]
+    return {
+        "type": "FeatureCollection",
+        "source": "incois_textdata",
+        "sector_count": 2,
+        "count": len(features),
+        "features": features,
+    }
+
+
+@pytest.fixture(autouse=True)
+def _no_live_ingest_no_file_write(monkeypatch):
+    """Patch the router's ingest (no portal, no disk write) + restore data file.
+
+    GET /api/pfz/today calls the real ingest_textdata() on Redis-miss, which
+    scrapes live INCOIS and rewrites data/pfz-today.geojson. The portal's
+    sector rotation then breaks every downstream file-reader test in the full
+    suite (ports registry, kochi cache, satellite e2e, ...). Serve a fixed doc
+    instead and restore the file if anything still touches it.
+    """
+    from pathlib import Path
+
+    import backend.routers.pfz as pfz_router
+
+    async def _fake_ingest(*args, **kwargs):
+        return _fake_ingest_doc()
+
+    monkeypatch.setattr(pfz_router, "ingest_textdata", _fake_ingest)
+
+    repo_path = Path(__file__).resolve().parent.parent / "data" / "pfz-today.geojson"
+    backup = repo_path.read_bytes() if repo_path.is_file() else None
+    yield
+    if backup is not None:
+        repo_path.write_bytes(backup)
+
+
+# ==============================================================================
 # 1. Coordinate Conversion Helper Tests
 # ==============================================================================
 
