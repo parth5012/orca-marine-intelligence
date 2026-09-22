@@ -368,6 +368,52 @@ async def fetch_incois_sectors(
     return features
 
 
+# Persist-guard thresholds: a partial live scrape (portal sector rotation)
+# must never clobber the good fallback file. Fresh data is persisted only
+# when it carries >=3 sectors (or at least as many as the previous doc when
+# that is smaller) and >=50% of the previous feature count.
+_MIN_FRESH_SECTORS = 3
+_MIN_FRESH_COUNT_FRACTION = 0.5
+
+
+def _read_previous_doc() -> Optional[Dict[str, Any]]:
+    """Best-effort raw read of the current fallback file (None when absent)."""
+    try:
+        prev_path = _get_pfz_data_path()
+        if not prev_path.is_file():
+            return None
+        with open(prev_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict) and raw.get("features"):
+            return raw
+    except Exception as exc:
+        logger.debug("Previous PFZ doc unreadable: %s", exc)
+    return None
+
+
+def _fresh_doc_passes_guard(
+    features: List[Dict[str, Any]],
+    sector_set: set,
+    prev_doc: Optional[Dict[str, Any]],
+) -> bool:
+    """True when fresh features are safe to persist over the previous doc."""
+    if not features or prev_doc is None:
+        return bool(features)
+    prev_features = prev_doc.get("features", []) or []
+    prev_count = len(prev_features)
+    prev_sectors = {
+        f.get("properties", {}).get("sector")
+        for f in prev_features
+        if f.get("properties", {}).get("sector")
+    }
+    if not prev_count:
+        return True
+    min_sectors = min(_MIN_FRESH_SECTORS, len(prev_sectors) or _MIN_FRESH_SECTORS)
+    if len(sector_set) < min_sectors:
+        return False
+    return len(features) >= _MIN_FRESH_COUNT_FRACTION * prev_count
+
+
 async def ingest_textdata(
     session_id: Optional[str] = None,
     valid_date: Optional[date] = None,
@@ -397,6 +443,29 @@ async def ingest_textdata(
         if f.get("properties", {}).get("sector")
     }
 
+    # Rotation guard: retain the previous good doc when the fresh scrape is
+    # a partial rotation (fewer sectors / collapsing count). Persisting it
+    # would wipe Kerala etc. from the file, PostGIS, and cache at once.
+    retained_previous = False
+    prev_doc = _read_previous_doc()
+    if not _fresh_doc_passes_guard(features, sector_set, prev_doc):
+        prev_features = prev_doc.get("features", []) if prev_doc else []
+        logger.warning(
+            "Partial INCOIS rotation detected (%d features, %d sectors vs "
+            "previous %d features) — retaining previous fallback file",
+            len(features),
+            len(sector_set),
+            len(prev_features),
+        )
+        features = prev_features
+        sector_set = {
+            f.get("properties", {}).get("sector")
+            for f in features
+            if f.get("properties", {}).get("sector")
+        }
+        source = prev_doc.get("source", "incois_textdata") if prev_doc else source
+        retained_previous = True
+
     geojson_doc: Dict[str, Any] = {
         "type": "FeatureCollection",
         "source": source,
@@ -411,8 +480,10 @@ async def ingest_textdata(
     # so cron/API envelopes never claim persistence that did not happen.
     artifacts: List[str] = []
 
-    # 1. Write data/pfz-today.geojson (only if features non-empty)
-    if features:
+    # 1. Write data/pfz-today.geojson (only if features non-empty AND fresh —
+    #    a retained previous doc is already on disk, so rewriting it would
+    #    only churn the timestamp; PostGIS keeps yesterday's rows too).
+    if features and not retained_previous:
         out_path = _get_pfz_data_path()
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -447,13 +518,16 @@ async def ingest_textdata(
         logger.debug("Redis cache set skipped: %s", redis_err)
 
     geojson_doc["artifacts"] = artifacts
+    if retained_previous:
+        geojson_doc["retained_previous"] = True
 
     # Re-persist the final document so stored payloads carry the completed
     # artifact list (both were serialized above while it was still empty).
     # Best-effort: never fail the run on rewrite. The file rewrite stays
-    # gated on features (never persist an empty file over yesterday's data);
-    # Redis refreshes whenever it persisted, even for empty feature sets.
-    if artifacts:
+    # gated on fresh features (never persist an empty file over yesterday's
+    # data, and never rewrite a retained doc); Redis refreshes whenever it
+    # persisted, even for empty feature sets.
+    if artifacts and not retained_previous:
         if features:
             try:
                 with open(_get_pfz_data_path(), "w", encoding="utf-8") as f:
