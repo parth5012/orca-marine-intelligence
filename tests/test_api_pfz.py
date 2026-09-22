@@ -106,8 +106,14 @@ def _no_live_ingest_no_file_write(monkeypatch):
     except Exception:
         redis_backup = None
     yield
+    # Attempt every cleanup step even if one fails; surface the first error
+    # instead of silently leaving polluted state for later tests.
+    errors = []
     if backup is not None:
-        repo_path.write_bytes(backup)
+        try:
+            repo_path.write_bytes(backup)
+        except Exception as exc:
+            errors.append(exc)
     try:
         if redis_backup is None:
             # Evict the test-seeded key (in-memory fallback + live Redis).
@@ -118,8 +124,10 @@ def _no_live_ingest_no_file_write(monkeypatch):
                 asyncio.run(client.delete("pfz:today"))
         else:
             asyncio.run(redis_mod.set_json("pfz:today", redis_backup, ttl_seconds=21600))
-    except Exception:
-        pass
+    except Exception as exc:
+        errors.append(exc)
+    if errors:
+        raise errors[0]
 
 
 # ==============================================================================
