@@ -275,6 +275,30 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
     )
 
 
+def _ffmpeg_exe() -> Optional[str]:
+    """Resolve an ffmpeg binary: system PATH first, imageio static fallback.
+
+    Vercel serverless (and other slim images) ship no system ffmpeg, which
+    used to force raw webm passthrough that ULCA ASR rejects (-> voice 503).
+    imageio-ffmpeg bundles a static binary; prefer PATH so host-managed
+    ffmpeg (with security updates) wins when present. Returns None only when
+    neither exists (passthrough, same as before). Never raises.
+    """
+    system = shutil.which("ffmpeg")
+    if system:
+        return system
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+
+        bundled = get_ffmpeg_exe()
+        if bundled and os.path.isfile(bundled) and os.access(bundled, os.X_OK):
+            return str(bundled)
+        logger.debug("imageio-ffmpeg binary not usable: %s", bundled)
+    except Exception as exc:
+        logger.debug("imageio-ffmpeg fallback unavailable: %s", exc)
+    return None
+
+
 def _convert_to_16k_mono_wav(raw: bytes, filename: Optional[str] = None) -> bytes:
     """
     Convert uploaded audio bytes to 16kHz mono WAV (Bhashini ASR requirement).
@@ -293,7 +317,8 @@ def _convert_to_16k_mono_wav(raw: bytes, filename: Optional[str] = None) -> byte
     src_path = None
     dst_path = None
     try:
-        if shutil.which("ffmpeg") is None:
+        ffmpeg_exe = _ffmpeg_exe()
+        if ffmpeg_exe is None:
             logger.warning("ffmpeg not found; passing voice audio through unconverted.")
             return raw
         with tempfile.NamedTemporaryFile(suffix=suffix or ".webm", delete=False) as src:
@@ -303,7 +328,7 @@ def _convert_to_16k_mono_wav(raw: bytes, filename: Optional[str] = None) -> byte
             dst_path = dst.name
         try:
             proc = subprocess.run(
-                ["ffmpeg", "-y", "-v", "error", "-i", src_path,
+                [ffmpeg_exe, "-y", "-v", "error", "-i", src_path,
                  "-ac", "1", "-ar", "16000", "-sample_fmt", "s16", dst_path],
                 capture_output=True,
                 timeout=30,

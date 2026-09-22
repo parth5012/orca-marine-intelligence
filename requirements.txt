@@ -45,3 +45,7 @@ google-genai>=1.0.0
 # Monitoring
 structlog==24.4.0
 python-multipart
+# Static ffmpeg binary for voice conversion on slim/serverless images
+# (Vercel ships no system ffmpeg; backend falls back to this before
+# raw passthrough). Mirrored in backend/requirements.txt.
+imageio-ffmpeg==0.5.1
