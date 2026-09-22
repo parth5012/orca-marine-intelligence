@@ -1037,7 +1037,19 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
         }
 
         if (!res.ok) {
-          throw new Error(`Voice transcription failed: ${res.status} ${res.statusText}`);
+          // Surface the backend's reason (e.g. 503 detail names the missing
+          // Bhashini keys) instead of a bare status code.
+          let detail = '';
+          try {
+            const errBody = await res.clone().json();
+            const d = (errBody as any)?.detail;
+            if (typeof d === 'string' && d.trim()) detail = d.trim();
+          } catch {
+            // Non-JSON error body — fall back to status text.
+          }
+          throw new Error(
+            detail || `Voice transcription failed: ${res.status} ${res.statusText}`
+          );
         }
 
         const data = await res.json();
