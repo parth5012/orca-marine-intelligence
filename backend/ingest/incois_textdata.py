@@ -522,13 +522,13 @@ async def ingest_textdata(
         geojson_doc["retained_previous"] = True
 
     # Re-persist the final document so stored payloads carry the completed
-    # artifact list (both were serialized above while it was still empty).
-    # Best-effort: never fail the run on rewrite. The file rewrite stays
-    # gated on fresh features (never persist an empty file over yesterday's
-    # data, and never rewrite a retained doc); Redis refreshes whenever it
-    # persisted, even for empty feature sets.
-    if artifacts and not retained_previous:
-        if features:
+    # artifact list and retention flag (both were serialized above while
+    # still empty). Best-effort: never fail the run on rewrite. The file
+    # rewrite stays gated on fresh features (never persist an empty file
+    # over yesterday's data, and never rewrite a retained doc); the Redis
+    # refresh always runs so retained docs also carry their final metadata.
+    if artifacts:
+        if features and not retained_previous:
             try:
                 with open(_get_pfz_data_path(), "w", encoding="utf-8") as f:
                     json.dump(geojson_doc, f, indent=2)
