@@ -481,9 +481,9 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       // No client-side stream timeout — backend owns budgets (if needed later).
       // AbortController retained for manual cancel via stopStream only.
 
+      try {
       const activeSession = sessionId || generateUUID();
       const baseUrl = getBackendBaseUrl();
-      const endpoint = `${baseUrl}/api/chat`;
 
       const payload = {
         message: text.trim(),
@@ -493,42 +493,79 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
         language: language || 'en',
       };
 
+      const requestInit: RequestInit = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      };
+
+      // Same-origin proxy FIRST: no CORS preflight, no CSP connect-src
+      // gate, no mixed-content block. Cross-origin direct is the fallback
+      // (used when the proxy has no backend configured, e.g. local dev).
+      // Retryable proxy statuses: 502/503/504 (proxy could not reach backend).
+      const isLocalPage =
+        typeof window !== 'undefined' &&
+        (window.location.hostname === 'localhost' ||
+          window.location.hostname === '127.0.0.1');
+      const directUsable =
+        baseUrl !== '' &&
+        (isLocalPage ||
+          (!baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')));
+      const directEndpoint = `${baseUrl}/api/chat`;
+
+      let response: Response | null = null;
+      let proxyErr: any = null;
       try {
-        let response: Response;
+        const proxyRes = await fetch('/api/chat', requestInit);
+        if (proxyRes.ok) {
+          response = proxyRes;
+        } else if (
+          proxyRes.status === 502 ||
+          proxyRes.status === 503 ||
+          proxyRes.status === 504
+        ) {
+          proxyErr = new Error(
+            `Chat proxy error: ${proxyRes.status} ${proxyRes.statusText}`
+          );
+        } else {
+          throw new Error(
+            `Chat API error: ${proxyRes.status} ${proxyRes.statusText}`
+          );
+        }
+      } catch (fetchErr: any) {
+        if (proxyErr === null) proxyErr = fetchErr;
+      }
+
+      if (!response) {
+        if (!directUsable) {
+          throw (
+            proxyErr ||
+            new Error('Chat proxy unreachable and no direct backend configured.')
+          );
+        }
         try {
-          response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'text/event-stream',
-            },
-            body: JSON.stringify(payload),
-            signal: controller.signal,
-          });
+          response = await fetch(directEndpoint, requestInit);
         } catch (fetchErr: any) {
-          // If connection to baseUrl failed (e.g. backend at relative /api/chat or proxy), try relative /api/chat
-          if (baseUrl !== '' && baseUrl !== window.location.origin) {
-            response = await fetch('/api/chat', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Accept: 'text/event-stream',
-              },
-              body: JSON.stringify(payload),
-              signal: controller.signal,
-            });
-          } else {
-            throw fetchErr;
-          }
+          throw (
+            proxyErr ||
+            new Error(
+              'Failed to connect to ORCA advisory stream (proxy + direct).'
+            )
+          );
         }
+      }
 
-        if (!response.ok) {
-          throw new Error(`Chat API error: ${response.status} ${response.statusText}`);
-        }
+      if (!response.ok) {
+        throw new Error(`Chat API error: ${response.status} ${response.statusText}`);
+      }
 
-        if (!response.body) {
-          throw new Error('ReadableStream not supported by browser response.');
-        }
+      if (!response.body) {
+        throw new Error('ReadableStream not supported by browser response.');
+      }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
@@ -947,15 +984,47 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       if (language) formData.append('language', language);
 
       try {
-        let res: Response;
+        // Same-origin proxy FIRST (no CORS/CSP/mixed-content issues);
+        // cross-origin direct is the fallback. Retryable proxy statuses:
+        // 502/503/504 (proxy could not reach the backend).
+        const isLocalPage =
+          typeof window !== 'undefined' &&
+          (window.location.hostname === 'localhost' ||
+            window.location.hostname === '127.0.0.1');
+        const directUsable =
+          baseUrl !== '' &&
+          (isLocalPage ||
+            (!baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')));
+
+        let res: Response | null = null;
         try {
-          res = await fetch(endpoint, {
+          const proxyRes = await fetch('/api/chat/voice', {
             method: 'POST',
             body: formData,
           });
-        } catch {
-          // Fallback to relative /api/chat/voice if proxy configured
-          res = await fetch('/api/chat/voice', {
+          if (proxyRes.ok) {
+            res = proxyRes;
+          } else if (
+            proxyRes.status !== 502 &&
+            proxyRes.status !== 503 &&
+            proxyRes.status !== 504
+          ) {
+            throw new Error(
+              `Voice transcription failed: ${proxyRes.status} ${proxyRes.statusText}`
+            );
+          }
+          // 502/503/504 -> fall through to direct below (if usable).
+        } catch (proxyErr: any) {
+          if (res === null && !directUsable) throw proxyErr;
+        }
+
+        if (!res) {
+          if (!directUsable) {
+            throw new Error(
+              'Voice proxy unreachable and no direct backend configured.'
+            );
+          }
+          res = await fetch(endpoint, {
             method: 'POST',
             body: formData,
           });

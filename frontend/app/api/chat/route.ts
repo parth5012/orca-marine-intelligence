@@ -67,7 +67,11 @@ export async function POST(request: NextRequest) {
   } catch (e: any) {
     const isAbort = e?.name === "AbortError";
     return NextResponse.json(
-      { detail: isAbort ? "Backend timeout" : "Backend unavailable" },
+      {
+        detail: isAbort
+          ? "Backend timeout (no SSE response within 35s)"
+          : `Backend unavailable at ${backendBase}/api/chat — set BACKEND_API_URL (server) or NEXT_PUBLIC_API_URL to the FastAPI origin`,
+      },
       { status: 504 }
     );
   }
