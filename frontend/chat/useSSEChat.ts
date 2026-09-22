@@ -519,25 +519,26 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
       let response: Response | null = null;
       let proxyErr: any = null;
+      let proxyRes: Response | null = null;
       try {
-        const proxyRes = await fetch('/api/chat', requestInit);
-        if (proxyRes.ok) {
-          response = proxyRes;
-        } else if (
-          proxyRes.status === 502 ||
-          proxyRes.status === 503 ||
-          proxyRes.status === 504
-        ) {
-          proxyErr = new Error(
-            `Chat proxy error: ${proxyRes.status} ${proxyRes.statusText}`
-          );
-        } else {
-          throw new Error(
-            `Chat API error: ${proxyRes.status} ${proxyRes.statusText}`
-          );
-        }
+        proxyRes = await fetch('/api/chat', requestInit);
       } catch (fetchErr: any) {
-        if (proxyErr === null) proxyErr = fetchErr;
+        proxyErr = fetchErr;
+      }
+
+      if (proxyRes && proxyRes.ok) {
+        response = proxyRes;
+      } else if (proxyRes && (proxyRes.status === 502 || proxyRes.status === 503 || proxyRes.status === 504)) {
+        // Retryable: proxy alive but could not reach the backend.
+        proxyErr = new Error(
+          `Chat proxy error: ${proxyRes.status} ${proxyRes.statusText}`
+        );
+      } else if (proxyRes) {
+        // Non-retryable proxy status (e.g. 400/422 from backend validation):
+        // surface it directly, never fall through to direct.
+        throw new Error(
+          `Chat API error: ${proxyRes.status} ${proxyRes.statusText}`
+        );
       }
 
       if (!response) {
@@ -997,26 +998,31 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
             (!baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')));
 
         let res: Response | null = null;
+        let proxyRes: Response | null = null;
         try {
-          const proxyRes = await fetch('/api/chat/voice', {
+          proxyRes = await fetch('/api/chat/voice', {
             method: 'POST',
             body: formData,
           });
-          if (proxyRes.ok) {
-            res = proxyRes;
-          } else if (
-            proxyRes.status !== 502 &&
-            proxyRes.status !== 503 &&
-            proxyRes.status !== 504
-          ) {
-            throw new Error(
-              `Voice transcription failed: ${proxyRes.status} ${proxyRes.statusText}`
-            );
-          }
-          // 502/503/504 -> fall through to direct below (if usable).
         } catch (proxyErr: any) {
-          if (res === null && !directUsable) throw proxyErr;
+          if (!directUsable) throw proxyErr;
+          // Network failure -> fall through to direct below (if usable).
         }
+
+        if (proxyRes && proxyRes.ok) {
+          res = proxyRes;
+        } else if (
+          proxyRes &&
+          proxyRes.status !== 502 &&
+          proxyRes.status !== 503 &&
+          proxyRes.status !== 504
+        ) {
+          // Non-retryable proxy status: surface it, never try direct.
+          throw new Error(
+            `Voice transcription failed: ${proxyRes.status} ${proxyRes.statusText}`
+          );
+        }
+        // proxyRes null (network failure) or 502/503/504 -> direct fallback.
 
         if (!res) {
           if (!directUsable) {

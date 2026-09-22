@@ -66,11 +66,14 @@ export async function POST(request: NextRequest) {
     });
   } catch (e: any) {
     const isAbort = e?.name === "AbortError";
+    // Client-safe message only: backendBase may be a private origin
+    // (server-only BACKEND_API_URL). Log the target server-side.
+    console.error(`[api/chat] proxy ${isAbort ? "timeout" : "failure"} -> ${backendUrl}:`, e?.message || e);
     return NextResponse.json(
       {
         detail: isAbort
           ? "Backend timeout (no SSE response within 35s)"
-          : `Backend unavailable at ${backendBase}/api/chat — set BACKEND_API_URL (server) or NEXT_PUBLIC_API_URL to the FastAPI origin`,
+          : "Backend unavailable — the chat proxy could not reach the FastAPI backend",
       },
       { status: 504 }
     );

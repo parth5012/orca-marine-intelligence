@@ -78,17 +78,21 @@ def _fake_ingest_doc():
 
 @pytest.fixture(autouse=True)
 def _no_live_ingest_no_file_write(monkeypatch):
-    """Patch the router's ingest (no portal, no disk write) + restore data file.
+    """Patch the router's ingest (no portal, no disk write) + restore state.
 
     GET /api/pfz/today calls the real ingest_textdata() on Redis-miss, which
     scrapes live INCOIS and rewrites data/pfz-today.geojson. The portal's
     sector rotation then breaks every downstream file-reader test in the full
     suite (ports registry, kochi cache, satellite e2e, ...). Serve a fixed doc
-    instead and restore the file if anything still touches it.
+    instead and restore the file if anything still touches it. Also snapshot
+    the shared in-memory pfz:today key so test_endpoint_serves_from_redis
+    cannot leak into the history tests.
     """
+    import asyncio
     from pathlib import Path
 
     import backend.routers.pfz as pfz_router
+    from backend.db import redis as redis_mod
 
     async def _fake_ingest(*args, **kwargs):
         return _fake_ingest_doc()
@@ -97,9 +101,25 @@ def _no_live_ingest_no_file_write(monkeypatch):
 
     repo_path = Path(__file__).resolve().parent.parent / "data" / "pfz-today.geojson"
     backup = repo_path.read_bytes() if repo_path.is_file() else None
+    try:
+        redis_backup = asyncio.run(redis_mod.get_json("pfz:today"))
+    except Exception:
+        redis_backup = None
     yield
     if backup is not None:
         repo_path.write_bytes(backup)
+    try:
+        if redis_backup is None:
+            # Evict the test-seeded key (in-memory fallback + live Redis).
+            redis_mod._memory_store.pop("pfz:today", None)
+            redis_mod._memory_expiry.pop("pfz:today", None)
+            client = redis_mod._redis_client
+            if client is not None:
+                asyncio.run(client.delete("pfz:today"))
+        else:
+            asyncio.run(redis_mod.set_json("pfz:today", redis_backup, ttl_seconds=21600))
+    except Exception:
+        pass
 
 
 # ==============================================================================
