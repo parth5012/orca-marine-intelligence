@@ -34,7 +34,12 @@ from pydantic import BaseModel, Field
 
 try:
     from backend.agents.graph import orchestrate_stream_via_graph
-    from backend.core.bhashini import transcribe, translate_from_english, translate_to_english
+    from backend.core.bhashini import (
+        TranscriptionResult,
+        transcribe,
+        translate_from_english,
+        translate_to_english,
+    )
     from backend.core.security import (
         check_ip_rate_limit,
         get_client_ip,
@@ -43,7 +48,12 @@ try:
     from backend.db.redis import append_message, get_redis_client
 except ImportError:
     from agents.graph import orchestrate_stream_via_graph  # type: ignore
-    from core.bhashini import transcribe, translate_from_english, translate_to_english  # type: ignore
+    from core.bhashini import (  # type: ignore
+        TranscriptionResult,
+        transcribe,
+        translate_from_english,
+        translate_to_english,
+    )
     from core.security import (  # type: ignore
         check_ip_rate_limit,
         get_client_ip,
@@ -443,16 +453,32 @@ async def chat_voice(
         except Exception as err:
             # transcribe() itself never raises; this guards the call boundary.
             logger.warning("Bhashini ASR transcription failed: %s", err)
+            result = TranscriptionResult(
+                text="",
+                source_lang=source_lang,
+                transcribed=False,
+                error_code="BHASHINI_UPSTREAM_ERROR",
+                error_detail=f"Bhashini ASR transcription failed: {err}",
+                retryable=True,
+            )
     finally:
         await upload_file.close()
 
     if not result or not result.transcribed or not transcription_text:
-        err_code = (result.error_code if result and result.error_code else None) or "ASR_CONFIG_MISSING"
-        err_detail = (
-            (result.error_detail if result and result.error_detail else None)
-            or "Voice transcription unavailable"
-        )
-        retryable = result.retryable if result else False
+        if result and result.error_code:
+            err_code = result.error_code
+            err_detail = result.error_detail or "Voice transcription unavailable"
+            retryable = result.retryable
+        elif result is None:
+            # Unexpected: exception escaped before transcribe() returned.
+            err_code = "BHASHINI_UPSTREAM_ERROR"
+            err_detail = "Voice transcription unavailable"
+            retryable = True
+        else:
+            # Result present but no error_code — legacy generic failure.
+            err_code = "ASR_CONFIG_MISSING"
+            err_detail = result.error_detail or "Voice transcription unavailable"
+            retryable = result.retryable
 
         STATUS_MAP = {
             "ASR_CONFIG_MISSING": 503,

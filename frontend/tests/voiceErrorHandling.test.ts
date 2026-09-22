@@ -194,10 +194,11 @@ describe('US-VOICE-503: Voice Proxy Route Tests', () => {
 
       const res = await POST(req as any);
       expect(res.status).toBe(502);
+      expect(res.headers.get('x-orca-proxy-error')).toBe('connection-failed');
       const json = await res.json();
       expect(json).toEqual({
         detail: 'Failed to connect to backend voice service.',
-        error_code: 'BHASHINI_UPSTREAM_ERROR',
+        error_code: 'PROXY_CONNECTION_FAILED',
         retryable: true,
       });
     } finally {

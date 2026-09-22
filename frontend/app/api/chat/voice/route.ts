@@ -57,10 +57,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         detail: "Failed to connect to backend voice service.",
-        error_code: "BHASHINI_UPSTREAM_ERROR",
+        error_code: "PROXY_CONNECTION_FAILED",
         retryable: true,
       },
-      { status: 502 }
+      {
+        status: 502,
+        headers: {
+          "x-orca-proxy-error": "connection-failed",
+        },
+      }
     );
   } finally {
     clearTimeout(t);
@@ -69,7 +74,7 @@ export async function POST(request: NextRequest) {
   // Forward backend non-200 response and parse/forward JSON error body directly
   if (!backendRes.ok) {
     try {
-      const errorJson = await backendRes.json();
+      const errorJson = await backendRes.clone().json();
       const payload =
         errorJson && typeof errorJson.detail === "object" && errorJson.detail !== null
           ? { ...errorJson.detail }
@@ -77,11 +82,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(payload, { status: backendRes.status });
     } catch {
       const text = await backendRes.text().catch(() => "");
+      const retryable = backendRes.status === 502 || backendRes.status === 504;
+      const errorCode =
+        backendRes.status === 504
+          ? "ASR_TIMEOUT"
+          : backendRes.status === 502
+            ? "BHASHINI_UPSTREAM_ERROR"
+            : "AUDIO_PROCESSING_ERROR";
       return NextResponse.json(
         {
           detail: text || "Voice transcription failed.",
-          error_code: "AUDIO_PROCESSING_ERROR",
-          retryable: false,
+          error_code: errorCode,
+          retryable,
         },
         { status: backendRes.status }
       );
