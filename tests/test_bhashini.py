@@ -5,6 +5,7 @@ Owner: M-A (Agents & Orchestration) — unit tests with mocked HTTP
 Module: tests/test_bhashini.py
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import httpx
@@ -414,3 +415,149 @@ async def test_transcribe_top_level_endpoint_parsed():
             assert compute_kwargs["headers"]["Authorization"] == "infer-test-key"
             cfg = compute_kwargs["json"]["pipelineTasks"][0]["config"]
             assert cfg["serviceId"] == "svc-ml-test"
+
+
+# ---------------------------------------------------------------------------
+# US-VOICE-503: Detailed error codes, retryable flags, and telemetry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_transcribe_empty_audio_error_contract():
+    """Empty audio returns NO_SPEECH_DETECTED with retryable=False."""
+    with patch.dict("os.environ", ASR_ENV):
+        res = await transcribe(b"", "ml")
+        assert res.transcribed is False
+        assert res.error_code == "NO_SPEECH_DETECTED"
+        assert res.error_detail == "Empty audio payload received."
+        assert res.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_transcribe_missing_credentials_contract(caplog):
+    """Missing credentials returns ASR_CONFIG_MISSING with retryable=False and logs warning."""
+    with patch.dict("os.environ", {}, clear=True):
+        with caplog.at_level(logging.WARNING):
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is False
+            assert res.error_code == "ASR_CONFIG_MISSING"
+            assert "unconfigured" in (res.error_detail or "").lower()
+            assert res.retryable is False
+            assert "Bhashini ASR credentials missing" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_transcribe_config_timeout():
+    """Config timeout returns ASR_TIMEOUT with retryable=True."""
+    with patch.dict("os.environ", ASR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = httpx.TimeoutException("Config timeout")
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                res = await transcribe(b"\x01\x02", "ml")
+                assert res.transcribed is False
+                assert res.error_code == "ASR_TIMEOUT"
+                assert res.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_transcribe_config_4xx_upstream_error():
+    """Config 4xx returns BHASHINI_UPSTREAM_ERROR with retryable=False."""
+    resp_400 = MagicMock()
+    resp_400.status_code = 400
+    resp_400.text = "Bad Request"
+    with patch.dict("os.environ", ASR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = resp_400
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is False
+            assert res.error_code == "BHASHINI_UPSTREAM_ERROR"
+            assert res.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_transcribe_config_5xx_upstream_error():
+    """Config 5xx returns BHASHINI_UPSTREAM_ERROR with retryable=True."""
+    resp_500 = MagicMock()
+    resp_500.status_code = 500
+    resp_500.text = "Internal Server Error"
+    with patch.dict("os.environ", ASR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = resp_500
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                res = await transcribe(b"\x01\x02", "ml")
+                assert res.transcribed is False
+                assert res.error_code == "BHASHINI_UPSTREAM_ERROR"
+                assert res.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_transcribe_config_parse_failure():
+    """Config response missing serviceId/inference_key returns BHASHINI_UPSTREAM_ERROR with retryable=False."""
+    resp_bad = MagicMock()
+    resp_bad.status_code = 200
+    resp_bad.json.return_value = {"invalid": "shape"}
+    with patch.dict("os.environ", ASR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = resp_bad
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is False
+            assert res.error_code == "BHASHINI_UPSTREAM_ERROR"
+            assert res.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_transcribe_compute_timeout():
+    """Compute timeout returns ASR_TIMEOUT with retryable=True."""
+    with patch.dict("os.environ", ASR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [_config_200()] + [httpx.TimeoutException("Compute timeout")] * 4
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                res = await transcribe(b"\x01\x02", "ml")
+                assert res.transcribed is False
+                assert res.error_code == "ASR_TIMEOUT"
+                assert res.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_transcribe_compute_4xx_upstream_error():
+    """Compute 4xx returns BHASHINI_UPSTREAM_ERROR with retryable=False."""
+    resp_403 = MagicMock()
+    resp_403.status_code = 403
+    resp_403.text = "Forbidden"
+    with patch.dict("os.environ", ASR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [_config_200(), resp_403]
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is False
+            assert res.error_code == "BHASHINI_UPSTREAM_ERROR"
+            assert res.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_transcribe_compute_5xx_upstream_error():
+    """Compute 5xx returns BHASHINI_UPSTREAM_ERROR with retryable=True."""
+    resp_503 = MagicMock()
+    resp_503.status_code = 503
+    resp_503.text = "Service Unavailable"
+    with patch.dict("os.environ", ASR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [_config_200()] + [resp_503] * 4
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                res = await transcribe(b"\x01\x02", "ml")
+                assert res.transcribed is False
+                assert res.error_code == "BHASHINI_UPSTREAM_ERROR"
+                assert res.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_transcribe_empty_transcription_no_speech():
+    """Empty transcription from compute returns NO_SPEECH_DETECTED with retryable=False."""
+    with patch.dict("os.environ", ASR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [_config_200(), _compute_200("   ")]
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is False
+            assert res.error_code == "NO_SPEECH_DETECTED"
+            assert res.error_detail == "No speech detected in audio."
+            assert res.retryable is False
+

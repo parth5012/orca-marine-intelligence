@@ -90,6 +90,74 @@ export interface UseSSEChatOptions {
   onRouteChange?: (route: [number, number][] | number[][] | null) => void;
 }
 
+export interface VoiceErrorPayload {
+  detail?: string;
+  error_code?: string;
+  retryable?: boolean;
+}
+
+export const VOICE_ERROR_MESSAGES: Record<string, string> = {
+  ASR_CONFIG_MISSING: 'Voice input is currently unavailable on the server. Please type your message.',
+  NO_SPEECH_DETECTED: 'No speech was detected. Please hold the microphone and speak clearly.',
+  BHASHINI_UPSTREAM_ERROR: 'Voice recognition service is temporarily unavailable. Please retry or type your message.',
+  ASR_TIMEOUT: 'Voice transcription request timed out. Please try again.',
+  AUDIO_PROCESSING_ERROR: 'Audio could not be processed. Please try recording again.',
+  AUDIO_TOO_LARGE: 'Audio file exceeds 25MB limit. Please record a shorter message.',
+};
+
+export function getVoiceErrorMessage(
+  payload?: VoiceErrorPayload | null,
+  status?: number
+): string {
+  if (payload?.error_code && VOICE_ERROR_MESSAGES[payload.error_code]) {
+    return VOICE_ERROR_MESSAGES[payload.error_code];
+  }
+  if (status === 413) {
+    return VOICE_ERROR_MESSAGES.AUDIO_TOO_LARGE;
+  }
+  if (status === 422) {
+    return VOICE_ERROR_MESSAGES.NO_SPEECH_DETECTED;
+  }
+  if (status === 504) {
+    return VOICE_ERROR_MESSAGES.ASR_TIMEOUT;
+  }
+  if (status === 502) {
+    return VOICE_ERROR_MESSAGES.BHASHINI_UPSTREAM_ERROR;
+  }
+  if (status === 503) {
+    const detailLower = (payload?.detail || '').toLowerCase();
+    if (detailLower.includes('config') || detailLower.includes('key')) {
+      return VOICE_ERROR_MESSAGES.ASR_CONFIG_MISSING;
+    }
+    return VOICE_ERROR_MESSAGES.BHASHINI_UPSTREAM_ERROR;
+  }
+  if (payload?.detail && typeof payload.detail === 'string' && payload.detail.trim()) {
+    return payload.detail.trim();
+  }
+  return status ? `Voice transcription failed: ${status}` : 'Voice transcription failed.';
+}
+
+export async function parseVoiceError(res: Response): Promise<{
+  payload: VoiceErrorPayload | null;
+  message: string;
+}> {
+  let payload: VoiceErrorPayload | null = null;
+  try {
+    const body = await res.clone().json();
+    if (body && typeof body === 'object') {
+      if (body.detail && typeof body.detail === 'object') {
+        payload = body.detail as VoiceErrorPayload;
+      } else {
+        payload = body as VoiceErrorPayload;
+      }
+    }
+  } catch {
+    // Non-JSON response
+  }
+  const message = getVoiceErrorMessage(payload, res.status);
+  return { payload, message };
+}
+
 const AGENT_TITLE_MAP: Record<string, string> = {
   conversational_router: 'Conversational router checked intent',
   chitchat_responder: 'Direct chat reply (no marine tools)',
@@ -973,6 +1041,12 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       setIsTranscribing(true);
       setVoiceError(null);
 
+      if (audioBlob.size > 25 * 1024 * 1024) {
+        setIsTranscribing(false);
+        setVoiceError(VOICE_ERROR_MESSAGES.AUDIO_TOO_LARGE);
+        return null;
+      }
+
       const baseUrl = getBackendBaseUrl();
       const endpoint = `${baseUrl}/api/chat/voice`;
       const activeSession = sessionId || generateUUID();
@@ -986,8 +1060,11 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
       try {
         // Same-origin proxy FIRST (no CORS/CSP/mixed-content issues);
-        // cross-origin direct is the fallback. Retryable proxy statuses:
-        // 502/503/504 (proxy could not reach the backend).
+        // cross-origin direct is the fallback.
+        // If proxy returns a definitive application error (like 503 ASR_CONFIG_MISSING
+        // or 422 NO_SPEECH_DETECTED), do NOT needlessly re-try the direct backend
+        // endpoint since it will fail with the exact same error. Only fall back
+        // to direct backend on connection failure or proxy 502.
         const isLocalPage =
           typeof window !== 'undefined' &&
           (window.location.hostname === 'localhost' ||
@@ -999,57 +1076,56 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
         let res: Response | null = null;
         let proxyRes: Response | null = null;
+        let proxyNetworkErr: any = null;
+
         try {
           proxyRes = await fetch('/api/chat/voice', {
             method: 'POST',
             body: formData,
           });
         } catch (proxyErr: any) {
-          if (!directUsable) throw proxyErr;
-          // Network failure -> fall through to direct below (if usable).
+          proxyNetworkErr = proxyErr;
         }
 
         if (proxyRes && proxyRes.ok) {
           res = proxyRes;
-        } else if (
-          proxyRes &&
-          proxyRes.status !== 502 &&
-          proxyRes.status !== 503 &&
-          proxyRes.status !== 504
-        ) {
-          // Non-retryable proxy status: surface it, never try direct.
-          throw new Error(
-            `Voice transcription failed: ${proxyRes.status} ${proxyRes.statusText}`
-          );
-        }
-        // proxyRes null (network failure) or 502/503/504 -> direct fallback.
-
-        if (!res) {
-          if (!directUsable) {
-            throw new Error(
-              'Voice proxy unreachable and no direct backend configured.'
-            );
+        } else if (proxyRes && proxyRes.status !== 502) {
+          // Definitive application error (503 ASR_CONFIG_MISSING, 422 NO_SPEECH_DETECTED, 504, 413, etc.)
+          // Do NOT needlessly retry direct backend.
+          res = proxyRes;
+        } else {
+          // Only fall back to direct backend on connection failure or proxy 502
+          if (directUsable) {
+            try {
+              res = await fetch(endpoint, {
+                method: 'POST',
+                body: formData,
+              });
+            } catch {
+              if (proxyRes) {
+                res = proxyRes;
+              } else {
+                throw (
+                  proxyNetworkErr ||
+                  new Error(VOICE_ERROR_MESSAGES.BHASHINI_UPSTREAM_ERROR)
+                );
+              }
+            }
+          } else {
+            if (proxyRes) {
+              res = proxyRes;
+            } else {
+              throw (
+                proxyNetworkErr ||
+                new Error(VOICE_ERROR_MESSAGES.BHASHINI_UPSTREAM_ERROR)
+              );
+            }
           }
-          res = await fetch(endpoint, {
-            method: 'POST',
-            body: formData,
-          });
         }
 
         if (!res.ok) {
-          // Surface the backend's reason (e.g. 503 detail names the missing
-          // Bhashini keys) instead of a bare status code.
-          let detail = '';
-          try {
-            const errBody = await res.clone().json();
-            const d = (errBody as any)?.detail;
-            if (typeof d === 'string' && d.trim()) detail = d.trim();
-          } catch {
-            // Non-JSON error body — fall back to status text.
-          }
-          throw new Error(
-            detail || `Voice transcription failed: ${res.status} ${res.statusText}`
-          );
+          const { message } = await parseVoiceError(res);
+          throw new Error(message);
         }
 
         const data = await res.json();
@@ -1067,11 +1143,11 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
           await sendMessage(transcription.trim());
           return { transcription };
         } else {
-          setVoiceError('No speech detected in audio.');
+          setVoiceError(VOICE_ERROR_MESSAGES.NO_SPEECH_DETECTED);
           return null;
         }
       } catch (err: any) {
-        setVoiceError(err.message || 'Voice transcription failed.');
+        setVoiceError(err.message || VOICE_ERROR_MESSAGES.AUDIO_PROCESSING_ERROR);
         return null;
       } finally {
         setIsTranscribing(false);

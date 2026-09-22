@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const TIMEOUT_MS = 10000; // voice transcription may take longer
+const TIMEOUT_MS = 35000; // voice transcription with ASR retries may take up to 30-35s
 
 function getBackendBase(): string {
   return (
@@ -45,15 +45,47 @@ export async function POST(request: NextRequest) {
     // Client-safe message only: backendBase may be a private origin.
     console.error(`[api/chat/voice] proxy failure -> ${backendUrl}:`, e?.message || e);
     if (e?.name === "AbortError") {
-      return NextResponse.json({ detail: "Backend timeout (no voice response within 10s)" }, { status: 504 });
+      return NextResponse.json(
+        {
+          detail: "Voice transcription timed out.",
+          error_code: "ASR_TIMEOUT",
+          retryable: true,
+        },
+        { status: 504 }
+      );
     }
-    // If formData parsing failed, it may be that request has no multipart body
     return NextResponse.json(
-      { detail: "Backend unavailable — the voice proxy could not reach the FastAPI backend" },
-      { status: 504 }
+      {
+        detail: "Failed to connect to backend voice service.",
+        error_code: "BHASHINI_UPSTREAM_ERROR",
+        retryable: true,
+      },
+      { status: 502 }
     );
   } finally {
     clearTimeout(t);
+  }
+
+  // Forward backend non-200 response and parse/forward JSON error body directly
+  if (!backendRes.ok) {
+    try {
+      const errorJson = await backendRes.json();
+      const payload =
+        errorJson && typeof errorJson.detail === "object" && errorJson.detail !== null
+          ? { ...errorJson.detail }
+          : errorJson;
+      return NextResponse.json(payload, { status: backendRes.status });
+    } catch {
+      const text = await backendRes.text().catch(() => "");
+      return NextResponse.json(
+        {
+          detail: text || "Voice transcription failed.",
+          error_code: "AUDIO_PROCESSING_ERROR",
+          retryable: false,
+        },
+        { status: backendRes.status }
+      );
+    }
   }
 
   // Backend may return SSE stream or JSON — passthrough

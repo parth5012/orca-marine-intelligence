@@ -12,7 +12,12 @@ export type { ChatPanelProps } from './ChatPanel';
 export { default as LanguageSwitch, SUPPORTED_LANGUAGES } from './LanguageSwitch';
 export type { LanguageSwitchProps, LanguageOption } from './LanguageSwitch';
 
-export { useSSEChat } from './useSSEChat';
+export {
+  useSSEChat,
+  VOICE_ERROR_MESSAGES,
+  getVoiceErrorMessage,
+  parseVoiceError,
+} from './useSSEChat';
 export type {
   ChatMessage,
   ReasoningStep,
@@ -20,6 +25,7 @@ export type {
   SafetyData,
   MapEventData,
   UseSSEChatOptions,
+  VoiceErrorPayload,
 } from './useSSEChat';
 
 export * from './bhashini';
