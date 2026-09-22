@@ -43,10 +43,13 @@ export async function POST(request: NextRequest) {
   } catch (e: any) {
     clearTimeout(t);
     if (e?.name === "AbortError") {
-      return NextResponse.json({ detail: "Backend timeout" }, { status: 504 });
+      return NextResponse.json({ detail: "Backend timeout (no voice response within 10s)" }, { status: 504 });
     }
     // If formData parsing failed, it may be that request has no multipart body
-    return NextResponse.json({ detail: "Backend unavailable" }, { status: 504 });
+    return NextResponse.json(
+      { detail: `Backend unavailable at ${backendBase}/api/chat/voice — set BACKEND_API_URL (server) or NEXT_PUBLIC_API_URL to the FastAPI origin` },
+      { status: 504 }
+    );
   } finally {
     clearTimeout(t);
   }

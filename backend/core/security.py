@@ -75,7 +75,21 @@ def prune_stale_ips(now: float | None = None) -> int:
 
 
 def get_client_ip(request: Request) -> str:
-    """Best-effort client IP (TestClient reports 'testclient')."""
+    """Best-effort client IP (TestClient reports 'testclient').
+
+    Behind Render/Vercel the socket IP is the egress proxy shared by ALL
+    users — without X-Forwarded-For every user shares one 30/min bucket and
+    the chat 429s for everyone after a few messages. Trust the leftmost
+    XFF entry (closest to the client as appended by our proxies).
+    """
+    try:
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            first = xff.split(",")[0].strip()
+            if first:
+                return first
+    except Exception:
+        pass
     try:
         if request.client is not None and request.client.host:
             return request.client.host
