@@ -83,10 +83,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def seed_initial_pfz_if_empty() -> int:
+async def seed_initial_pfz_if_empty(force: bool = False) -> int:
     """
-    If the pfz_zones table is empty (e.g. fresh database deployment on Render/Supabase),
-    automatically seed it from data/pfz-today.geojson so that find_pfz_near works
+    Ensure the pfz_zones table has records for today.
+    If the table is empty OR today's valid_date has 0 rows (or force=True),
+    seeds it from data/pfz-today.geojson so that find_pfz_near works
     immediately without waiting for daily cron ingestion.
     """
     try:
@@ -96,20 +97,22 @@ async def seed_initial_pfz_if_empty() -> int:
         from datetime import date
         from sqlalchemy import func, select
 
-        async with AsyncSessionLocal() as session:
-            count_q = select(func.count(PFZZone.id))
-            res = await session.execute(count_q)
-            current_count = res.scalar() or 0
-            if current_count > 0:
-                return 0
+        today = date.today()
+        if not force:
+            async with AsyncSessionLocal() as session:
+                today_q = select(func.count(PFZZone.id)).where(PFZZone.valid_date == today)
+                today_res = await session.execute(today_q)
+                today_count = today_res.scalar() or 0
+                if today_count > 0:
+                    return 0
 
         features = _load_geojson_features()
         if not features:
             logger.info("seed_initial_pfz_if_empty: no local GeoJSON features found to seed")
             return 0
 
-        upserted = await upsert_pfz_features(features, valid_date=date.today())
-        logger.info("seed_initial_pfz_if_empty: seeded %d initial PFZ zones into empty database", upserted)
+        upserted = await upsert_pfz_features(features, valid_date=today)
+        logger.info("seed_initial_pfz_if_empty: seeded %d PFZ zones into PostGIS database for %s", upserted, today)
         return upserted
     except Exception as exc:
         logger.warning("seed_initial_pfz_if_empty notice: %s", exc)

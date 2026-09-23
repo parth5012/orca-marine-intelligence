@@ -77,5 +77,27 @@ async def test_postgis_empty_falls_back_to_geojson():
     with patch.object(fish_finder, "ping_database", new=AsyncMock(return_value=True)), \
          patch("backend.db.postgis.find_pfz_near", new=AsyncMock(return_value=[])):
         zones = await fish_finder.find_fishing_zones(lat=9.93, lon=76.26, radius_km=80.0, limit=5)
-        assert len(zones) > 0, "Should fall back to GeoJSON and return zones"
-        assert zones[0].get("place")
+    assert len(zones) > 0, "Should fall back to GeoJSON and return zones"
+    assert zones[0].get("place")
+
+
+@pytest.mark.asyncio
+async def test_seed_initial_pfz_if_empty():
+    """Verify seed_initial_pfz_if_empty calls upsert_pfz_features when table count is 0."""
+    from unittest.mock import patch, AsyncMock, MagicMock
+    from backend.db.session import seed_initial_pfz_if_empty
+
+    mock_session = AsyncMock()
+    mock_res = MagicMock()
+    mock_res.scalar.return_value = 0
+    mock_session.execute.return_value = mock_res
+
+    mock_session_ctx = AsyncMock()
+    mock_session_ctx.__aenter__.return_value = mock_session
+    mock_session_ctx.__aexit__.return_value = None
+
+    with patch("backend.db.session.AsyncSessionLocal", return_value=mock_session_ctx), \
+         patch("backend.db.postgis.upsert_pfz_features", new=AsyncMock(return_value=437)) as mock_upsert:
+        upserted = await seed_initial_pfz_if_empty(force=True)
+        assert upserted == 437
+        assert mock_upsert.called
