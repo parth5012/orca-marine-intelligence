@@ -688,6 +688,12 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || isStreaming) return;
+      // A local send supersedes in-flight hydration; server history lacks this turn.
+      if (hydrateAbortRef.current) {
+        hydrateAbortRef.current.abort();
+        hydrateAbortRef.current = null;
+        setIsLoadingHistory(false);
+      }
       options.onRouteChange?.(null);
 
       const userMessageId = `user-${Date.now()}-${(msgSeq += 1)}`;

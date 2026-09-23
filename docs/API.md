@@ -35,7 +35,7 @@
 | 15 | `POST` | `/api/officer/broadcasts` | `officer` | `/officer` broadcast composer · `backend/routers/officer.py` | P1 |
 | 16 | `GET` | `/api/officer/broadcasts` | `officer` | `/officer` broadcast history · `backend/routers/officer.py` | P1 |
 | 17 | `GET` | `/api/officer/dayclose` | `officer` | `/officer` day-close audit (JSON + CSV) · `backend/routers/officer.py` | P1 |
-| 18 | `GET` | `/api/chat/history` | `chat` | No UI caller yet (T6 proxy + T7 hydrate pending) · `backend/routers/chat.py` | P1 |
+| 18 | `GET` | `/api/chat/history` | `chat` | `useSSEChat.ts` hydrate via proxy `GET /api/chat/history` (`frontend/app/api/chat/history/route.ts`) · `backend/routers/chat.py` | P1 |
 
 P0 = app broken without it. P1 = safety/UX degraded. P2 = deferred/internal.
 
@@ -271,7 +271,7 @@ data: <JSON>
 - `429` — Per-IP rate limit exceeded (`30/min` chat; `Retry-After` header)
 
 **Security notes (#199):** `session_id` is client-controlled but format-validated
-(`^[A-Za-z0-9_.-]{1,128}$`; invalid → fresh `uuid4` server-issued). Tradeoff:
+(`^[A-Za-z0-9_.-]{1,64}$`; invalid → fresh `uuid4` server-issued). Tradeoff:
 no server matching-secret, so a guessed ID could read that session's 24h-TTL
 history — mitigated by unguessable `uuid4` defaults + short TTL; full
 server-issued secret deferred post-MVP to avoid breaking existing clients.
@@ -360,8 +360,9 @@ Turns are `{role, content, ts}` plus optional `place`/`zone_id` when stored
 turns are plain text. T3 GPS redaction: `lat`/`lon`/`center` numbers are never
 included in the payload (place names only); access logs redact `session_id`.
 
-**Frontend:** no UI caller yet (`ChatPanel` has no history fetch; T6 Next.js
-`GET /api/chat/history` proxy + T7 `useSSEChat` hydrate pending).
+**Frontend:** `useSSEChat` fetches `GET /api/chat/history` through the Next.js
+proxy (`frontend/app/api/chat/history/route.ts`, 10s timeout, 504 on
+timeout/unavailable) when the session initializes.
 
 **Status Codes:**
 - `200` — Success, including `{count: 0, turns: []}` for unknown/expired sessions (silent empty, 24h Redis TTL)

@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
     // Client-safe message only: backendBase may be a private origin
     // (server-only BACKEND_API_URL). Log the target server-side.
     console.error(
-      `[api/chat/history] proxy ${isAbort ? "timeout" : "failure"} -> ${backendUrl.toString()}:`,
+      `[api/chat/history] proxy ${isAbort ? "timeout" : "failure"} -> ${backendUrl.origin}${backendUrl.pathname}:`,
       e?.message || e
     );
     return NextResponse.json(
