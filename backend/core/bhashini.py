@@ -239,6 +239,9 @@ class TranscriptionResult:
     source_lang: str
     transcribed: bool
     cached: bool = False
+    error_code: Optional[str] = None
+    error_detail: Optional[str] = None
+    retryable: bool = False
 
 
 def _normalize_asr_lang(source_lang: object) -> str:
@@ -272,14 +275,20 @@ async def _ulca_post(
     headers: dict,
     payload: dict,
     timeout_s: float,
-) -> Optional[Any]:
+) -> tuple[Optional[Any], Optional[str]]:
     """
     POST with 5xx/timeout retry (1s->2s->4s, max 4 attempts).
 
-    Returns the response on 200 AND on 4xx (no retry per spec — caller
-    treats 4xx as a fast failure). Returns None when the service is truly
-    unavailable (5xx exhausted / network error). Never raises.
+    Returns tuple (response, failure_reason) where failure_reason is
+    "TIMEOUT", "NETWORK_ERROR", or None.
+    - On 200 or 4xx: (resp, None)
+    - On 5xx exhausted: (last_resp, None)
+    - On timeout exhausted: (None, "TIMEOUT")
+    - On network error exhausted: (None, "NETWORK_ERROR")
+    Never raises.
     """
+    last_resp: Optional[Any] = None
+    last_failure_reason: Optional[str] = None
     for attempt in range(len(ASR_BACKOFF_DELAYS) + 1):
         try:
             async with httpx.AsyncClient(
@@ -287,20 +296,30 @@ async def _ulca_post(
             ) as client:
                 resp = await client.post(url, json=payload, headers=headers)
             if resp.status_code == 200 or 400 <= resp.status_code < 500:
-                return resp
+                return resp, None
+            last_resp = resp
+            last_failure_reason = None
             logger.warning(
                 "Bhashini ASR server error status %s on attempt %d: %s",
                 resp.status_code,
                 attempt + 1,
                 resp.text,
             )
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RequestError) as net_err:
+        except httpx.TimeoutException as time_err:
+            logger.warning("Bhashini ASR timeout on attempt %d: %s", attempt + 1, time_err)
+            last_failure_reason = "TIMEOUT"
+            last_resp = None
+        except (httpx.NetworkError, httpx.RequestError) as net_err:
             logger.warning("Bhashini ASR request error on attempt %d: %s", attempt + 1, net_err)
+            last_failure_reason = "NETWORK_ERROR"
+            last_resp = None
         except Exception as err:
             logger.warning("Unexpected error calling Bhashini ASR on attempt %d: %s", attempt + 1, err)
+            last_failure_reason = "NETWORK_ERROR"
+            last_resp = None
         if attempt < len(ASR_BACKOFF_DELAYS):
             await asyncio.sleep(ASR_BACKOFF_DELAYS[attempt])
-    return None
+    return last_resp, last_failure_reason
 
 
 def _parse_pipeline_config(data: Any) -> tuple[Optional[str], Optional[str], Optional[str]]:
@@ -371,7 +390,15 @@ async def transcribe(
     """
     lang = _normalize_asr_lang(source_lang)
     if not audio_bytes:
-        return TranscriptionResult(text="", source_lang=lang, transcribed=False, cached=False)
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="NO_SPEECH_DETECTED",
+            error_detail="Empty audio payload received.",
+            retryable=False,
+        )
 
     cache_key = _get_asr_cache_key(audio_bytes, lang)
 
@@ -395,8 +422,18 @@ async def transcribe(
     api_key = os.getenv("BHASHINI_API_KEY")
     user_id = os.getenv("BHASHINI_ULCA_USER_ID")
     if not api_key or not user_id:
-        logger.debug("BHASHINI_API_KEY/BHASHINI_ULCA_USER_ID missing; ASR unavailable.")
-        return TranscriptionResult(text="", source_lang=lang, transcribed=False, cached=False)
+        logger.warning(
+            "Bhashini ASR credentials missing (BHASHINI_ULCA_USER_ID or BHASHINI_API_KEY unset). Voice transcription disabled."
+        )
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="ASR_CONFIG_MISSING",
+            error_detail="Voice transcription service is unconfigured (missing ASR credentials).",
+            retryable=False,
+        )
 
     timeout_s = _get_asr_timeout_s()
     pipeline_id = os.getenv("BHASHINI_PIPELINE_ID", BHASHINI_DEFAULT_PIPELINE_ID)
@@ -416,21 +453,60 @@ async def transcribe(
         "userID": user_id,
         "ulcaApiKey": api_key,
     }
-    config_resp = await _ulca_post(_get_ulca_config_url(), config_headers, config_payload, timeout_s)
+    config_resp, config_failure = await _ulca_post(
+        _get_ulca_config_url(), config_headers, config_payload, timeout_s
+    )
     if config_resp is None or config_resp.status_code != 200:
-        if config_resp is not None:
+        if config_failure == "TIMEOUT":
+            return TranscriptionResult(
+                text="",
+                source_lang=lang,
+                transcribed=False,
+                cached=False,
+                error_code="ASR_TIMEOUT",
+                error_detail="Bhashini ASR config request timed out.",
+                retryable=True,
+            )
+        if config_resp is None:
+            return TranscriptionResult(
+                text="",
+                source_lang=lang,
+                transcribed=False,
+                cached=False,
+                error_code="BHASHINI_UPSTREAM_ERROR",
+                error_detail="Bhashini ASR config service unreachable (network error).",
+                retryable=True,
+            )
+        status = config_resp.status_code
+        if 400 <= status < 500:
             logger.warning(
                 "Bhashini ASR config client error status %s: %s",
                 config_resp.status_code,
                 config_resp.text,
             )
-        return TranscriptionResult(text="", source_lang=lang, transcribed=False, cached=False)
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="BHASHINI_UPSTREAM_ERROR",
+            error_detail=f"Bhashini ASR config call failed with status {status}.",
+            retryable=(status >= 500),
+        )
 
     try:
         config_data = config_resp.json()
     except Exception as err:
         logger.warning("Bhashini ASR config response unparseable: %s", err)
-        return TranscriptionResult(text="", source_lang=lang, transcribed=False, cached=False)
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="BHASHINI_UPSTREAM_ERROR",
+            error_detail="Bhashini ASR config response unparseable.",
+            retryable=False,
+        )
 
     service_id, callback_url, inference_key = _parse_pipeline_config(config_data)
     if not service_id or not inference_key:
@@ -439,7 +515,15 @@ async def transcribe(
             bool(service_id),
             bool(inference_key),
         )
-        return TranscriptionResult(text="", source_lang=lang, transcribed=False, cached=False)
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="BHASHINI_UPSTREAM_ERROR",
+            error_detail="Bhashini ASR config missing serviceId or inference key.",
+            retryable=False,
+        )
     compute_url = callback_url or BHASHINI_ASR_COMPUTE_URL
 
     # 4. Compute call — base64 WAV in inputData.audio[].audioContent
@@ -465,15 +549,46 @@ async def transcribe(
         "Content-Type": "application/json",
         "Authorization": inference_key,
     }
-    compute_resp = await _ulca_post(compute_url, compute_headers, compute_payload, timeout_s)
+    compute_resp, compute_failure = await _ulca_post(
+        compute_url, compute_headers, compute_payload, timeout_s
+    )
     if compute_resp is None or compute_resp.status_code != 200:
-        if compute_resp is not None:
+        if compute_failure == "TIMEOUT":
+            return TranscriptionResult(
+                text="",
+                source_lang=lang,
+                transcribed=False,
+                cached=False,
+                error_code="ASR_TIMEOUT",
+                error_detail="Bhashini ASR compute request timed out.",
+                retryable=True,
+            )
+        if compute_resp is None:
+            return TranscriptionResult(
+                text="",
+                source_lang=lang,
+                transcribed=False,
+                cached=False,
+                error_code="BHASHINI_UPSTREAM_ERROR",
+                error_detail="Bhashini ASR compute service unreachable (network error).",
+                retryable=True,
+            )
+        status = compute_resp.status_code
+        if 400 <= status < 500:
             logger.warning(
                 "Bhashini ASR compute client error status %s: %s",
                 compute_resp.status_code,
                 compute_resp.text,
             )
-        return TranscriptionResult(text="", source_lang=lang, transcribed=False, cached=False)
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="BHASHINI_UPSTREAM_ERROR",
+            error_detail=f"Bhashini ASR compute call failed with status {status}.",
+            retryable=(status >= 500),
+        )
 
     try:
         compute_data = compute_resp.json()
@@ -484,12 +599,28 @@ async def transcribe(
         )
     except Exception as err:
         logger.warning("Bhashini ASR compute response unparseable: %s", err)
-        return TranscriptionResult(text="", source_lang=lang, transcribed=False, cached=False)
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="BHASHINI_UPSTREAM_ERROR",
+            error_detail="Bhashini ASR compute response unparseable.",
+            retryable=False,
+        )
 
     if not text or not str(text).strip():
         # No-speech path: valid call, nothing detected — do not cache.
         logger.debug("Bhashini ASR returned empty transcription (no speech detected).")
-        return TranscriptionResult(text="", source_lang=lang, transcribed=False, cached=False)
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="NO_SPEECH_DETECTED",
+            error_detail="No speech detected in audio.",
+            retryable=False,
+        )
 
     transcription = str(text).strip()
     if redis_client is not None:

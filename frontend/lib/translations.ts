@@ -53,6 +53,14 @@ export interface TranslationDictionary {
   aiSafeTomorrow: string;
   aiNearestPFZ: string;
   aiCycloneAlert: string;
+  // T7 multi-turn UX (T2-approved copy). Optional so non-EN langs fall back
+  // to EN via t() — EN values below are the verbatim T2-approved strings.
+  multiturnContinuingFrom?: string;
+  multiturnTurn?: string;
+  multiturnLoadingConversation?: string;
+  followupTomorrow?: string;
+  followupSaferZone?: string;
+  followupNearBeypore?: string;
 }
 
 export const TRANSLATIONS: Record<LanguageCode, TranslationDictionary> = {
@@ -93,7 +101,14 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDictionary> = {
     aiWelcome: 'Namaste Captain! I am ORCA, your Agentic Marine Assistant. Ask me anything in text about sea safety, weather, wave conditions, or high-yield fishing zones (PFZs).',
     aiSafeTomorrow: 'I checked nearby fishing zones and marine conditions. Tomorrow morning sea conditions off Veraval Coast are SAFE for fishing.',
     aiNearestPFZ: 'The nearest high-probability fishing zone is PFZ #09 (Somnath Shelf Slope), just 14.2 km SE from your current landing port.',
-    aiCycloneAlert: 'There is NO active cyclone warning in the West Coast / Arabian Sea sector. However, a HIGH WAVE WARNING (2.5-3.2m) is active for offshore Sector 4.'
+    aiCycloneAlert: 'There is NO active cyclone warning in the West Coast / Arabian Sea sector. However, a HIGH WAVE WARNING (2.5-3.2m) is active for offshore Sector 4.',
+    // T7 multi-turn UX — verbatim T2-approved EN copy (other langs fall back here).
+    multiturnContinuingFrom: 'Continuing from',
+    multiturnTurn: 'turn',
+    multiturnLoadingConversation: 'Loading conversation...',
+    followupTomorrow: 'and tomorrow?',
+    followupSaferZone: 'safer zone?',
+    followupNearBeypore: 'near Beypore?',
   },
   hi: {
     home: 'होम',

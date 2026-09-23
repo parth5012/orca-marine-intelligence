@@ -90,6 +90,75 @@ export interface UseSSEChatOptions {
   onRouteChange?: (route: [number, number][] | number[][] | null) => void;
 }
 
+export interface VoiceErrorPayload {
+  detail?: string;
+  error_code?: string;
+  retryable?: boolean;
+}
+
+export const VOICE_ERROR_MESSAGES: Record<string, string> = {
+  ASR_CONFIG_MISSING: 'Voice input is currently unavailable on the server. Please type your message.',
+  NO_SPEECH_DETECTED: 'No speech was detected. Please hold the microphone and speak clearly.',
+  BHASHINI_UPSTREAM_ERROR: 'Voice recognition service is temporarily unavailable. Please retry or type your message.',
+  ASR_TIMEOUT: 'Voice transcription request timed out. Please try again.',
+  PROXY_CONNECTION_FAILED: 'Failed to connect to voice proxy service. Please retry or type your message.',
+  AUDIO_PROCESSING_ERROR: 'Audio could not be processed. Please try recording again.',
+  AUDIO_TOO_LARGE: 'Audio file exceeds 25MB limit. Please record a shorter message.',
+};
+
+export function getVoiceErrorMessage(
+  payload?: VoiceErrorPayload | null,
+  status?: number
+): string {
+  if (payload?.error_code && VOICE_ERROR_MESSAGES[payload.error_code]) {
+    return VOICE_ERROR_MESSAGES[payload.error_code];
+  }
+  if (status === 413) {
+    return VOICE_ERROR_MESSAGES.AUDIO_TOO_LARGE;
+  }
+  if (status === 422) {
+    return VOICE_ERROR_MESSAGES.NO_SPEECH_DETECTED;
+  }
+  if (status === 504) {
+    return VOICE_ERROR_MESSAGES.ASR_TIMEOUT;
+  }
+  if (status === 502) {
+    return VOICE_ERROR_MESSAGES.BHASHINI_UPSTREAM_ERROR;
+  }
+  if (status === 503) {
+    const detailLower = (payload?.detail || '').toLowerCase();
+    if (detailLower.includes('config') || detailLower.includes('key')) {
+      return VOICE_ERROR_MESSAGES.ASR_CONFIG_MISSING;
+    }
+    return VOICE_ERROR_MESSAGES.BHASHINI_UPSTREAM_ERROR;
+  }
+  if (payload?.detail && typeof payload.detail === 'string' && payload.detail.trim()) {
+    return payload.detail.trim();
+  }
+  return status ? `Voice transcription failed: ${status}` : 'Voice transcription failed.';
+}
+
+export async function parseVoiceError(res: Response): Promise<{
+  payload: VoiceErrorPayload | null;
+  message: string;
+}> {
+  let payload: VoiceErrorPayload | null = null;
+  try {
+    const body = await res.clone().json();
+    if (body && typeof body === 'object') {
+      if (body.detail && typeof body.detail === 'object') {
+        payload = body.detail as VoiceErrorPayload;
+      } else {
+        payload = body as VoiceErrorPayload;
+      }
+    }
+  } catch {
+    // Non-JSON response
+  }
+  const message = getVoiceErrorMessage(payload, res.status);
+  return { payload, message };
+}
+
 const AGENT_TITLE_MAP: Record<string, string> = {
   conversational_router: 'Conversational router checked intent',
   chitchat_responder: 'Direct chat reply (no marine tools)',
@@ -291,6 +360,80 @@ export function filterHumanEvidence(items: unknown): string[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// History hydration (T6, map #232) — engine only, no visuals (T7 owns pills).
+//
+// T1 #234 (locked): backend GET /api/chat/history returns minimal+place
+//   {role,content,ts,place?,zone_id?}, 400 malformed -> empty, 200
+//   count:0 -> empty bubbles, limit 20 clamp, voice visible as text.
+// T3 #236 (locked): hide cards+keep banner both, hide tech both, verbatim
+//   lang, clarifications plain text, hide GPS (place names only).
+//
+// mapHistoryTurnsToMessages projects turns -> ChatMessage[]:
+//   - reasoning_steps:[] (hide tech), zone_cards:[] (drop cards, veto holds)
+//   - evidence: filterHumanEvidence([content]) (tech hidden, human kept)
+//   - content verbatim (no re-translate), clarifications plain text
+//   - no map_data/safety/coords (no GPS numbers; place names only in text)
+//   - voice turns map as plain text bubbles like any user turn
+// ---------------------------------------------------------------------------
+
+export const HISTORY_MESSAGE_CAP = 20;
+export const HISTORY_FETCH_LIMIT = 20;
+
+export interface HistoryTurn {
+  role: string;
+  content: string;
+  ts?: number;
+  place?: string;
+  zone_id?: string;
+}
+
+export function getHistoryStorageKey(sid: string): string {
+  return `orca_messages_${sid}`;
+}
+
+function toCreatedAtMs(ts: unknown): number {
+  if (typeof ts === 'number' && Number.isFinite(ts) && ts > 0) {
+    // Backend ts is time.time() seconds float; frontend created_at is ms.
+    return ts < 1e12 ? Math.round(ts * 1000) : Math.round(ts);
+  }
+  return Date.now();
+}
+
+export function mapHistoryTurnsToMessages(turns: unknown): ChatMessage[] {
+  if (!Array.isArray(turns)) return [];
+  const allowed = new Set(['user', 'assistant', 'system']);
+  const clean: HistoryTurn[] = [];
+  for (const t of turns) {
+    if (typeof t !== 'object' || t === null) continue;
+    const rec = t as Record<string, unknown>;
+    if (typeof rec.role !== 'string' || !allowed.has(rec.role)) continue;
+    if (typeof rec.content !== 'string') continue;
+    clean.push({
+      role: rec.role,
+      content: rec.content,
+      ts: typeof rec.ts === 'number' ? rec.ts : undefined,
+      place: typeof rec.place === 'string' ? rec.place : undefined,
+      zone_id: typeof rec.zone_id === 'string' ? rec.zone_id : undefined,
+    });
+  }
+  const capped = clean.slice(-HISTORY_MESSAGE_CAP);
+  return capped.map((t, idx) => {
+    const created_at = toCreatedAtMs(t.ts);
+    const content = t.content;
+    return {
+      id: `hist-${created_at}-${idx}`,
+      role: t.role as ChatMessage['role'],
+      content,
+      created_at,
+      isStreaming: false,
+      reasoning_steps: [],
+      zone_cards: [],
+      evidence: filterHumanEvidence([content]),
+    } as ChatMessage;
+  });
+}
+
 export function useSSEChat(options: UseSSEChatOptions = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -301,8 +444,12 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
   );
   const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  // T6 hydrate states for T7 to consume (non-fatal silent).
+  const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const hydrateAbortRef = useRef<AbortController | null>(null);
 
   // Initialize session_id from localStorage or generate fresh
   useEffect(() => {
@@ -330,6 +477,103 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
     }
   }, [options.initialLocation]);
 
+  // T6 hydrate: on sessionId init GET /api/chat/history -> ChatMessage[].
+  // Network wins over localStorage; failures are non-fatal silent
+  // (keep cache/empty, expose historyError for T7).
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined') return;
+    const key = getHistoryStorageKey(sessionId);
+    try {
+      const cached = localStorage.getItem(key);
+      if (cached) {
+        const parsed: unknown = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          const clean = (parsed as any[]).filter(
+            (m) => m && typeof m.content === 'string' && typeof m.id === 'string'
+          );
+          setMessages(clean.slice(-HISTORY_MESSAGE_CAP));
+        }
+      }
+    } catch {
+      // Corrupt cache — fall through to network.
+    }
+
+    hydrateAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    hydrateAbortRef.current = ctrl;
+    setIsLoadingHistory(true);
+    setHistoryError(null);
+
+    const url = `/api/chat/history?session_id=${encodeURIComponent(sessionId)}&limit=${HISTORY_FETCH_LIMIT}`;
+    fetch(url, { signal: ctrl.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          if (res.status === 400) {
+            // T1: malformed sid -> empty bubbles (silent).
+            if (!ctrl.signal.aborted) {
+              setMessages([]);
+              try {
+                localStorage.setItem(key, JSON.stringify([]));
+              } catch {
+                // quota ignore
+              }
+            }
+            return;
+          }
+          throw new Error(`History request failed: ${res.status}`);
+        }
+        const body = (await res.json()) as any;
+        const turns = Array.isArray(body?.turns) ? body.turns : [];
+        const mapped = mapHistoryTurnsToMessages(turns);
+        if (ctrl.signal.aborted) return;
+        setMessages(mapped);
+        try {
+          localStorage.setItem(key, JSON.stringify(mapped.slice(-HISTORY_MESSAGE_CAP)));
+        } catch {
+          // quota ignore
+        }
+      })
+      .catch((e: any) => {
+        if (e?.name === 'AbortError' || ctrl.signal.aborted) return;
+        setHistoryError(e?.message || 'History unavailable');
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setIsLoadingHistory(false);
+      });
+
+    return () => {
+      ctrl.abort();
+    };
+  }, [sessionId]);
+
+  // T6 persist: cap 20. Skipped while hydrating so the in-flight network
+  // response wins over the instant cache paint.
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined') return;
+    if (isLoadingHistory) return;
+    try {
+      localStorage.setItem(
+        getHistoryStorageKey(sessionId),
+        JSON.stringify(
+          messages
+            .filter((m) => !m.isStreaming)
+            .slice(-HISTORY_MESSAGE_CAP)
+            .map((m) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              created_at: m.created_at,
+              reasoning_steps: [],
+              zone_cards: [],
+              evidence: filterHumanEvidence(m.evidence),
+            }))
+        )
+      );
+    } catch {
+      // quota ignore
+    }
+  }, [messages, sessionId, isLoadingHistory]);
+
   const updateLanguage = useCallback((newLang: string) => {
     setLanguage(newLang);
     if (typeof window !== 'undefined') {
@@ -347,15 +591,27 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    if (hydrateAbortRef.current) {
+      hydrateAbortRef.current.abort();
+      hydrateAbortRef.current = null;
+    }
+    const prev = sessionId;
     const fresh = generateUUID();
     setSessionId(fresh);
     if (typeof window !== 'undefined') {
+      try {
+        if (prev) localStorage.removeItem(getHistoryStorageKey(prev));
+      } catch {
+        // ignore
+      }
       localStorage.setItem('orca_session_id', fresh);
     }
     setMessages([]);
     setIsStreaming(false);
+    setIsLoadingHistory(false);
+    setHistoryError(null);
     options.onRouteChange?.(null);
-  }, []);
+  }, [sessionId, options]);
 
   const parseZoneFeatures = useCallback((features: any[] = [], center?: [number, number] | null): MarineZoneCard[] => {
     const cards: MarineZoneCard[] = [];
@@ -445,6 +701,12 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || isStreaming) return;
+      // A local send supersedes in-flight hydration; server history lacks this turn.
+      if (hydrateAbortRef.current) {
+        hydrateAbortRef.current.abort();
+        hydrateAbortRef.current = null;
+        setIsLoadingHistory(false);
+      }
       options.onRouteChange?.(null);
 
       const userMessageId = `user-${Date.now()}-${(msgSeq += 1)}`;
@@ -973,6 +1235,12 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       setIsTranscribing(true);
       setVoiceError(null);
 
+      if (audioBlob.size > 25 * 1024 * 1024) {
+        setIsTranscribing(false);
+        setVoiceError(VOICE_ERROR_MESSAGES.AUDIO_TOO_LARGE);
+        return null;
+      }
+
       const baseUrl = getBackendBaseUrl();
       const endpoint = `${baseUrl}/api/chat/voice`;
       const activeSession = sessionId || generateUUID();
@@ -986,8 +1254,11 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
       try {
         // Same-origin proxy FIRST (no CORS/CSP/mixed-content issues);
-        // cross-origin direct is the fallback. Retryable proxy statuses:
-        // 502/503/504 (proxy could not reach the backend).
+        // cross-origin direct is the fallback.
+        // If proxy returns a definitive application error (like 503 ASR_CONFIG_MISSING
+        // or 422 NO_SPEECH_DETECTED), do NOT needlessly re-try the direct backend
+        // endpoint since it will fail with the exact same error. Only fall back
+        // to direct backend on connection failure or proxy 502.
         const isLocalPage =
           typeof window !== 'undefined' &&
           (window.location.hostname === 'localhost' ||
@@ -999,57 +1270,55 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
         let res: Response | null = null;
         let proxyRes: Response | null = null;
+        let proxyNetworkErr: any = null;
+
         try {
           proxyRes = await fetch('/api/chat/voice', {
             method: 'POST',
             body: formData,
           });
         } catch (proxyErr: any) {
-          if (!directUsable) throw proxyErr;
-          // Network failure -> fall through to direct below (if usable).
+          proxyNetworkErr = proxyErr;
         }
+
+        const isProxyConnectionFailure =
+          Boolean(proxyNetworkErr) ||
+          (proxyRes?.status === 502 &&
+            proxyRes?.headers?.get('x-orca-proxy-error') === 'connection-failed');
 
         if (proxyRes && proxyRes.ok) {
           res = proxyRes;
-        } else if (
-          proxyRes &&
-          proxyRes.status !== 502 &&
-          proxyRes.status !== 503 &&
-          proxyRes.status !== 504
-        ) {
-          // Non-retryable proxy status: surface it, never try direct.
-          throw new Error(
-            `Voice transcription failed: ${proxyRes.status} ${proxyRes.statusText}`
-          );
-        }
-        // proxyRes null (network failure) or 502/503/504 -> direct fallback.
-
-        if (!res) {
-          if (!directUsable) {
-            throw new Error(
-              'Voice proxy unreachable and no direct backend configured.'
-            );
+        } else if (proxyRes && !isProxyConnectionFailure) {
+          // Response came from backend (including backend 502/503/504/422).
+          // Do not repeat request directly to backend.
+          res = proxyRes;
+        } else {
+          // Only fall back to direct backend on proxy connection failure
+          if (directUsable) {
+            try {
+              res = await fetch(endpoint, {
+                method: 'POST',
+                body: formData,
+              });
+            } catch {
+              if (proxyRes) {
+                res = proxyRes;
+              } else {
+                throw new Error(VOICE_ERROR_MESSAGES.PROXY_CONNECTION_FAILED);
+              }
+            }
+          } else {
+            if (proxyRes) {
+              res = proxyRes;
+            } else {
+              throw new Error(VOICE_ERROR_MESSAGES.PROXY_CONNECTION_FAILED);
+            }
           }
-          res = await fetch(endpoint, {
-            method: 'POST',
-            body: formData,
-          });
         }
 
         if (!res.ok) {
-          // Surface the backend's reason (e.g. 503 detail names the missing
-          // Bhashini keys) instead of a bare status code.
-          let detail = '';
-          try {
-            const errBody = await res.clone().json();
-            const d = (errBody as any)?.detail;
-            if (typeof d === 'string' && d.trim()) detail = d.trim();
-          } catch {
-            // Non-JSON error body — fall back to status text.
-          }
-          throw new Error(
-            detail || `Voice transcription failed: ${res.status} ${res.statusText}`
-          );
+          const { message } = await parseVoiceError(res);
+          throw new Error(message);
         }
 
         const data = await res.json();
@@ -1067,11 +1336,11 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
           await sendMessage(transcription.trim());
           return { transcription };
         } else {
-          setVoiceError('No speech detected in audio.');
+          setVoiceError(VOICE_ERROR_MESSAGES.NO_SPEECH_DETECTED);
           return null;
         }
       } catch (err: any) {
-        setVoiceError(err.message || 'Voice transcription failed.');
+        setVoiceError(err.message || VOICE_ERROR_MESSAGES.AUDIO_PROCESSING_ERROR);
         return null;
       } finally {
         setIsTranscribing(false);
@@ -1083,6 +1352,8 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
   return {
     messages,
     isStreaming,
+    isLoadingHistory,
+    historyError,
     sessionId,
     language,
     location,

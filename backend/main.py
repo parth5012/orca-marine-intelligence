@@ -35,13 +35,17 @@ for _env_file in (_root_dir / ".env", _base_dir / ".env", Path(".env")):
     if _env_file.is_file():
         load_dotenv(dotenv_path=_env_file, override=False)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 try:
     from backend.routers import chat, geofence, officer, pfz, route, status, tiles, weather
+    from backend.routers.chat import VoiceTranscriptionException
 except ImportError:
     from routers import chat, geofence, officer, pfz, route, status, tiles, weather
+    from routers.chat import VoiceTranscriptionException
 
 try:
     from backend.core.logging import get_logger, setup_logging
@@ -175,6 +179,13 @@ async def lifespan(app: FastAPI):
         telemetry["langsmith"]["enabled"],
     )
 
+    bhashini_key = os.getenv("BHASHINI_API_KEY")
+    bhashini_user = os.getenv("BHASHINI_ULCA_USER_ID")
+    if not bhashini_key or not bhashini_user:
+        logger.warning(
+            "Bhashini ASR credentials missing (BHASHINI_ULCA_USER_ID or BHASHINI_API_KEY unset). Voice transcription disabled."
+        )
+
     # Verify database connection (gracefully handle disconnected state)
     try:
         db_status = await check_database()
@@ -209,7 +220,10 @@ async def lifespan(app: FastAPI):
         import backend.db.redis as r_mod
         client = getattr(r_mod, "_redis_client", None)
         if client is not None:
-            await client.close()
+            if hasattr(client, "aclose"):
+                await client.aclose()
+            else:
+                await client.close()
     except Exception:
         pass
 
@@ -226,6 +240,38 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(VoiceTranscriptionException)
+async def voice_transcription_exception_handler(request: Request, exc: VoiceTranscriptionException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.error_detail,
+            "error_code": exc.error_code,
+            "retryable": exc.retryable,
+        },
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if isinstance(exc.detail, dict) and "error_code" in exc.detail:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": exc.detail.get("detail", ""),
+                "error_code": exc.detail.get("error_code"),
+                "retryable": exc.detail.get("retryable", False),
+            },
+            headers=exc.headers,
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=exc.headers,
+    )
 
 # Configure CORS from environment: explicit allowlist only. Vercel preview
 # regex is opt-out (ORCA_ALLOW_VERCEL_PREVIEW=false locks prod to the

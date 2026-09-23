@@ -10,10 +10,13 @@ conversation memory via Redis, and vernacular voice transcription.
 
 Endpoints:
   POST /api/chat          Send query, receive SSE advisory stream
+  GET  /api/chat/history  Multi-turn history (T1-locked, partial reversal)
   POST /api/chat/voice    Ingest vernacular voice audio, transcribe via Bhashini ULCA ASR
 
-Wayfinder T3 (map #92): /chat/stream alias and /chat/history deleted per
-human grill decision — single primary kept, history deferred post-MVP.
+Wayfinder T3 (map #92): /chat/stream alias deleted per human grill decision —
+single primary kept, history deferred post-MVP. Multi-turn map #232 T1
+partially reverses this: GET /chat/history returns (POST /chat/stream stays
+deleted).
 """
 
 from __future__ import annotations
@@ -28,28 +31,38 @@ import tempfile
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 try:
     from backend.agents.graph import orchestrate_stream_via_graph
-    from backend.core.bhashini import transcribe, translate_from_english, translate_to_english
+    from backend.core.bhashini import (
+        TranscriptionResult,
+        transcribe,
+        translate_from_english,
+        translate_to_english,
+    )
     from backend.core.security import (
         check_ip_rate_limit,
         get_client_ip,
         sanitize_session_id,
     )
-    from backend.db.redis import append_message, get_redis_client
+    from backend.db.redis import append_message, get_history, get_redis_client
 except ImportError:
     from agents.graph import orchestrate_stream_via_graph  # type: ignore
-    from core.bhashini import transcribe, translate_from_english, translate_to_english  # type: ignore
+    from core.bhashini import (  # type: ignore
+        TranscriptionResult,
+        transcribe,
+        translate_from_english,
+        translate_to_english,
+    )
     from core.security import (  # type: ignore
         check_ip_rate_limit,
         get_client_ip,
         sanitize_session_id,
     )
-    from db.redis import append_message, get_redis_client  # type: ignore
+    from db.redis import append_message, get_history, get_redis_client  # type: ignore
 
 logger = logging.getLogger("orca.chat")
 
@@ -123,6 +136,83 @@ class ChatRequest(BaseModel):
     lat: Optional[float] = None
     lon: Optional[float] = None
     language: Optional[str] = "en"
+
+
+# T1 #234 resolution (quoted): GET /api/chat/history?session_id=<uuid>&limit=20.
+# Shape minimal+place: 200 {session_id,count,turns:[{role,content,ts,place?,
+# zone_id?}]}. Semantics: 400 malformed sid (sanitize fail); 200
+# {count:0,turns:[]} unknown/expired (silent empty). Partial reversal:
+# history returns, POST /chat/stream stays deleted. Cap: default 20 clamp
+# 1..20 backend. Voice turns visible as text (stored as user text turns).
+# T3 #236 backend-owned filters applied here: verbatim lang (no re-translate),
+# clarifications plain text, redact GPS (no lat/lon/center numbers in payload
+# — place names only), veto/allowlist hold via text-only turns (no cards,
+# pfz_features, safety, or evidence blobs ever returned).
+HISTORY_LIMIT_DEFAULT = 20
+HISTORY_LIMIT_MAX = 20
+
+_ALLOWED_HISTORY_ROLES = ("user", "assistant", "system")
+
+
+def _sanitize_history_turn(item: object) -> Optional[Dict[str, Any]]:
+    """Project one raw stored turn to the T1 minimal+place shape (T3-redacted).
+
+    Returns None for legacy/malformed entries (e.g. graph dead-persist
+    {query,reply_summary} shape — left untouched per T4, skipped on read).
+    Never includes lat/lon/center/coordinates (T3 GPS redaction) and never
+    includes cards/evidence/safety blobs (T3 veto + allowlist hold).
+    Content is returned verbatim (T3: no re-translate).
+    """
+    if not isinstance(item, dict):
+        return None
+    role = item.get("role")
+    content = item.get("content")
+    if role not in _ALLOWED_HISTORY_ROLES or not isinstance(content, str):
+        return None
+    ts = item.get("ts")
+    if not isinstance(ts, (int, float)):
+        ts = 0.0
+    turn: Dict[str, Any] = {"role": role, "content": content, "ts": ts}
+    place = item.get("place")
+    if isinstance(place, str) and place.strip():
+        turn["place"] = place
+    zone_id = item.get("zone_id")
+    if isinstance(zone_id, str) and zone_id.strip():
+        turn["zone_id"] = zone_id
+    return turn
+
+
+@router.get("/chat/history")
+async def chat_history(
+    request: Request,
+    session_id: Optional[str] = None,
+    limit: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    """Return recent conversation turns for a session (T1-locked)."""
+    # Rate limit: reuse the chat bucket (30/min per IP) — documented in docs/API.md.
+    _enforce_rate_limit(request, "chat")
+    if (
+        not isinstance(session_id, str)
+        or not session_id
+        or sanitize_session_id(session_id) != session_id
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid session_id; must match ^[A-Za-z0-9_.-]{1,64}$",
+        )
+    try:
+        clamped = int(limit) if limit is not None else HISTORY_LIMIT_DEFAULT
+    except (TypeError, ValueError):
+        clamped = HISTORY_LIMIT_DEFAULT
+    clamped = max(1, min(HISTORY_LIMIT_MAX, clamped))
+    raw = await get_history(session_id, limit=clamped)
+    turns: List[Dict[str, Any]] = []
+    if isinstance(raw, list):
+        for entry in raw[-clamped:]:
+            clean = _sanitize_history_turn(entry)
+            if clean is not None:
+                turns.append(clean)
+    return {"session_id": session_id, "count": len(turns), "turns": turns}
 
 
 @router.post("/chat")
@@ -355,6 +445,27 @@ def _convert_to_16k_mono_wav(raw: bytes, filename: Optional[str] = None) -> byte
         return raw
 
 
+class VoiceTranscriptionException(HTTPException):
+    """Exception raised when voice transcription fails, preserving structured error metadata."""
+
+    def __init__(
+        self,
+        status_code: int,
+        detail: str,
+        error_code: str,
+        retryable: bool = False,
+        headers: Optional[Dict[str, str]] = None,
+    ):
+        super().__init__(
+            status_code=status_code,
+            detail={"detail": detail, "error_code": error_code, "retryable": retryable},
+            headers=headers,
+        )
+        self.error_detail = detail
+        self.error_code = error_code
+        self.retryable = retryable
+
+
 @router.post("/chat/voice")
 async def chat_voice(
     request: Request,
@@ -377,9 +488,19 @@ async def chat_voice(
     resolved_session_id = sanitize_session_id(session_id)
     transcription_text = ""
     MAX_AUDIO_BYTES = VOICE_MAX_AUDIO_BYTES
+    result = None
 
     try:
         content = await upload_file.read(MAX_AUDIO_BYTES + 1)
+        if len(content) == 0:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "detail": "Audio file is empty",
+                    "error_code": "NO_SPEECH_DETECTED",
+                    "retryable": False,
+                },
+            )
         if len(content) > MAX_AUDIO_BYTES:
             raise HTTPException(
                 status_code=413,
@@ -391,6 +512,15 @@ async def chat_voice(
         wav_bytes = await asyncio.to_thread(
             _convert_to_16k_mono_wav, content, safe_filename
         )
+        if not wav_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "detail": "Audio processing failed: invalid audio format.",
+                    "error_code": "AUDIO_PROCESSING_ERROR",
+                    "retryable": False,
+                },
+            )
         redis_client = None
         try:
             redis_client = await get_redis_client()
@@ -402,15 +532,48 @@ async def chat_voice(
                 transcription_text = result.text.strip()
         except Exception as err:
             # transcribe() itself never raises; this guards the call boundary.
-            logger.warning("Bhashini ASR transcription failed: %s", err)
+            logger.warning("Bhashini ASR transcription failed: %s", err, exc_info=True)
+            result = TranscriptionResult(
+                text="",
+                source_lang=source_lang,
+                transcribed=False,
+                error_code="BHASHINI_UPSTREAM_ERROR",
+                error_detail="Bhashini ASR transcription failed.",
+                retryable=True,
+            )
     finally:
         await upload_file.close()
 
-    if not transcription_text:
-        raise HTTPException(
-            status_code=503,
-            detail="Voice transcription unavailable: no transcription produced (Bhashini ASR unavailable or no speech detected).",
-        )
+    if not result or not result.transcribed or not transcription_text:
+        if result and result.error_code:
+            err_code = result.error_code
+            err_detail = result.error_detail or "Voice transcription unavailable"
+            retryable = result.retryable
+        elif result is None:
+            # Unexpected: exception escaped before transcribe() returned.
+            err_code = "BHASHINI_UPSTREAM_ERROR"
+            err_detail = "Voice transcription unavailable"
+            retryable = True
+        else:
+            # Result present but no error_code — legacy generic failure.
+            err_code = "ASR_CONFIG_MISSING"
+            err_detail = result.error_detail or "Voice transcription unavailable"
+            retryable = result.retryable
+
+        STATUS_MAP = {
+            "ASR_CONFIG_MISSING": 503,
+            "NO_SPEECH_DETECTED": 422,
+            "BHASHINI_UPSTREAM_ERROR": 502,
+            "ASR_TIMEOUT": 504,
+            "AUDIO_PROCESSING_ERROR": 400,
+        }
+        code = STATUS_MAP.get(err_code, 503)
+        detail_obj = {
+            "detail": err_detail,
+            "error_code": err_code,
+            "retryable": retryable,
+        }
+        raise HTTPException(status_code=code, detail=detail_obj)
 
     return {
         "transcription": transcription_text,

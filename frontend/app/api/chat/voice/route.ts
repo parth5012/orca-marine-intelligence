@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const TIMEOUT_MS = 10000; // voice transcription may take longer
+const TIMEOUT_MS = 35000; // voice transcription with ASR retries may take up to 30-35s
 
 function getBackendBase(): string {
   return (
@@ -31,10 +31,23 @@ export async function POST(request: NextRequest) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    clearTimeout(t);
+    return NextResponse.json(
+      {
+        detail: "Invalid voice upload.",
+        error_code: "AUDIO_PROCESSING_ERROR",
+        retryable: false,
+      },
+      { status: 400 }
+    );
+  }
+
   let backendRes: Response;
   try {
-    // Read FormData from incoming request and forward as-is
-    const formData = await request.formData();
     backendRes = await fetch(backendUrl, {
       method: "POST",
       body: formData,
@@ -45,15 +58,59 @@ export async function POST(request: NextRequest) {
     // Client-safe message only: backendBase may be a private origin.
     console.error(`[api/chat/voice] proxy failure -> ${backendUrl}:`, e?.message || e);
     if (e?.name === "AbortError") {
-      return NextResponse.json({ detail: "Backend timeout (no voice response within 10s)" }, { status: 504 });
+      return NextResponse.json(
+        {
+          detail: "Voice transcription timed out.",
+          error_code: "ASR_TIMEOUT",
+          retryable: true,
+        },
+        { status: 504 }
+      );
     }
-    // If formData parsing failed, it may be that request has no multipart body
     return NextResponse.json(
-      { detail: "Backend unavailable — the voice proxy could not reach the FastAPI backend" },
-      { status: 504 }
+      {
+        detail: "Failed to connect to backend voice service.",
+        error_code: "PROXY_CONNECTION_FAILED",
+        retryable: true,
+      },
+      {
+        status: 502,
+        headers: {
+          "x-orca-proxy-error": "connection-failed",
+        },
+      }
     );
   } finally {
     clearTimeout(t);
+  }
+
+  // Forward backend non-200 response and parse/forward JSON error body directly
+  if (!backendRes.ok) {
+    try {
+      const errorJson = await backendRes.clone().json();
+      const payload =
+        errorJson && typeof errorJson.detail === "object" && errorJson.detail !== null
+          ? { ...errorJson.detail }
+          : errorJson;
+      return NextResponse.json(payload, { status: backendRes.status });
+    } catch {
+      const text = await backendRes.text().catch(() => "");
+      const retryable = backendRes.status === 502 || backendRes.status === 504;
+      const errorCode =
+        backendRes.status === 504
+          ? "ASR_TIMEOUT"
+          : backendRes.status === 502
+            ? "BHASHINI_UPSTREAM_ERROR"
+            : "AUDIO_PROCESSING_ERROR";
+      return NextResponse.json(
+        {
+          detail: text || "Voice transcription failed.",
+          error_code: errorCode,
+          retryable,
+        },
+        { status: backendRes.status }
+      );
+    }
   }
 
   // Backend may return SSE stream or JSON — passthrough
