@@ -20,3 +20,35 @@
 - **Invariants**:
   - Motion transitions respect `prefers-reduced-motion` across all components (scroll behavior and Framer Motion spring/fade durations collapse to immediate).
   - Zero modifications to fisherman routes, layouts, or `frontend/app/page.tsx`.
+
+### 2026-09-23: ADR-0005 PostGIS PFZ Date Filtering Loosening & Government INCOIS Feed Migration Strategy
+
+**Context**:
+When deployed in cloud environments (Render, AWS, Supabase), ORCA backend containers operate in UTC (date.today() is UTC). INCOIS (Indian National Centre for Ocean Information Services) generates PFZ advisories daily based on Indian Standard Time (IST, UTC+05:30), typically releasing advisories around 11:30 IST (~06:00 UTC).
+Previously, find_pfz_near in backend/db/postgis.py used a strict equality filter:
+.where(PFZZone.valid_date == date.today())
+This caused critical failures in production:
+1. **Timezone Rollover**: Between 00:00 IST and 05:30 IST (18:30-23:59 UTC previous day), server UTC date is day D-1 while INCOIS data was dated D.
+2. **Pre-Ingestion Window**: Every morning between 00:00 UTC and 06:00 UTC, today's INCOIS advisory has not yet been published by INCOIS. Strict filtering returned 0 zones.
+3. **Empty/Fresh Deployments**: On fresh deployment before the first daily cron executes, valid_date == today returned empty arrays without raising an exception, causing fish_finder.py to exhaust search radii and report 'No fishing zones found' instead of falling back to bundled data.
+
+**Decision**:
+1. **Loosen Spatial Query Date Filtering in find_pfz_near**:
+   - Primary: Query for valid_date == valid_date (defaults to date.today()).
+   - Resilient Fallback: If 0 rows return, query for MAX(valid_date) within the spatial radius. If recent zones exist (e.g. yesterday's advisory), return them.
+2. **Auto-Seed on Startup**:
+   - init_db() invokes seed_initial_pfz_if_empty() to populate PostGIS from data/pfz-today.geojson with today's date if pfz_zones is empty.
+3. **Agent-Level Safety Fallback**:
+   - fish_finder.find_fishing_zones falls back to _geojson_fallback_staged whenever PostGIS returns 0 zones across all expansion radii (80/120/160 km), not just on connection errors.
+
+**Future Government Live Data Protocol (INCOIS / MoES / ISRO)**:
+When official government feeds (INCOIS TextData Webhook, ISRO OCM-3/Oceansat satellite thermal fronts, or MoES Marine API) become active:
+1. **Advisory Lifecycle & Staleness Bound**:
+   - INCOIS PFZ maps remain biologically and oceanographically valid for 24 to 48 hours. However, during monsoon fishing bans (April-May East Coast, June-July West Coast) or adverse weather/cyclone warnings, INCOIS does not publish new PFZ advisories.
+   - **Staleness SLA Guard**: Once real-time feeds run in production, constrain the fallback to a bounded window (e.g., maximum 48 hours):
+     if latest_date and (valid_date - latest_date).days <= 2:
+   - If latest data is older than 48 hours, return stale_warning: true or state clearly: 'INCOIS advisory from [date] - satellite update pending due to cloud cover / fishing ban'.
+2. **Data Provenance Metadata**:
+   - Keep valid_date and source in all returned zone objects so the frontend and LLM explicitly state the advisory date (e.g., 'Advisory valid for: 23-Sep-2026').
+3. **Re-tightening Criteria**:
+   - Do NOT revert to strict single-day equality (valid_date == date.today()) because INCOIS publication frequency is subject to cloud cover and satellite overpass schedules. Instead, rely on bounded validity windows (valid_date >= today - 2 days) with explicit provenance badges.

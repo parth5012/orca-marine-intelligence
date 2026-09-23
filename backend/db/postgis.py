@@ -171,10 +171,20 @@ async def find_pfz_near(
     Calculates exact spherical distance on Earth ellipsoid.
 
     Dedup: one row per (place, valid_date) exists because zone_id is
-    {base}_{date}. Without a date filter yesterday + today rows for the
-    same landing centre both enter top-N with different zone_ids and
-    render as twin cards. We filter to today's valid_date and dedup by
+    {base}_{date}. Without a date filter, yesterday and today's rows for the
+    same landing centre both enter top-N under different zone_ids and
+    render twin cards. We filter by today's valid_date and dedup by
     normalized place + rounded coords, keeping nearest first.
+
+    Resilient Fallback (ADR-0005):
+    If valid_date == today yields 0 rows, queries MAX(valid_date) within the
+    spatial radius to handle UTC/IST server date rollover or mornings before
+    INCOIS publishes today's daily 11:30 IST bulletin.
+    Future Live Government Data Migration Note:
+    When live INCOIS/MoES feeds are connected, PFZ advisories remain valid for
+    up to 48 hours. Bounded staleness checks (valid_date >= today - 2 days)
+    should be applied rather than strict single-day equality, as INCOIS does not
+    issue advisories on bad weather or fishing ban periods.
     """
     if valid_date is None:
         valid_date = date.today()
