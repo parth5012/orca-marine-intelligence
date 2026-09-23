@@ -68,6 +68,14 @@ const QUICK_ACTIONS = [
   { label: '📍 Munambam PFZ', query: 'Check PFZ fishing coordinates near Munambam.' },
 ];
 
+// T7 multi-turn follow-ups (T2-approved copy verbatim). Queries ride the same
+// session_id via sendMessage — session memory resolves context, no re-ask.
+const FOLLOWUP_CHIPS = [
+  { labelKey: 'followupTomorrow', fallback: 'and tomorrow?', query: 'and tomorrow?' },
+  { labelKey: 'followupSaferZone', fallback: 'safer zone?', query: 'safer zone?' },
+  { labelKey: 'followupNearBeypore', fallback: 'near Beypore?', query: 'near Beypore?' },
+];
+
 function toSafetyStatus(safety?: SafetyData): 'SAFE' | 'CAUTION' | 'AVOID' {
   // Fail-open to caution: missing/unknown safety never renders SAFE.
   // Only an explicit safe/green verdict returns SAFE.
@@ -148,6 +156,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     location,
     isTranscribing,
     voiceError,
+    // T6 hydration states (T7 consumes only — no fetch changes).
+    isLoadingHistory,
+    historyError,
     sendMessage,
     stopStream,
     sendVoiceAudio,
@@ -258,6 +269,32 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       req: buildRequestPayload(queryText),
       res: buildResponsePayload(msg),
     });
+  };
+
+  // T7 multi-turn UX (T2-approved copy on T6 hydration — no fetch changes).
+  // historyError stays silent by design: localStorage bubbles remain, no banner.
+  void historyError;
+  // t() with EN fallback: EN dict holds the verbatim T2 copy; missing keys
+  // fall back to the inline T2 string so copy never renders as a raw key.
+  const mtText = (key: string, fallback: string): string => {
+    const v = t(key);
+    return v === key ? fallback : v;
+  };
+  const userTurnCount = messages.filter((m) => m.role === 'user').length;
+  const lastPlace = (() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const name = messages[i]?.zone_cards?.[0]?.name;
+      if (name) return name;
+    }
+    return 'Kochi';
+  })();
+  const showContextPill = messages.length >= 2 && !isLoadingHistory;
+  const showFollowups = !isStreaming && !isLoadingHistory;
+  const pillText = `${mtText('multiturnContinuingFrom', 'Continuing from')} ${lastPlace} - ${mtText('multiturnTurn', 'turn')} ${userTurnCount}`;
+
+  const handleFollowup = async (query: string) => {
+    if (isStreaming || isLoadingHistory) return;
+    await sendMessage(query);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -442,9 +479,41 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         </div>
       </div>
 
+      {/* T7 multi-turn context pill (T2 copy): hidden <2 msgs or hydrating.
+          New Chat clears it via clearSession (messages -> []). */}
+      {showContextPill && (
+        <div
+          data-testid="multiturn-context-pill"
+          aria-label={`Continuing conversation from ${lastPlace}, turn ${userTurnCount}`}
+          className={`rounded-full px-3.5 py-1.5 border text-xs font-semibold flex items-center gap-2 w-fit shadow-sm ${
+            isLight
+              ? 'bg-cyan-50 border-cyan-200 text-cyan-900'
+              : 'bg-cyan-950/60 border-cyan-800 text-cyan-200'
+          }`}
+        >
+          <span>🧭 {pillText}</span>
+          {sessionId ? (
+            <span className="font-mono opacity-70">• {sessionId.slice(0, 8)}</span>
+          ) : null}
+        </div>
+      )}
+
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-        {messages.length === 0 && (
+        {/* T7 reload skeleton (T2 copy): history hydrating -> bubbles. */}
+        {isLoadingHistory && (
+          <div
+            data-testid="multiturn-history-skeleton"
+            aria-live="polite"
+            className={`rounded-2xl p-4 text-sm flex items-center gap-2 ${
+              isLight ? 'bg-white border border-slate-200 text-slate-500' : 'glass-panel bg-slate-950/95 border border-cyan-900/40 text-slate-400'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+            <span>{mtText('multiturnLoadingConversation', 'Loading conversation...')}</span>
+          </div>
+        )}
+        {messages.length === 0 && !isLoadingHistory && (
           <div className="py-8 text-center space-y-3">
             <div className="w-14 h-14 mx-auto rounded-2xl bg-cyan-950/60 border border-cyan-800 flex items-center justify-center text-2xl shadow-inner">
               🌊
@@ -937,6 +1006,33 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           ))}
         </div>
       </div>
+
+      {/* T7 follow-up chips (T2 copy, below quick actions): hidden while
+          streaming/loading; tap sends into the same session (memory resolves
+          context). New Chat resets them via clearSession. */}
+      {showFollowups && (
+        <div className="px-1">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+            {FOLLOWUP_CHIPS.map((chip, idx) => (
+              <button
+                key={chip.labelKey}
+                type="button"
+                data-testid={`followup-chip-${idx}`}
+                aria-label={`Follow-up query: ${mtText(chip.labelKey, chip.fallback)}`}
+                disabled={isStreaming || isLoadingHistory}
+                onClick={() => handleFollowup(chip.query)}
+                className={`flex-shrink-0 px-2.5 py-1 rounded-full border text-[11px] transition-colors disabled:opacity-50 ${
+                  isLight
+                    ? 'bg-cyan-50 hover:bg-cyan-100 text-cyan-900 border-cyan-200'
+                    : 'bg-cyan-950/50 hover:bg-cyan-900/60 text-cyan-200 border-cyan-800/60'
+                }`}
+              >
+                {mtText(chip.labelKey, chip.fallback)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Voice Status or Transcribing Notice */}
       {(isRecording || isTranscribing || voiceError) && (
