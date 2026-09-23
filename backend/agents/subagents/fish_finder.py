@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 from pathlib import Path
 import time
 from typing import Any
@@ -167,7 +168,14 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _resolve_geojson_path() -> Path | None:
-    for p in _GEOJSON_CANDIDATES:
+    candidates = list(_GEOJSON_CANDIDATES)
+    env_path = os.getenv("PFZ_GEOJSON_PATH")
+    if env_path:
+        candidates.insert(0, Path(env_path))
+    # Container & production fallback paths
+    candidates.append(Path("/app/data/pfz-today.geojson"))
+    candidates.append(Path.cwd() / "backend" / ".." / "data" / "pfz-today.geojson")
+    for p in candidates:
         try:
             resolved = p.resolve()
         except Exception:
@@ -490,9 +498,25 @@ async def find_fishing_zones(
                 last_error = exc2
                 return []
 
-    # All stages exhausted
-    if last_error:
-        logger.info("fish_finder: 0 zones found within %dkm (last_error=%s)", radii_to_try[-1], last_error)
+    # All stages exhausted in PostGIS.
+    # If PostGIS had 0 zones across all expansion radii (e.g. fresh/empty DB or date mismatch),
+    # fall back to local GeoJSON so the user still receives valid fishing zones.
+    logger.info(
+        "fish_finder: PostGIS returned 0 zones within %.0fkm; falling back to GeoJSON dataset",
+        radii_to_try[-1],
+    )
+    try:
+        fb_zones = _geojson_fallback_staged(
+            lat=lat, lon=lon, radii_km=radii_to_try, limit=limit, sector=sector_filter
+        )
+        if fb_zones:
+            return fb_zones[:limit]
+    except Exception as exc_fb:
+        logger.warning("fish_finder: GeoJSON fallback after 0 PostGIS zones failed: %s", exc_fb)
+        last_error = exc_fb
+
+    if not last_error:
+        logger.info("fish_finder: 0 zones found within %.0fkm (last_error=%s)", radii_to_try[-1], last_error)
     return []
 
 

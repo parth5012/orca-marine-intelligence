@@ -43,10 +43,13 @@ export async function GET(request: NextRequest) {
   const bbox = searchParams.get('bbox');
   const place = searchParams.get('place') || 'Kochi';
 
+  const envUrl = process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL;
   const backendBase =
-    process.env.BACKEND_API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    'http://localhost:8000';
+    envUrl && envUrl.trim().length > 0
+      ? envUrl
+      : (process.env.NODE_ENV === 'production' || process.env.VERCEL
+          ? 'https://orca-marine-intelligence-api.onrender.com'
+          : 'http://localhost:8000');
 
   const backendUrl = new URL(`${backendBase.replace(/\/$/, '')}/api/pfz/today`);
   if (sector) backendUrl.searchParams.set('sector', sector);

@@ -17,11 +17,14 @@ export const runtime = "nodejs";
 const TIMEOUT_MS = 35000; // voice transcription with ASR retries may take up to 30-35s
 
 function getBackendBase(): string {
-  return (
-    process.env.BACKEND_API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "http://localhost:8000"
-  ).replace(/\/$/, "");
+  const envUrl = process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl && envUrl.trim().length > 0) {
+    return envUrl.replace(/\/$/, "");
+  }
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+    return "https://orca-marine-intelligence-api.onrender.com";
+  }
+  return "http://localhost:8000";
 }
 
 export async function POST(request: NextRequest) {

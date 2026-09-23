@@ -22,10 +22,13 @@ export interface SystemStatusResponse {
 }
 
 export async function GET(_request: NextRequest) {
+  const envUrl = process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL;
   const backendBase =
-    process.env.BACKEND_API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    'http://localhost:8000';
+    envUrl && envUrl.trim().length > 0
+      ? envUrl
+      : (process.env.NODE_ENV === 'production' || process.env.VERCEL
+          ? 'https://orca-marine-intelligence-api.onrender.com'
+          : 'http://localhost:8000');
 
   const backendUrl = `${backendBase.replace(/\/$/, '')}/api/status`;
 

@@ -174,13 +174,25 @@ const AGENT_TITLE_MAP: Record<string, string> = {
 
 function getBackendBaseUrl(): string {
   if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    return (
+      process.env.NEXT_PUBLIC_API_URL ||
+      (process.env.NODE_ENV === 'production' || process.env.VERCEL
+        ? 'https://orca-marine-intelligence-api.onrender.com'
+        : 'http://localhost:8000')
+    );
   }
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl && envUrl.trim().length > 0) {
     return envUrl.replace(/\/$/, '');
   }
-  // Default to localhost:8000 in dev or relative if served together
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1'
+  ) {
+    return 'https://orca-marine-intelligence-api.onrender.com';
+  }
+  // Default to localhost:8000 in dev or relative when served together
   return 'http://localhost:8000';
 }
 

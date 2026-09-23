@@ -83,11 +83,45 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def seed_initial_pfz_if_empty() -> int:
+    """
+    If the pfz_zones table is empty (e.g. fresh database deployment on Render/Supabase),
+    automatically seed it from data/pfz-today.geojson so that find_pfz_near works
+    immediately without waiting for daily cron ingestion.
+    """
+    try:
+        from backend.db.models import PFZZone
+        from backend.db.postgis import upsert_pfz_features
+        from backend.agents.subagents.fish_finder import _load_geojson_features
+        from datetime import date
+        from sqlalchemy import func, select
+
+        async with AsyncSessionLocal() as session:
+            count_q = select(func.count(PFZZone.id))
+            res = await session.execute(count_q)
+            current_count = res.scalar() or 0
+            if current_count > 0:
+                return 0
+
+        features = _load_geojson_features()
+        if not features:
+            logger.info("seed_initial_pfz_if_empty: no local GeoJSON features found to seed")
+            return 0
+
+        upserted = await upsert_pfz_features(features, valid_date=date.today())
+        logger.info("seed_initial_pfz_if_empty: seeded %d initial PFZ zones into empty database", upserted)
+        return upserted
+    except Exception as exc:
+        logger.warning("seed_initial_pfz_if_empty notice: %s", exc)
+        return 0
+
+
 async def init_db():
     """
     Initialize database:
-    1. Enables the PostGIS extension if not already present.
+    1. Enables PostGIS extension if not present.
     2. Creates all tables defined in Base.metadata.
+    3. Seeds initial PFZ data if table is empty.
     """
     logger.info("Initializing database schema...")
     async with engine.begin() as conn:
@@ -96,3 +130,8 @@ async def init_db():
         # Create all tables
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database schema initialized successfully.")
+
+    try:
+        await seed_initial_pfz_if_empty()
+    except Exception as seed_err:
+        logger.warning("Post-init PFZ seeding notice: %s", seed_err)

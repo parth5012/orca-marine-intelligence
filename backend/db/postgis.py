@@ -202,8 +202,32 @@ async def find_pfz_near(
         )
 
         result = await session.execute(query)
+        rows = result.all()
+        if not rows:
+            # Fallback: if exact valid_date has 0 records, try the latest valid_date available
+            # within radius to guard against UTC/IST timezone rollover or pending daily cron.
+            latest_date_query = (
+                select(func.max(PFZZone.valid_date))
+                .where(func.ST_DWithin(zone_geog, user_geog, radius_meters))
+            )
+            latest_date_res = await session.execute(latest_date_query)
+            latest_date = latest_date_res.scalar()
+            if latest_date is not None and latest_date != valid_date:
+                fb_query = (
+                    select(
+                        PFZZone,
+                        func.ST_Distance(zone_geog, user_geog).label("distance_meters"),
+                    )
+                    .where(func.ST_DWithin(zone_geog, user_geog, radius_meters))
+                    .where(PFZZone.valid_date == latest_date)
+                    .order_by("distance_meters")
+                    .limit(fetch_n)
+                )
+                fb_result = await session.execute(fb_query)
+                rows = fb_result.all()
+
         spots = []
-        for zone, dist_m in result.all():
+        for zone, dist_m in rows:
             spots.append({
                 "zone_id": zone.zone_id,
                 "place": zone.place,
