@@ -35,12 +35,13 @@
 | 15 | `POST` | `/api/officer/broadcasts` | `officer` | `/officer` broadcast composer · `backend/routers/officer.py` | P1 |
 | 16 | `GET` | `/api/officer/broadcasts` | `officer` | `/officer` broadcast history · `backend/routers/officer.py` | P1 |
 | 17 | `GET` | `/api/officer/dayclose` | `officer` | `/officer` day-close audit (JSON + CSV) · `backend/routers/officer.py` | P1 |
+| 18 | `GET` | `/api/chat/history` | `chat` | No UI caller yet (T6 proxy + T7 hydrate pending) · `backend/routers/chat.py` | P1 |
 
 P0 = app broken without it. P1 = safety/UX degraded. P2 = deferred/internal.
 
 > **Next.js proxies (not FastAPI but required):** `GET /api/pfz` (`frontend/app/api/pfz/route.ts:39`) proxies `GET /api/pfz/today` with 3s timeout, `revalidate: 3600`, and `data/pfz-today.geojson` local fallback (503 when backend and file both unavailable). `POST /api/chat` (`frontend/app/api/chat/route.ts:45`) proxies with 3s timeout and unbuffered SSE passthrough (504 on timeout/unavailable). `POST /api/chat/voice` (`frontend/app/api/chat/voice/route.ts:27`) proxies multipart upload with 10s timeout (504 on timeout/unavailable).
 
-> **Removed in T3 (map #92, human grill):** `POST /api/chat/stream` (unused alias), `GET /api/chat/history` (post-MVP), `GET /api/pfz/history` (post-MVP slider), `GET`+`POST /api/geofence/check`, `POST /api/geofence/route`. All return 404. Tests assert removal.
+> **Removed in T3 (map #92, human grill):** `POST /api/chat/stream` (unused alias), `GET /api/pfz/history` (post-MVP slider), `GET`+`POST /api/geofence/check`, `POST /api/geofence/route`. All return 404. Tests assert removal. `GET /api/chat/history` (also pruned in T3) **returned in multi-turn map #232 T1** (partial reversal — history returns, `/chat/stream` alias stays deleted).
 
 ---
 
@@ -322,6 +323,50 @@ Vernacular voice audio transcribed via Bhashini ULCA ASR (2-call Config → Comp
 kiosks); abuse contained by the `10/min` per-IP limit + 25MB cap + 255-char
 filename sanitization. `language` is normalized (`ml-IN` → `ml`); unknown
 codes fall back to `en`.
+
+---
+
+## GET /api/chat/history
+
+Multi-turn conversation history for a session (T1-locked, multi-turn map #232;
+partial reversal of the T3 prune — history returns, `POST /api/chat/stream`
+stays deleted). Text-only turns for thread reload (T7 hydrate); voice turns
+are stored as user text so they appear on reload.
+
+**File:** `backend/routers/chat.py`
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | Yes | Multi-turn session ID (`^[A-Za-z0-9_.-]{1,64}$`; malformed → `400`) |
+| `limit` | integer | No | Max turns returned (default `20`, clamped `1..20` backend) |
+
+**Response `200`:**
+
+```json
+{
+  "session_id": "ab12cd34ef56",
+  "count": 2,
+  "turns": [
+    {"role": "user", "content": "fish near Kochi", "ts": 1758600000.0, "place": "Kochi"},
+    {"role": "assistant", "content": "Nearest zone ...", "ts": 1758600001.0}
+  ]
+}
+```
+
+Turns are `{role, content, ts}` plus optional `place`/`zone_id` when stored
+(minimal+place). Content is returned verbatim (no re-translate); clarification
+turns are plain text. T3 GPS redaction: `lat`/`lon`/`center` numbers are never
+included in the payload (place names only); access logs redact `session_id`.
+
+**Frontend:** no UI caller yet (`ChatPanel` has no history fetch; T6 Next.js
+`GET /api/chat/history` proxy + T7 `useSSEChat` hydrate pending).
+
+**Status Codes:**
+- `200` — Success, including `{count: 0, turns: []}` for unknown/expired sessions (silent empty, 24h Redis TTL)
+- `400` — Malformed `session_id` (sanitize fail: missing, empty, or outside `^[A-Za-z0-9_.-]{1,64}$`)
+- `429` — Per-IP rate limit exceeded (reuses the `chat` bucket: `30/min`; `Retry-After` header)
 
 ---
 

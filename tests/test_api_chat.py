@@ -11,8 +11,9 @@ Covers:
   - POST /api/chat/voice vernacular voice transcription (Bhashini ULCA ASR & offline fallback)
   - End-to-end integration with LangGraph supervisor
 
-Wayfinder T3 (map #92): /chat/stream alias and /chat/history deleted —
-corresponding endpoint tests removed; persistence verified via get_history.
+Wayfinder T3 (map #92): /chat/stream alias deleted —
+history returned in multi-turn map #232 T1 (partial reversal); persistence
+verified via get_history + GET /api/chat/history.
 """
 
 import json
@@ -371,13 +372,22 @@ class TestChatStreamingEndpoint:
             assert error_events[0]["data"]["type"] == "error"
             assert error_events[0]["data"]["fallback"] == "none"
 
-class TestChatHistoryEndpointRemoved:
-    """T3 prune: GET /api/chat/history deleted — endpoint must 404."""
+class TestChatHistoryEndpoint:
+    """T1 (map #232) partial reversal: GET /api/chat/history returns (stream stays deleted)."""
 
-    def test_history_endpoint_gone(self, client):
-        """Verify history endpoint returns 404 after T3 prune."""
+    def test_history_endpoint_returns_empty_for_unknown(self, client):
+        """Unknown session returns 200 silent empty (T1), not 404."""
         resp = client.get("/api/chat/history?session_id=empty-session")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == "empty-session"
+        assert body["count"] == 0
+        assert body["turns"] == []
+
+    def test_history_endpoint_rejects_bad_id(self, client):
+        """Malformed session_id returns 400 (T1 sanitize fail)."""
+        resp = client.get("/api/chat/history?session_id=../../etc/passwd")
+        assert resp.status_code == 400
 
 
 class TestVoiceTranscriptionEndpoint:
