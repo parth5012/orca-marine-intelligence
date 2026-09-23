@@ -476,7 +476,8 @@ class TestVoiceTranscriptionEndpoint:
                 body = resp.json()
                 assert body["error_code"] == "BHASHINI_UPSTREAM_ERROR"
                 assert body["retryable"] is True
-                assert "boom" in body["detail"]
+                assert "boom" not in body["detail"]
+                assert "Bhashini ASR transcription failed." in body["detail"]
 
     def test_voice_oversized_file_returns_413(self, client):
         """Verify audio file exceeding 25MB returns 413 HTTP status."""

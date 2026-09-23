@@ -554,7 +554,20 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
     try {
       localStorage.setItem(
         getHistoryStorageKey(sessionId),
-        JSON.stringify(messages.slice(-HISTORY_MESSAGE_CAP))
+        JSON.stringify(
+          messages
+            .filter((m) => !m.isStreaming)
+            .slice(-HISTORY_MESSAGE_CAP)
+            .map((m) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              created_at: m.created_at,
+              reasoning_steps: [],
+              zone_cards: [],
+              evidence: filterHumanEvidence(m.evidence),
+            }))
+        )
       );
     } catch {
       // quota ignore
@@ -1291,20 +1304,14 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
               if (proxyRes) {
                 res = proxyRes;
               } else {
-                throw (
-                  proxyNetworkErr ||
-                  new Error(VOICE_ERROR_MESSAGES.BHASHINI_UPSTREAM_ERROR)
-                );
+                throw new Error(VOICE_ERROR_MESSAGES.PROXY_CONNECTION_FAILED);
               }
             }
           } else {
             if (proxyRes) {
               res = proxyRes;
             } else {
-              throw (
-                proxyNetworkErr ||
-                new Error(VOICE_ERROR_MESSAGES.BHASHINI_UPSTREAM_ERROR)
-              );
+              throw new Error(VOICE_ERROR_MESSAGES.PROXY_CONNECTION_FAILED);
             }
           }
         }

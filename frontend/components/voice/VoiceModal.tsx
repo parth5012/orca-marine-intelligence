@@ -188,9 +188,16 @@ export const VoiceModal: React.FC = () => {
       }
 
       const isProxyConnectionError =
-        Boolean(proxyNetworkErr) ||
+        (Boolean(proxyNetworkErr) && proxyNetworkErr?.name !== 'AbortError') ||
         (proxyRes?.status === 502 &&
           proxyRes?.headers?.get('x-orca-proxy-error') === 'connection-failed');
+
+      if (proxyNetworkErr?.name === 'AbortError') {
+        setVoiceError(VOICE_ERROR_MESSAGES.ASR_TIMEOUT);
+        setIsRetryable(true);
+        setIsConfigMissing(false);
+        return;
+      }
 
       if (proxyRes && proxyRes.ok) {
         res = proxyRes;

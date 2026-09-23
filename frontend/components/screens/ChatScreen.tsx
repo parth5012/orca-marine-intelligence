@@ -289,7 +289,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     return 'Kochi';
   })();
   const showContextPill = messages.length >= 2 && !isLoadingHistory;
-  const showFollowups = !isStreaming && !isLoadingHistory;
+  const showFollowups = messages.length > 0 && !isStreaming && !isLoadingHistory;
   const pillText = `${mtText('multiturnContinuingFrom', 'Continuing from')} ${lastPlace} - ${mtText('multiturnTurn', 'turn')} ${userTurnCount}`;
 
   const handleFollowup = async (query: string) => {

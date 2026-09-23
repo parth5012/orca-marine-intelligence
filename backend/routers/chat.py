@@ -532,13 +532,13 @@ async def chat_voice(
                 transcription_text = result.text.strip()
         except Exception as err:
             # transcribe() itself never raises; this guards the call boundary.
-            logger.warning("Bhashini ASR transcription failed: %s", err)
+            logger.warning("Bhashini ASR transcription failed: %s", err, exc_info=True)
             result = TranscriptionResult(
                 text="",
                 source_lang=source_lang,
                 transcribed=False,
                 error_code="BHASHINI_UPSTREAM_ERROR",
-                error_detail=f"Bhashini ASR transcription failed: {err}",
+                error_detail="Bhashini ASR transcription failed.",
                 retryable=True,
             )
     finally:

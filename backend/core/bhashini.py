@@ -467,8 +467,18 @@ async def transcribe(
                 error_detail="Bhashini ASR config request timed out.",
                 retryable=True,
             )
-        status = config_resp.status_code if config_resp is not None else 500
-        if config_resp is not None and 400 <= status < 500:
+        if config_resp is None:
+            return TranscriptionResult(
+                text="",
+                source_lang=lang,
+                transcribed=False,
+                cached=False,
+                error_code="BHASHINI_UPSTREAM_ERROR",
+                error_detail="Bhashini ASR config service unreachable (network error).",
+                retryable=True,
+            )
+        status = config_resp.status_code
+        if 400 <= status < 500:
             logger.warning(
                 "Bhashini ASR config client error status %s: %s",
                 config_resp.status_code,
@@ -553,8 +563,18 @@ async def transcribe(
                 error_detail="Bhashini ASR compute request timed out.",
                 retryable=True,
             )
-        status = compute_resp.status_code if compute_resp is not None else 500
-        if compute_resp is not None and 400 <= status < 500:
+        if compute_resp is None:
+            return TranscriptionResult(
+                text="",
+                source_lang=lang,
+                transcribed=False,
+                cached=False,
+                error_code="BHASHINI_UPSTREAM_ERROR",
+                error_detail="Bhashini ASR compute service unreachable (network error).",
+                retryable=True,
+            )
+        status = compute_resp.status_code
+        if 400 <= status < 500:
             logger.warning(
                 "Bhashini ASR compute client error status %s: %s",
                 compute_resp.status_code,

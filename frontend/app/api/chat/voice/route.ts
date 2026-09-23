@@ -31,10 +31,23 @@ export async function POST(request: NextRequest) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    clearTimeout(t);
+    return NextResponse.json(
+      {
+        detail: "Invalid voice upload.",
+        error_code: "AUDIO_PROCESSING_ERROR",
+        retryable: false,
+      },
+      { status: 400 }
+    );
+  }
+
   let backendRes: Response;
   try {
-    // Read FormData from incoming request and forward as-is
-    const formData = await request.formData();
     backendRes = await fetch(backendUrl, {
       method: "POST",
       body: formData,

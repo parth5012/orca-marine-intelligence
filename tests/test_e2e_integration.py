@@ -932,12 +932,11 @@ class TestVoiceE2EIntegrationUSVoice503:
             files = {"file": ("fisherman_voice.wav", dummy_wav, "audio/wav")}
             data = {"language": "ml", "session_id": "e2e-fast-fail-sess"}
 
-            t0 = time.perf_counter()
-            resp = client.post("/api/chat/voice", files=files, data=data)
-            duration_ms = (time.perf_counter() - t0) * 1000
+            with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+                resp = client.post("/api/chat/voice", files=files, data=data)
+                assert mock_post.call_count == 0
 
             assert resp.status_code == 503
-            assert duration_ms < 300.0, f"Expected <300ms fast-fail, took {duration_ms:.2f}ms"
 
             body = resp.json()
             assert body["error_code"] == "ASR_CONFIG_MISSING"
@@ -952,12 +951,11 @@ class TestVoiceE2EIntegrationUSVoice503:
         files = {"file": ("empty_recording.wav", b"", "audio/wav")}
         data = {"language": "ta"}
 
-        t0 = time.perf_counter()
-        resp = client.post("/api/chat/voice", files=files, data=data)
-        duration_ms = (time.perf_counter() - t0) * 1000
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            resp = client.post("/api/chat/voice", files=files, data=data)
+            assert mock_post.call_count == 0
 
         assert resp.status_code == 422
-        assert duration_ms < 300.0, f"Expected <300ms, took {duration_ms:.2f}ms"
 
         body = resp.json()
         assert body["error_code"] == "NO_SPEECH_DETECTED"
