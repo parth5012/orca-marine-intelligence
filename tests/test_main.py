@@ -26,7 +26,7 @@ def client():
 
 
 def test_routes_mounted():
-    """Verify core routers are mounted under /api prefix (T3 prune applied)."""
+    """Verify core routers are mounted under /api prefix (T3 prune + T1 history return)."""
     paths = set(app.openapi()["paths"].keys())
 
     # Core endpoints mounted under /api
@@ -40,9 +40,9 @@ def test_routes_mounted():
     assert "/api/tiles/{z}/{x}/{y}.pbf" in paths
     assert "/api/tiles/config" in paths
 
-    # Unused aliases pruned
+    # Unused aliases pruned (history returned in T1 partial reversal)
     assert "/api/chat/stream" not in paths
-    assert "/api/chat/history" not in paths
+    assert "/api/chat/history" in paths
     assert "/api/geofence/check" not in paths
     assert "/api/geofence/route" not in paths
 

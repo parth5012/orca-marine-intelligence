@@ -10,10 +10,13 @@ conversation memory via Redis, and vernacular voice transcription.
 
 Endpoints:
   POST /api/chat          Send query, receive SSE advisory stream
+  GET  /api/chat/history  Multi-turn history (T1-locked, partial reversal)
   POST /api/chat/voice    Ingest vernacular voice audio, transcribe via Bhashini ULCA ASR
 
-Wayfinder T3 (map #92): /chat/stream alias and /chat/history deleted per
-human grill decision — single primary kept, history deferred post-MVP.
+Wayfinder T3 (map #92): /chat/stream alias deleted per human grill decision —
+single primary kept, history deferred post-MVP. Multi-turn map #232 T1
+partially reverses this: GET /chat/history returns (POST /chat/stream stays
+deleted).
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ import tempfile
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -45,7 +48,7 @@ try:
         get_client_ip,
         sanitize_session_id,
     )
-    from backend.db.redis import append_message, get_redis_client
+    from backend.db.redis import append_message, get_history, get_redis_client
 except ImportError:
     from agents.graph import orchestrate_stream_via_graph  # type: ignore
     from core.bhashini import (  # type: ignore
@@ -59,7 +62,7 @@ except ImportError:
         get_client_ip,
         sanitize_session_id,
     )
-    from db.redis import append_message, get_redis_client  # type: ignore
+    from db.redis import append_message, get_history, get_redis_client  # type: ignore
 
 logger = logging.getLogger("orca.chat")
 
@@ -133,6 +136,83 @@ class ChatRequest(BaseModel):
     lat: Optional[float] = None
     lon: Optional[float] = None
     language: Optional[str] = "en"
+
+
+# T1 #234 resolution (quoted): GET /api/chat/history?session_id=<uuid>&limit=20.
+# Shape minimal+place: 200 {session_id,count,turns:[{role,content,ts,place?,
+# zone_id?}]}. Semantics: 400 malformed sid (sanitize fail); 200
+# {count:0,turns:[]} unknown/expired (silent empty). Partial reversal:
+# history returns, POST /chat/stream stays deleted. Cap: default 20 clamp
+# 1..20 backend. Voice turns visible as text (stored as user text turns).
+# T3 #236 backend-owned filters applied here: verbatim lang (no re-translate),
+# clarifications plain text, redact GPS (no lat/lon/center numbers in payload
+# — place names only), veto/allowlist hold via text-only turns (no cards,
+# pfz_features, safety, or evidence blobs ever returned).
+HISTORY_LIMIT_DEFAULT = 20
+HISTORY_LIMIT_MAX = 20
+
+_ALLOWED_HISTORY_ROLES = ("user", "assistant", "system")
+
+
+def _sanitize_history_turn(item: object) -> Optional[Dict[str, Any]]:
+    """Project one raw stored turn to the T1 minimal+place shape (T3-redacted).
+
+    Returns None for legacy/malformed entries (e.g. graph dead-persist
+    {query,reply_summary} shape — left untouched per T4, skipped on read).
+    Never includes lat/lon/center/coordinates (T3 GPS redaction) and never
+    includes cards/evidence/safety blobs (T3 veto + allowlist hold).
+    Content is returned verbatim (T3: no re-translate).
+    """
+    if not isinstance(item, dict):
+        return None
+    role = item.get("role")
+    content = item.get("content")
+    if role not in _ALLOWED_HISTORY_ROLES or not isinstance(content, str):
+        return None
+    ts = item.get("ts")
+    if not isinstance(ts, (int, float)):
+        ts = 0.0
+    turn: Dict[str, Any] = {"role": role, "content": content, "ts": ts}
+    place = item.get("place")
+    if isinstance(place, str) and place.strip():
+        turn["place"] = place
+    zone_id = item.get("zone_id")
+    if isinstance(zone_id, str) and zone_id.strip():
+        turn["zone_id"] = zone_id
+    return turn
+
+
+@router.get("/chat/history")
+async def chat_history(
+    request: Request,
+    session_id: Optional[str] = None,
+    limit: int = Query(default=HISTORY_LIMIT_DEFAULT),
+) -> Dict[str, Any]:
+    """Return recent conversation turns for a session (T1-locked)."""
+    # Rate limit: reuse the chat bucket (30/min per IP) — documented in docs/API.md.
+    _enforce_rate_limit(request, "chat")
+    if (
+        not isinstance(session_id, str)
+        or not session_id
+        or sanitize_session_id(session_id) != session_id
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid session_id; must match ^[A-Za-z0-9_.-]{1,64}$",
+        )
+    try:
+        clamped = int(limit)
+    except (TypeError, ValueError):
+        clamped = HISTORY_LIMIT_DEFAULT
+    clamped = max(1, min(HISTORY_LIMIT_MAX, clamped))
+    raw = await get_history(session_id, limit=clamped)
+    turns: List[Dict[str, Any]] = []
+    if isinstance(raw, list):
+        for entry in raw[-clamped:]:
+            clean = _sanitize_history_turn(entry)
+            if clean is not None:
+                turns.append(clean)
+    return {"session_id": session_id, "count": len(turns), "turns": turns}
 
 
 @router.post("/chat")
