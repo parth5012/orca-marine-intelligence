@@ -2151,20 +2151,20 @@ async def orchestrate_via_graph(
         })
         if len(turn_history) > 20:
             turn_history = turn_history[-20:]
-            session_data = {
-                "lat": float(final["user_location"]["lat"]),
-                "lon": float(final["user_location"]["lon"]),
-                "last_lat": float(final["user_location"]["lat"]),
-                "last_lon": float(final["user_location"]["lon"]),
-                "last_zone_id": best.get("zone_id") if isinstance(best, dict) else None,
-                "last_zone_name": best.get("place") if isinstance(best, dict) else None,
-                "zone_id": best.get("zone_id") if isinstance(best, dict) else None,
-                "place": best.get("place") if isinstance(best, dict) else None,
-                "detected_language": final.get("detected_language") or final.get("language") or "en",
-                "last_advisory_summary": (final.get("reply") or "")[:500],
-                "turn_history": turn_history,
-                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-            }
+        session_data = {
+            "lat": float(final["user_location"]["lat"]),
+            "lon": float(final["user_location"]["lon"]),
+            "last_lat": float(final["user_location"]["lat"]),
+            "last_lon": float(final["user_location"]["lon"]),
+            "last_zone_id": best.get("zone_id") if isinstance(best, dict) else None,
+            "last_zone_name": best.get("place") if isinstance(best, dict) else None,
+            "zone_id": best.get("zone_id") if isinstance(best, dict) else None,
+            "place": best.get("place") if isinstance(best, dict) else None,
+            "detected_language": final.get("detected_language") or final.get("language") or "en",
+            "last_advisory_summary": (final.get("reply") or "")[:500],
+            "turn_history": turn_history,
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
         if isinstance(cached, dict) and cached.get("vessel_type") is not None:
             session_data["vessel_type"] = cached.get("vessel_type")
         try:
@@ -3061,20 +3061,20 @@ async def orchestrate_stream_via_graph(
         })
         if len(_turn_history) > 20:
             _turn_history = _turn_history[-20:]
-            _session_data = {
-                "lat": float(resolved_ul["lat"]),
-                "lon": float(resolved_ul["lon"]),
-                "last_lat": float(resolved_ul["lat"]),
-                "last_lon": float(resolved_ul["lon"]),
-                "last_zone_id": _best.get("zone_id") if isinstance(_best, dict) else None,
-                "last_zone_name": _best.get("place") if isinstance(_best, dict) else None,
-                "zone_id": _best.get("zone_id") if isinstance(_best, dict) else None,
-                "place": _best.get("place") if isinstance(_best, dict) else None,
-                "detected_language": dout.get("detected_language") or final_state.get("detected_language") or "en",
-                "last_advisory_summary": (_reply or "")[:500],
-                "turn_history": _turn_history,
-                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-            }
+        _session_data = {
+            "lat": float(resolved_ul["lat"]),
+            "lon": float(resolved_ul["lon"]),
+            "last_lat": float(resolved_ul["lat"]),
+            "last_lon": float(resolved_ul["lon"]),
+            "last_zone_id": _best.get("zone_id") if isinstance(_best, dict) else None,
+            "last_zone_name": _best.get("place") if isinstance(_best, dict) else None,
+            "zone_id": _best.get("zone_id") if isinstance(_best, dict) else None,
+            "place": _best.get("place") if isinstance(_best, dict) else None,
+            "detected_language": dout.get("detected_language") or final_state.get("detected_language") or "en",
+            "last_advisory_summary": (_reply or "")[:500],
+            "turn_history": _turn_history,
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
         if isinstance(_cached, dict) and _cached.get("vessel_type") is not None:
             _session_data["vessel_type"] = _cached.get("vessel_type")
         try:
