@@ -186,7 +186,7 @@ def _sanitize_history_turn(item: object) -> Optional[Dict[str, Any]]:
 async def chat_history(
     request: Request,
     session_id: Optional[str] = None,
-    limit: int = Query(default=HISTORY_LIMIT_DEFAULT),
+    limit: Optional[str] = Query(default=None),
 ) -> Dict[str, Any]:
     """Return recent conversation turns for a session (T1-locked)."""
     # Rate limit: reuse the chat bucket (30/min per IP) — documented in docs/API.md.
@@ -201,7 +201,7 @@ async def chat_history(
             detail="Invalid session_id; must match ^[A-Za-z0-9_.-]{1,64}$",
         )
     try:
-        clamped = int(limit)
+        clamped = int(limit) if limit is not None else HISTORY_LIMIT_DEFAULT
     except (TypeError, ValueError):
         clamped = HISTORY_LIMIT_DEFAULT
     clamped = max(1, min(HISTORY_LIMIT_MAX, clamped))
