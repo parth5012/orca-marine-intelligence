@@ -360,6 +360,80 @@ export function filterHumanEvidence(items: unknown): string[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// History hydration (T6, map #232) — engine only, no visuals (T7 owns pills).
+//
+// T1 #234 (locked): backend GET /api/chat/history returns minimal+place
+//   {role,content,ts,place?,zone_id?}, 400 malformed -> empty, 200
+//   count:0 -> empty bubbles, limit 20 clamp, voice visible as text.
+// T3 #236 (locked): hide cards+keep banner both, hide tech both, verbatim
+//   lang, clarifications plain text, hide GPS (place names only).
+//
+// mapHistoryTurnsToMessages projects turns -> ChatMessage[]:
+//   - reasoning_steps:[] (hide tech), zone_cards:[] (drop cards, veto holds)
+//   - evidence: filterHumanEvidence([content]) (tech hidden, human kept)
+//   - content verbatim (no re-translate), clarifications plain text
+//   - no map_data/safety/coords (no GPS numbers; place names only in text)
+//   - voice turns map as plain text bubbles like any user turn
+// ---------------------------------------------------------------------------
+
+export const HISTORY_MESSAGE_CAP = 20;
+export const HISTORY_FETCH_LIMIT = 20;
+
+export interface HistoryTurn {
+  role: string;
+  content: string;
+  ts?: number;
+  place?: string;
+  zone_id?: string;
+}
+
+export function getHistoryStorageKey(sid: string): string {
+  return `orca_messages_${sid}`;
+}
+
+function toCreatedAtMs(ts: unknown): number {
+  if (typeof ts === 'number' && Number.isFinite(ts) && ts > 0) {
+    // Backend ts is time.time() seconds float; frontend created_at is ms.
+    return ts < 1e12 ? Math.round(ts * 1000) : Math.round(ts);
+  }
+  return Date.now();
+}
+
+export function mapHistoryTurnsToMessages(turns: unknown): ChatMessage[] {
+  if (!Array.isArray(turns)) return [];
+  const allowed = new Set(['user', 'assistant', 'system']);
+  const clean: HistoryTurn[] = [];
+  for (const t of turns) {
+    if (typeof t !== 'object' || t === null) continue;
+    const rec = t as Record<string, unknown>;
+    if (typeof rec.role !== 'string' || !allowed.has(rec.role)) continue;
+    if (typeof rec.content !== 'string') continue;
+    clean.push({
+      role: rec.role,
+      content: rec.content,
+      ts: typeof rec.ts === 'number' ? rec.ts : undefined,
+      place: typeof rec.place === 'string' ? rec.place : undefined,
+      zone_id: typeof rec.zone_id === 'string' ? rec.zone_id : undefined,
+    });
+  }
+  const capped = clean.slice(-HISTORY_MESSAGE_CAP);
+  return capped.map((t, idx) => {
+    const created_at = toCreatedAtMs(t.ts);
+    const content = t.content;
+    return {
+      id: `hist-${created_at}-${idx}`,
+      role: t.role as ChatMessage['role'],
+      content,
+      created_at,
+      isStreaming: false,
+      reasoning_steps: [],
+      zone_cards: [],
+      evidence: filterHumanEvidence([content]),
+    } as ChatMessage;
+  });
+}
+
 export function useSSEChat(options: UseSSEChatOptions = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -370,8 +444,12 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
   );
   const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  // T6 hydrate states for T7 to consume (non-fatal silent).
+  const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const hydrateAbortRef = useRef<AbortController | null>(null);
 
   // Initialize session_id from localStorage or generate fresh
   useEffect(() => {
@@ -399,6 +477,90 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
     }
   }, [options.initialLocation]);
 
+  // T6 hydrate: on sessionId init GET /api/chat/history -> ChatMessage[].
+  // Network wins over localStorage; failures are non-fatal silent
+  // (keep cache/empty, expose historyError for T7).
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined') return;
+    const key = getHistoryStorageKey(sessionId);
+    try {
+      const cached = localStorage.getItem(key);
+      if (cached) {
+        const parsed: unknown = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          const clean = (parsed as any[]).filter(
+            (m) => m && typeof m.content === 'string' && typeof m.id === 'string'
+          );
+          setMessages(clean.slice(-HISTORY_MESSAGE_CAP));
+        }
+      }
+    } catch {
+      // Corrupt cache — fall through to network.
+    }
+
+    hydrateAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    hydrateAbortRef.current = ctrl;
+    setIsLoadingHistory(true);
+    setHistoryError(null);
+
+    const url = `/api/chat/history?session_id=${encodeURIComponent(sessionId)}&limit=${HISTORY_FETCH_LIMIT}`;
+    fetch(url, { signal: ctrl.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          if (res.status === 400) {
+            // T1: malformed sid -> empty bubbles (silent).
+            if (!ctrl.signal.aborted) {
+              setMessages([]);
+              try {
+                localStorage.setItem(key, JSON.stringify([]));
+              } catch {
+                // quota ignore
+              }
+            }
+            return;
+          }
+          throw new Error(`History request failed: ${res.status}`);
+        }
+        const body = (await res.json()) as any;
+        const turns = Array.isArray(body?.turns) ? body.turns : [];
+        const mapped = mapHistoryTurnsToMessages(turns);
+        if (ctrl.signal.aborted) return;
+        setMessages(mapped);
+        try {
+          localStorage.setItem(key, JSON.stringify(mapped.slice(-HISTORY_MESSAGE_CAP)));
+        } catch {
+          // quota ignore
+        }
+      })
+      .catch((e: any) => {
+        if (e?.name === 'AbortError' || ctrl.signal.aborted) return;
+        setHistoryError(e?.message || 'History unavailable');
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setIsLoadingHistory(false);
+      });
+
+    return () => {
+      ctrl.abort();
+    };
+  }, [sessionId]);
+
+  // T6 persist: cap 20. Skipped while hydrating so the in-flight network
+  // response wins over the instant cache paint.
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined') return;
+    if (isLoadingHistory) return;
+    try {
+      localStorage.setItem(
+        getHistoryStorageKey(sessionId),
+        JSON.stringify(messages.slice(-HISTORY_MESSAGE_CAP))
+      );
+    } catch {
+      // quota ignore
+    }
+  }, [messages, sessionId, isLoadingHistory]);
+
   const updateLanguage = useCallback((newLang: string) => {
     setLanguage(newLang);
     if (typeof window !== 'undefined') {
@@ -416,15 +578,27 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    if (hydrateAbortRef.current) {
+      hydrateAbortRef.current.abort();
+      hydrateAbortRef.current = null;
+    }
+    const prev = sessionId;
     const fresh = generateUUID();
     setSessionId(fresh);
     if (typeof window !== 'undefined') {
+      try {
+        if (prev) localStorage.removeItem(getHistoryStorageKey(prev));
+      } catch {
+        // ignore
+      }
       localStorage.setItem('orca_session_id', fresh);
     }
     setMessages([]);
     setIsStreaming(false);
+    setIsLoadingHistory(false);
+    setHistoryError(null);
     options.onRouteChange?.(null);
-  }, []);
+  }, [sessionId, options]);
 
   const parseZoneFeatures = useCallback((features: any[] = [], center?: [number, number] | null): MarineZoneCard[] => {
     const cards: MarineZoneCard[] = [];
@@ -1165,6 +1339,8 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
   return {
     messages,
     isStreaming,
+    isLoadingHistory,
+    historyError,
     sessionId,
     language,
     location,
