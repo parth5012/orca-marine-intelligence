@@ -117,8 +117,15 @@ def test_lexical_derive_wave_parity(value, expected):
 def test_lexical_derive_current_parity(value, expected):
     from backend.agents.lexical_mask import derive_safety_tier
 
-    # current breaches escalate even when wave/wind are calm
-    assert derive_safety_tier(0.8, 8.0, current_kt=value) == expected.upper()
+    # Option 1: current breaches never escalate past CAUTION when wave/wind
+    # are calm — only wave/wind danger or geofence ban force DANGER.
+    # Per-metric classify_current still reports danger (>3.0kt); the tier
+    # is what drives DO NOT SAIL.
+    tier = derive_safety_tier(0.8, 8.0, current_kt=value)
+    if expected == "danger":
+        assert tier == "CAUTION"
+    else:
+        assert tier == expected.upper()
 
 
 @pytest.mark.parametrize("value,expected", WIND_CASES)

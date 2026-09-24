@@ -598,16 +598,20 @@ def combine_and_rank(
     # Tie-breaker: sort by descending score, then lower wave, then closer distance
     ranked.sort(key=lambda z: (-z["score"], z["wave_height_m"] if z["wave_height_m"] is not None else 999.0, z["distance_km"]))
 
-    # All-unsafe detection: every zone actually exceeds at least one safety threshold
-    # Canonical bands (safety_thresholds): wave >= 1.5m, wind >= 15kt,
-    # current >= 1.5kt, or banned (not_banned == 0.0).
-    # Missing measurements (wave/wind unavailable) do not count as threshold violations.
+    # All-unsafe detection: every zone exceeds a VETO threshold.
+    # Canonical bands (safety_thresholds): wave >= 2.0m, wind >= 22kt,
+    # or banned (not_banned == 0.0).
+    # Option 1: current_exceeded ALONE never sets all_unsafe — a shared
+    # strong-current grid cell must not force DO NOT SAIL on calm
+    # wave/wind/geofence (Kochi/Munambam bug). Current still scores
+    # (safe_sea) and annotates per-zone safety as caution.
+    # Missing measurements (wave/wind unavailable) do not count as violations.
     all_unsafe = False
     if ranked:
         unsafe_count = 0
         for z in ranked:
             bd = z["score_breakdown"]
-            if bd.get("wave_exceeded") or bd.get("wind_exceeded") or bd.get("current_exceeded") or bd.get("not_banned") == 0.0:
+            if bd.get("wave_exceeded") or bd.get("wind_exceeded") or bd.get("not_banned") == 0.0:
                 unsafe_count += 1
         if unsafe_count == len(ranked):
             all_unsafe = True
