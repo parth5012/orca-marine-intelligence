@@ -67,6 +67,15 @@ export const CRUISE_KMH = 25;
 export function getBackendBaseUrl(): string {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl && envUrl.trim().length > 0) return envUrl.trim().replace(/\/+$/, '');
+  // No env: resolve at runtime instead of hardcoding a host. Deployed pages
+  // hit their own origin (frontend/vercel.json rewrites /api/* to the live
+  // backend); only local http dev talks straight to FastAPI on :8000.
+  if (typeof window !== 'undefined' && window.location) {
+    const { protocol, hostname, origin } = window.location;
+    const isLocal = protocol === 'http:' && (hostname === 'localhost' || hostname === '127.0.0.1');
+    if (!isLocal && origin) return origin.replace(/\/+$/, '');
+    if (isLocal) return 'http://localhost:8000';
+  }
   return 'http://localhost:8000';
 }
 

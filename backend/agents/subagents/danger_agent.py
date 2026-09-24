@@ -777,6 +777,27 @@ async def check_safety(
             postgis_ok = False
 
     # ------------------------------------------------------------------
+    # 1b. Empty-table cross-check
+    # ------------------------------------------------------------------
+    # An unseeded eez_boundaries table makes PostGIS succeed with 0 rows, so
+    # EVERY point reads "outside India's EEZ" and downstream combiners emit a
+    # false all-zones-unsafe DO NOT SAIL. data/eez.geojson is the exact source
+    # ingest_boundaries() seeds from — when the two disagree, trust the file.
+    if postgis_ok and check_eez and not inside_eez:
+        try:
+            fb_inside, _fb_dist = _fallback_check_eez(lat_f, lon_f)
+            if fb_inside:
+                logger.warning(
+                    "danger_agent: PostGIS reports outside EEZ but GeoJSON says inside "
+                    "for (%s, %s) — eez_boundaries likely unseeded, using GeoJSON",
+                    lat_f,
+                    lon_f,
+                )
+                inside_eez = True
+        except Exception as exc:
+            logger.debug("danger_agent: EEZ cross-check skipped: %s", exc)
+
+    # ------------------------------------------------------------------
     # 2. Fallback ray-casting if PostGIS failed or was skipped
     # ------------------------------------------------------------------
     if not postgis_ok:

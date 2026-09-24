@@ -36,6 +36,7 @@ import { SafetyStatus } from '@/components/common/SafetyStatus';
 import { EvidenceCard } from '@/components/common/EvidenceCard';
 import { AgentExecutionTrace } from '@/components/agent/AgentExecutionTrace';
 import { getEffectiveResponseLang } from '@/lib/languageGate';
+import { showZoneOnMap as showZoneOnMapAction } from '@/lib/zoneMapAction';
 import { ProcessingCard } from '@/components/agent/ProcessingCard';
 import { PayloadInspectorModal } from '@/components/agent/PayloadInspector';
 import {
@@ -343,10 +344,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     }
   };
 
-  const showZoneOnMap = (card: MarineZoneCard) => {
-    handleFlyToZone(card);
-    setActiveTab('map');
-  };
+  const showZoneOnMap = (card: MarineZoneCard) =>
+    showZoneOnMapAction(card, { flyToZone: handleFlyToZone, setActiveTab });
 
   // Vernacular voice recording (browser MediaRecorder -> Whisper -> auto-send).
   const startRecording = async () => {
@@ -921,7 +920,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                                       type="button"
                                       data-testid={`zone-show-on-map-${zone.id}`}
                                       aria-label={`Show ${zone.name} on map`}
-                                      onClick={() => handleFlyToZone(zone)}
+                                      onClick={() => showZoneOnMap(zone)}
                                       className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors ${
                                         isSelected
                                           ? 'bg-cyan-500 text-slate-950 shadow-sm'
