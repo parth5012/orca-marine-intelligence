@@ -266,17 +266,25 @@ def fetch_open_meteo_marine(
         max_current_6h = round(max(window_currents), 2)
 
         # Classifications
+        # Option 1: current-only danger caps overall at caution (never a
+        # sole DO NOT SAIL driver); wave danger still forces danger.
         wave_status = "safe" if wave_height < WAVE_SAFE_MAX else ("caution" if wave_height <= WAVE_CAUTION_MAX else "danger")
         current_status = "safe" if current_kt < CURRENT_SAFE_MAX else ("caution" if current_kt <= CURRENT_CAUTION_MAX else "danger")
-        overall_status = "danger" if (wave_status == "danger" or current_status == "danger") else (
-            "caution" if (wave_status == "caution" or current_status == "caution") else "safe"
-        )
+        if wave_status == "danger":
+            overall_status = "danger"
+        elif current_status == "danger" or wave_status == "caution" or current_status == "caution":
+            overall_status = "caution"
+        else:
+            overall_status = "safe"
 
         worst_wave_status_6h = "safe" if max_wave_6h < WAVE_SAFE_MAX else ("caution" if max_wave_6h <= WAVE_CAUTION_MAX else "danger")
         worst_current_status_6h = "safe" if max_current_6h < CURRENT_SAFE_MAX else ("caution" if max_current_6h <= CURRENT_CAUTION_MAX else "danger")
-        worst_status_6h = "danger" if (worst_wave_status_6h == "danger" or worst_current_status_6h == "danger") else (
-            "caution" if (worst_wave_status_6h == "caution" or worst_current_status_6h == "caution") else "safe"
-        )
+        if worst_wave_status_6h == "danger":
+            worst_status_6h = "danger"
+        elif worst_current_status_6h == "danger" or worst_wave_status_6h == "caution" or worst_current_status_6h == "caution":
+            worst_status_6h = "caution"
+        else:
+            worst_status_6h = "safe"
 
         # Compute forecast lead hours
         lead_hours = 0.0

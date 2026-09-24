@@ -71,7 +71,15 @@ def _classify_current(current_kt: float) -> str:
 
 
 def _overall_status(wave_status: str, current_status: str) -> str:
-    """Worst of wave/current wins."""
+    """Worst of wave/current wins — but current-only danger caps at caution.
+
+    Option 1: a strong current alone must not produce an overall danger
+    status (that feeds red badges / DO NOT SAIL). Wave danger still wins.
+    Raw ``current_status`` stays "danger" for observability; only the
+    overall status is capped.
+    """
+    if current_status == "danger" and wave_status != "danger":
+        current_status = "caution"
     if _SEVERITY_RANK[wave_status] >= _SEVERITY_RANK[current_status]:
         return wave_status
     return current_status
@@ -368,7 +376,10 @@ async def check_sea_conditions(points: list[dict]) -> list[dict]:
             else:
                 reason = f"wave {wave_m}m danger (>2.5m)"
         elif status == "caution":
-            if current_status == "caution" and wave_status == "caution":
+            if current_status == "danger" and wave_status != "danger":
+                # Option 1: current-only breach capped at overall caution.
+                reason = f"current {current_kt}kt strong (>3kt) — proceed with caution"
+            elif current_status == "caution" and wave_status == "caution":
                 reason = f"wave {wave_m}m caution + current {current_kt}kt caution"
             elif current_status == "caution":
                 reason = f"current {current_kt}kt caution (>2kt)"

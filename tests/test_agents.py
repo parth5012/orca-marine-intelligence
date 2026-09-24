@@ -319,7 +319,10 @@ class TestSeaChecker:
         assert _overall_status("safe", "safe") == "safe"
         assert _overall_status("safe", "caution") == "caution"
         assert _overall_status("caution", "safe") == "caution"
-        assert _overall_status("caution", "danger") == "danger"
+        # Option 1: current-only danger caps at caution; wave danger wins.
+        assert _overall_status("caution", "danger") == "caution"
+        assert _overall_status("safe", "danger") == "caution"
+        assert _overall_status("danger", "danger") == "danger"
         assert _overall_status("danger", "safe") == "danger"
 
     @pytest.mark.asyncio
@@ -362,8 +365,10 @@ class TestSeaChecker:
 
         with patch.object(sea_checker, "get_wave_current", side_effect=fake_get):
             results = await sea_checker.check_sea_conditions(points)
+        # Raw metric stays danger for observability; overall caps at caution
+        # (option 1 — current-only never sole DO NOT SAIL).
         assert results[0]["current_status"] == "danger"
-        assert results[0]["status"] == "danger"
+        assert results[0]["status"] == "caution"
 
     @pytest.mark.asyncio
     async def test_check_sea_empty_and_invalid(self):

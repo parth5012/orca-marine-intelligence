@@ -12,12 +12,19 @@ literal definition.
 Canonical bands (fail-open caution, never SAFE on missing data):
   - wave:    <2.0m safe, 2.0–3.5m caution, >3.5m danger
   - wind:    <22kt safe, 22–27kt caution, >27kt danger
-  - current: <2.0kt safe, 2.0–3.0kt caution, >3.0kt danger
+  - current: <2.0kt safe, 2.0–3.0kt caution, >3.0kt danger (metric band)
   - banned (inside MPA or explicitly outside EEZ) or cyclone alert → danger.
   - missing wave/wind (None) → caution, never safe. Missing geofence
     (inside_eez=None) is unknown, never a ban — only an explicit
     ``inside_eez is False`` bans. Missing current alone is informational
     (does not force caution when wave+wind are measured).
+
+Option 1 — current-only never vetoes (Kochi/Munambam DO NOT SAIL bug):
+  Tier DANGER / all_unsafe / DO NOT SAIL requires wave danger, wind
+  danger, geofence ban, cyclone, or the all_unsafe flag. A current
+  breach ALONE (even >3.0kt) yields CAUTION — strong current, proceed
+  with care — never a sole DO NOT SAIL. Wave/wind danger combined with
+  a current breach still yields DANGER.
 
 Map invariant: Code Trumps LLM, fail-open caution never SAFE.
 """
@@ -191,12 +198,17 @@ def derive_safety_tier(
     current_kt: Any = None,
     cyclone_alert: Any = False,
 ) -> str:
-    """Deterministic tier. DANGER on veto/breach; missing wave/wind → CAUTION.
+    """Deterministic tier. DANGER on wave/wind/ban/cyclone; current alone → CAUTION.
 
     Backward compatible: first four params match the legacy
     ``lexical_mask.derive_safety_tier`` signature; ``current_kt`` and
     ``cyclone_alert`` are additive (missing current never forces caution
     when wave+wind are measured).
+
+    Option 1: a current breach ALONE never reaches DANGER — it caps at
+    CAUTION. Only wave danger, wind danger, geofence ban, cyclone, or
+    the explicit ``all_unsafe`` flag force DANGER (sole DO NOT SAIL
+    vetoes). Wave/wind danger combined with a current breach still DANGER.
     """
     try:
         veto = bool(all_unsafe) or bool(banned) or bool(cyclone_alert)
@@ -207,20 +219,16 @@ def derive_safety_tier(
     wave = _finite_or_none(wave_m)
     wind = _finite_or_none(wind_kts)
     current = _finite_or_none(current_kt)
-    # Fail-open: missing wave/wind can never read SAFE.
-    if wave is None or wind is None:
-        # A measured breach still reads DANGER even when the other is missing.
-        if (wave is not None and wave > WAVE_DANGER_MIN_M) or (
-            wind is not None and wind > WIND_DANGER_MIN_KT
-        ) or (current is not None and current > CURRENT_DANGER_MIN_KT):
-            return "DANGER"
-        return "CAUTION"
-    if (
-        wave > WAVE_DANGER_MIN_M
-        or wind > WIND_DANGER_MIN_KT
-        or (current is not None and current > CURRENT_DANGER_MIN_KT)
-    ):
+    # Wave/wind danger → DANGER even when the other metric is missing.
+    # Current danger NEVER escalates past CAUTION on its own (option 1).
+    wave_danger = wave is not None and wave > WAVE_DANGER_MIN_M
+    wind_danger = wind is not None and wind > WIND_DANGER_MIN_KT
+    if wave_danger or wind_danger:
         return "DANGER"
+    # Fail-open: missing wave/wind can never read SAFE (current alone
+    # stays CAUTION here, not DANGER).
+    if wave is None or wind is None:
+        return "CAUTION"
     if (
         wave >= WAVE_SAFE_MAX_M
         or wind >= WIND_SAFE_MAX_KT
@@ -304,12 +312,8 @@ def apply_safety_veto(zone: dict) -> str:
         cyclone = False
     if is_banned(zone.get("inside_mpa"), zone.get("inside_eez")) or cyclone:
         return "danger"
-    if wave is None or wind is None:
-        if (wave is not None and wave > WAVE_DANGER_MIN_M) or (
-            wind is not None and wind > WIND_DANGER_MIN_KT
-        ) or (current is not None and current > CURRENT_DANGER_MIN_KT):
-            return "danger"
-        return "caution"
+    # Option 1: current-only breach (even >3.0kt) → caution, never danger.
+    # Wave/wind danger still reaches danger via derive_safety_tier.
     tier = derive_safety_tier(wave, wind, False, False, current, False)
     return tier.lower()
 

@@ -233,12 +233,13 @@ class TestSafetyVetoWaveWind:
         assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 25.0}) == "caution"
         assert apply_safety_veto({"wave_height_m": 2.5, "wind_kt": 5.0}) == "caution"
         assert apply_safety_veto({"wave_height_m": 0.8, "wind_kt": 8.0}) == "safe"
-        # current is scored explicitly: >3.0kt danger, >=2.0kt caution.
+        # current is scored explicitly: >3.0kt danger metric band, but
+        # option 1 caps the zone annotation at caution (never sole DO NOT SAIL).
         assert (
             apply_safety_veto(
                 {"wave_height_m": 0.8, "wind_kt": 8.0, "current_kt": 3.2}
             )
-            == "danger"
+            == "caution"
         )
         assert (
             apply_safety_veto(
