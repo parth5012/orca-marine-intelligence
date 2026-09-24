@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     envUrl && envUrl.trim().length > 0
       ? envUrl
       : (process.env.NODE_ENV === 'production' || process.env.VERCEL
-          ? 'https://orca-marine-intelligence-api.onrender.com'
+          ? 'https://orca-marine-intelligence-backend.vercel.app'
           : 'http://localhost:8000');
 
   const backendUrl = new URL(`${backendBase.replace(/\/$/, '')}/api/route/safe`);

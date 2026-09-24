@@ -12,7 +12,7 @@
  * Security: Vercel sends `Authorization: Bearer <CRON_SECRET>`.
  * Backend enforces the same secret (fails closed unless
  * ALLOW_UNAUTHENTICATED_REFRESH=true for local dev).
- * Requires BACKEND_API_URL=https://orca-marine-intelligence-api.onrender.com
+ * Requires BACKEND_API_URL=https://orca-marine-intelligence-backend.vercel.app
  * on Vercel production; plaintext HTTP backends are rejected unless localhost.
  */
 
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
 
   // Fail fast in production instead of POSTing to localhost and returning a
   // confusing 502: BACKEND_API_URL is required on Vercel production.
-  // Set BACKEND_API_URL=https://orca-marine-intelligence-api.onrender.com
+  // Set BACKEND_API_URL=https://orca-marine-intelligence-backend.vercel.app
   if (
     usingDefaultBackend &&
     (process.env.VERCEL_ENV === 'production' || process.env.NODE_ENV === 'production')
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
         status: 'error',
         summary: 'BACKEND_API_URL not configured in production; refusing localhost refresh',
         next_actions: [
-          'set BACKEND_API_URL=https://orca-marine-intelligence-api.onrender.com on Vercel',
+          'set BACKEND_API_URL=https://orca-marine-intelligence-backend.vercel.app on Vercel',
         ],
         artifacts: [],
       },
