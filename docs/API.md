@@ -283,7 +283,7 @@ retry.`); full tracebacks stay in server logs. Access logs redact
 
 ## POST /api/chat/voice
 
-Vernacular voice audio transcribed via Bhashini ULCA ASR (2-call Config → Compute flow, `taskType=asr`, 16kHz mono WAV). The backend converts browser `webm/opus` recordings with ffmpeg (`-ac 1 -ar 16000 -sample_fmt s16`); the deploy image must include ffmpeg, otherwise uploads pass through unconverted. There is **no mock fallback**: when Bhashini credentials are missing (`BHASHINI_API_KEY` / `BHASHINI_ULCA_USER_ID`), upstream fails, or no speech is detected, the endpoint returns 503. `GROQ_API_KEY` is planner-only and never used in the voice path.
+Vernacular voice audio transcribed via Bhashini ULCA ASR (2-call Config → Compute flow, `taskType=asr`, 16kHz mono WAV). The backend converts browser `webm/opus` recordings with ffmpeg (`-ac 1 -ar 16000 -sample_fmt s16`); the deploy image must include ffmpeg, otherwise uploads pass through unconverted. There is **no mock fallback**: when Bhashini credentials are missing (`BHASHINI_API_KEY` / `BHASHINI_ULCA_USER_ID`), upstream fails, or no speech is detected, the endpoint returns 503. Credentials come from env vars: `BHASHINI_API_KEY` (Config `ulcaApiKey`), `BHASHINI_ULCA_USER_ID` (Config `userID`), and optional `BHASHINI_INFERENCE_KEY` (Compute `Authorization`; overrides the key returned by the Config response — translation uses it too, falling back to `BHASHINI_API_KEY`). `GROQ_API_KEY` is planner-only and never used in the voice path.
 
 **File:** `backend/routers/chat.py:137`
 

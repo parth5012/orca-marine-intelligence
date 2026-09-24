@@ -17,6 +17,7 @@ from backend.core.bhashini import (
     translate_to_english,
     translate_from_english,
     TranslationResult,
+    _get_inference_key,
 )
 
 
@@ -281,6 +282,67 @@ async def test_translate_compute_4xx_fallback():
 
 
 # ---------------------------------------------------------------------------
+# BHASHINI_INFERENCE_KEY — env-var-provided inference credential
+# ---------------------------------------------------------------------------
+
+
+def test_get_inference_key_precedence():
+    """_get_inference_key() prefers BHASHINI_INFERENCE_KEY over BHASHINI_API_KEY."""
+    with patch.dict(
+        "os.environ",
+        {"BHASHINI_INFERENCE_KEY": "infer-key", "BHASHINI_API_KEY": "api-key"},
+        clear=True,
+    ):
+        assert _get_inference_key() == "infer-key"
+
+    with patch.dict(
+        "os.environ",
+        {"BHASHINI_API_KEY": "api-key"},
+        clear=True,
+    ):
+        assert _get_inference_key() == "api-key"
+
+    with patch.dict("os.environ", {}, clear=True):
+        assert _get_inference_key() is None
+
+
+@pytest.mark.asyncio
+async def test_translate_env_inference_key_overrides_config_key():
+    """BHASHINI_INFERENCE_KEY env wins over config-response inference key in translate()."""
+    env = {**TR_ENV, "BHASHINI_INFERENCE_KEY": "infer-env-key"}
+    with patch.dict("os.environ", env, clear=True):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [
+                _translate_config_200(infer_key="config-infer-key"),
+                _translate_compute_200(),
+            ]
+            res = await translate("കൊച്ചി", "ml", "en")
+            assert res.translated is True
+            # Config call uses ULCA api key + user
+            config_kwargs = mock_post.call_args_list[0][1]
+            assert config_kwargs["headers"]["userID"] == "test-user"
+            assert config_kwargs["headers"]["ulcaApiKey"] == "test-key"
+            # Compute call uses env inference key, not config-provided one
+            compute_kwargs = mock_post.call_args_list[1][1]
+            assert compute_kwargs["headers"]["Authorization"] == "infer-env-key"
+
+
+@pytest.mark.asyncio
+async def test_translate_rejects_non_https_callback_url():
+    """Config callbackUrl over http:// is rejected before Compute call to avoid credential exposure."""
+    resp_http = _translate_config_200()
+    resp_http.json.return_value["pipelineInferenceAPIEndPoint"]["callbackUrl"] = (
+        "http://insecure.bhashini.gov.in/compute"
+    )
+    with patch.dict("os.environ", TR_ENV, clear=True):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [resp_http]
+            res = await translate("കൊച്ചി", "ml", "en")
+            assert res.translated is False
+            assert mock_post.call_count == 1
+
+
+# ---------------------------------------------------------------------------
 # ULCA ASR transcribe() — voice path (#194, contract per research #192)
 # ---------------------------------------------------------------------------
 
@@ -513,6 +575,79 @@ async def test_transcribe_top_level_endpoint_parsed():
             assert compute_kwargs["headers"]["Authorization"] == "infer-test-key"
             cfg = compute_kwargs["json"]["pipelineTasks"][0]["config"]
             assert cfg["serviceId"] == "svc-ml-test"
+
+
+@pytest.mark.asyncio
+async def test_transcribe_env_inference_key_overrides_config_key():
+    """BHASHINI_INFERENCE_KEY env wins over the config-response inference key."""
+    env = {**ASR_ENV, "BHASHINI_INFERENCE_KEY": "infer-env-key"}
+    with patch.dict("os.environ", env, clear=True):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [_config_200(), _compute_200()]
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is True
+            # Config call still uses ULCA api key + user id
+            config_kwargs = mock_post.call_args_list[0][1]
+            assert config_kwargs["headers"]["userID"] == "test-user"
+            assert config_kwargs["headers"]["ulcaApiKey"] == "test-key"
+            # Compute call uses env inference key, not the config-provided one
+            compute_kwargs = mock_post.call_args_list[1][1]
+            assert compute_kwargs["headers"]["Authorization"] == "infer-env-key"
+
+
+@pytest.mark.asyncio
+async def test_transcribe_env_inference_key_fills_missing_config_key():
+    """Config response omits inferenceApiKey but BHASHINI_INFERENCE_KEY is set ->
+    transcribed=True using the env credential."""
+    env = {**ASR_ENV, "BHASHINI_INFERENCE_KEY": "infer-env-key"}
+    resp_bad_key = MagicMock()
+    resp_bad_key.status_code = 200
+    resp_bad_key.json.return_value = {
+        "pipelineResponseConfig": [
+            {
+                "taskType": "asr",
+                "config": [{"serviceId": "svc-ml-test"}],
+            }
+        ],
+        "pipelineInferenceAPIEndPoint": {
+            "callbackUrl": "https://dhruva-api.bhashini.gov.in/services/inference/pipeline"
+        },
+    }
+    with patch.dict("os.environ", env, clear=True):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [resp_bad_key, _compute_200()]
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is True
+            compute_kwargs = mock_post.call_args_list[1][1]
+            assert compute_kwargs["headers"]["Authorization"] == "infer-env-key"
+
+
+@pytest.mark.asyncio
+async def test_transcribe_rejects_non_https_callback_url():
+    """CodeRabbit review (comment 4092730794): Config callbackUrl over http://
+    -> rejected before Compute so the inference Authorization never travels
+    cleartext. transcribed=False, compute call never made."""
+    resp_http = MagicMock()
+    resp_http.status_code = 200
+    resp_http.json.return_value = {
+        "pipelineResponseConfig": [
+            {"taskType": "asr", "config": [{"serviceId": "svc-ml-test"}]}
+        ],
+        "pipelineInferenceAPIEndPoint": {
+            "callbackUrl": "http://insecure.example/inference/pipeline",
+            "inferenceApiKey": {"name": "Authorization", "value": "infer-test-key"},
+        },
+    }
+    with patch.dict("os.environ", ASR_ENV, clear=True):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = resp_http
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is False
+            assert res.error_code == "BHASHINI_UPSTREAM_ERROR"
+            assert res.retryable is False
+            assert "HTTPS" in (res.error_detail or "")
+            # Only the Config call happened — Compute was never attempted
+            assert mock_post.call_count == 1
 
 
 # ---------------------------------------------------------------------------

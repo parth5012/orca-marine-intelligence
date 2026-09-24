@@ -175,6 +175,8 @@ REDIS_URL=redis://localhost:6379/0
 
 # Optional keys for LLM and multilingual voice
 BHASHINI_API_KEY=your_bhashini_key_here
+BHASHINI_INFERENCE_KEY=your_bhashini_inference_key_here
+BHASHINI_ULCA_USER_ID=your_ulca_user_id_here
 GROQ_API_KEY=your_groq_api_key_here
 ```
 

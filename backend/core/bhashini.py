@@ -76,6 +76,22 @@ def _get_cache_key(text: str, source_lang: str, target_lang: str) -> str:
     return f"orca:bhashini:v1:{source_lang}:{target_lang}:{text_hash}"
 
 
+def _get_inference_key() -> Optional[str]:
+    """Resolve inference Authorization credential from env vars.
+
+    Preference order:
+      1. BHASHINI_INFERENCE_KEY (explicit inference key)
+      2. BHASHINI_API_KEY (ULCA api key fallback, for backward compat)
+    """
+    key = _env_str("BHASHINI_INFERENCE_KEY")
+    if key:
+        return key
+    key = _env_str("BHASHINI_API_KEY")
+    if key:
+        return key
+    return None
+
+
 async def translate(
     text: str,
     source_lang: str,
@@ -119,8 +135,7 @@ async def translate(
     user_id = _env_str("BHASHINI_ULCA_USER_ID")
     if not api_key or not user_id:
         logger.debug(
-            "BHASHINI_API_KEY/BHASHINI_ULCA_USER_ID not set; falling back to original text."
-        )
+            "BHASHINI_API_KEY/BHASHINI_ULCA_USER_ID not set; falling back to original text."        )
         return TranslationResult(
             text=text,
             source_lang=source_lang,
@@ -180,6 +195,12 @@ async def translate(
         )
 
     service_id, callback_url, inference_key = _parse_pipeline_config(config_data)
+    # Env-provided inference key (BHASHINI_INFERENCE_KEY) wins over
+    # config-response key; config-derived key remains fallback.
+    env_inference_key = _env_str("BHASHINI_INFERENCE_KEY")
+    if env_inference_key:
+        inference_key = env_inference_key
+
     if not service_id or not inference_key:
         logger.warning(
             "Bhashini translation config missing serviceId/inference key: "
@@ -194,7 +215,24 @@ async def translate(
             translated=False,
             cached=False,
         )
+
     compute_url = callback_url or BHASHINI_ENDPOINT
+    # Security (CodeRabbit review, PR #255): Never send inference Authorization
+    # header over cleartext — reject non-HTTPS callback URLs from Config response
+    # before making Compute request.
+    if not compute_url.lower().startswith("https://"):
+        logger.warning(
+            "Bhashini translation config callbackUrl is not HTTPS (%s); "
+            "rejecting Compute call to avoid credential exposure.",
+            compute_url,
+        )
+        return TranslationResult(
+            text=text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            translated=False,
+            cached=False,
+        )
 
     # 4. Compute call — account key never sent here; inference key only.
     compute_payload = {
@@ -570,6 +608,11 @@ async def transcribe(
         )
 
     service_id, callback_url, inference_key = _parse_pipeline_config(config_data)
+    # Env-provided inference key (BHASHINI_INFERENCE_KEY) wins over the
+    # config-response key; config-derived key remains the fallback.
+    env_inference_key = _env_str("BHASHINI_INFERENCE_KEY")
+    if env_inference_key:
+        inference_key = env_inference_key
     if not service_id or not inference_key:
         logger.warning(
             "Bhashini ASR config missing serviceId/inference key: has_service_id=%s has_key=%s",
@@ -586,6 +629,24 @@ async def transcribe(
             retryable=False,
         )
     compute_url = callback_url or BHASHINI_ASR_COMPUTE_URL
+    # Security (CodeRabbit review, PR #255): never send the inference
+    # Authorization header over cleartext — reject non-HTTPS callback URLs
+    # from the Config response before the Compute request.
+    if not compute_url.lower().startswith("https://"):
+        logger.warning(
+            "Bhashini ASR config callbackUrl is not HTTPS (%s); "
+            "rejecting Compute call to avoid credential exposure.",
+            compute_url,
+        )
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="BHASHINI_UPSTREAM_ERROR",
+            error_detail="Bhashini ASR config callbackUrl is not HTTPS; refusing to send credentials over cleartext.",
+            retryable=False,
+        )
 
     # 4. Compute call — base64 WAV in inputData.audio[].audioContent
     audio_b64 = base64.b64encode(bytes(audio_bytes)).decode("ascii")
