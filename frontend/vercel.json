@@ -4,6 +4,40 @@
   "buildCommand": "npm run build",
   "installCommand": "npm install",
   "outputDirectory": ".next",
+  "rewrites": [
+    {
+      "source": "/api/weather/:path*",
+      "destination": "https://orca-marine-intelligence-backend.vercel.app/api/weather/:path*"
+    },
+    {
+      "source": "/api/geofence/:path*",
+      "destination": "https://orca-marine-intelligence-backend.vercel.app/api/geofence/:path*"
+    },
+    {
+      "source": "/api/officer/:path*",
+      "destination": "https://orca-marine-intelligence-backend.vercel.app/api/officer/:path*"
+    },
+    {
+      "source": "/api/tiles/:path*",
+      "destination": "https://orca-marine-intelligence-backend.vercel.app/api/tiles/:path*"
+    },
+    {
+      "source": "/api/pfz/today",
+      "destination": "https://orca-marine-intelligence-backend.vercel.app/api/pfz/today"
+    },
+    {
+      "source": "/api/pfz/history",
+      "destination": "https://orca-marine-intelligence-backend.vercel.app/api/pfz/history"
+    },
+    {
+      "source": "/api/pfz/refresh",
+      "destination": "https://orca-marine-intelligence-backend.vercel.app/api/pfz/refresh"
+    },
+    {
+      "source": "/api/route/safe",
+      "destination": "https://orca-marine-intelligence-backend.vercel.app/api/route/safe"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

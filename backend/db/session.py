@@ -119,12 +119,53 @@ async def seed_initial_pfz_if_empty(force: bool = False) -> int:
         return 0
 
 
+async def _boundary_counts() -> tuple[int, int]:
+    """(eez_rows, mpa_rows) currently in PostGIS. (0, 0) means "needs seed"."""
+    from sqlalchemy import func, select
+
+    from backend.db.models import EEZBoundary, MPABoundary
+
+    async with AsyncSessionLocal() as session:
+        eez = (await session.execute(select(func.count(EEZBoundary.id)))).scalar() or 0
+        mpa = (await session.execute(select(func.count(MPABoundary.id)))).scalar() or 0
+    return int(eez), int(mpa)
+
+
+async def seed_boundaries_if_empty() -> int:
+    """
+    Seed eez_boundaries / mpa_boundaries from data/*.geojson when empty.
+
+    An unseeded eez_boundaries makes PostGIS report EVERY point as
+    "outside Indian EEZ", which the combiner turns into a false
+    all-zones-unsafe DO NOT SAIL advisory — and the chat danger veto then
+    wipes the zone cards (and their Show-on-Map buttons) mid-stream.
+    Mirrors seed_initial_pfz_if_empty. Returns features ingested (0 if
+    already populated).
+    """
+    from backend.ingest.boundaries import ingest_boundaries
+
+    eez_n, mpa_n = await _boundary_counts()
+    if eez_n > 0 and mpa_n > 0:
+        logger.info("seed_boundaries_if_empty: already populated (%d EEZ, %d MPA)", eez_n, mpa_n)
+        return 0
+    res = await ingest_boundaries()
+    ingested = int(res.get("eez_count", 0)) + int(res.get("mpa_count", 0))
+    logger.info(
+        "seed_boundaries_if_empty: ingested %d EEZ + %d MPA (db_synced=%s)",
+        int(res.get("eez_count", 0)),
+        int(res.get("mpa_count", 0)),
+        res.get("db_synced"),
+    )
+    return ingested
+
+
 async def init_db():
     """
     Initialize database:
     1. Enables PostGIS extension if not present.
     2. Creates all tables defined in Base.metadata.
     3. Seeds initial PFZ data if table is empty.
+    4. Seeds EEZ/MPA boundary tables if empty.
     """
     logger.info("Initializing database schema...")
     async with engine.begin() as conn:
@@ -138,3 +179,8 @@ async def init_db():
         await seed_initial_pfz_if_empty()
     except Exception as seed_err:
         logger.warning("Post-init PFZ seeding notice: %s", seed_err)
+
+    try:
+        await seed_boundaries_if_empty()
+    except Exception as seed_err:
+        logger.warning("Post-init boundary seeding notice: %s", seed_err)
