@@ -161,11 +161,12 @@ def _combined_inputs_hash(
     user_location: Any,
     language: Any = None,
     forecast: Any = None,
+    intent: Any = None,
 ) -> str:
     """Stable md5 over the full combiner input set (JSON, key-sorted)."""
     try:
         raw = json.dumps(
-            [fish, sea, weather, danger, user_location, language, forecast],
+            [fish, sea, weather, danger, user_location, language, forecast, intent],
             sort_keys=True,
             default=str,
         )
@@ -723,6 +724,7 @@ async def planner_node(state: ORCAState) -> dict:
     except ImportError as exc:
         logger.warning("graph.planner: planner_service unavailable, deterministic fallback (%s)", exc)
         intent_det, user_location_det, cached_session, degraded = await _deterministic_baseline()
+        fb_sel_import = [TOOL_OCEAN, TOOL_WEATHER] if (isinstance(intent_det, dict) and intent_det.get("wants_fish") is False) else None
         return {
             "intent": intent_det,
             "user_location": user_location_det,
@@ -731,7 +733,7 @@ async def planner_node(state: ORCAState) -> dict:
             "degraded": degraded,
             "query": query,
             "language": language,
-            "selected_tools": None,
+            "selected_tools": fb_sel_import,
             "reasoning_trace": [
                 f"planner fallback: planner_service unavailable ({exc}) — using deterministic intent/location"
             ],
@@ -1061,19 +1063,19 @@ async def planner_node(state: ORCAState) -> dict:
     except Exception:
         pass
 
-        # Guard: a confident plan with an empty toolset would deadlock the pipeline
-        # (no fish, no decision). Default to full dispatch with an auditable note.
-        if not needs_clarification and not selected_tools:
-            if isinstance(intent, dict) and intent.get("wants_fish") is False:
-                selected_tools = [TOOL_OCEAN, TOOL_WEATHER]
-                reasoning_trace = list(reasoning_trace) + [
-                    "planner note: empty selected_tools for safety/weather query defaulted to ocean+weather"
-                ]
-            else:
-                selected_tools = list(_ALL_PLANNER_TOOLS)
-                reasoning_trace = list(reasoning_trace) + [
-                    "planner note: empty selected_tools on confident plan defaulted to full dispatch (auditable)"
-                ]
+    # Guard: a confident plan with an empty toolset would deadlock the pipeline
+    # (no fish, no decision). Default to full dispatch with an auditable note.
+    if not needs_clarification and not selected_tools:
+        if isinstance(intent, dict) and intent.get("wants_fish") is False:
+            selected_tools = [TOOL_OCEAN, TOOL_WEATHER]
+            reasoning_trace = list(reasoning_trace) + [
+                "planner note: empty selected_tools for safety/weather query defaulted to ocean+weather"
+            ]
+        else:
+            selected_tools = list(_ALL_PLANNER_TOOLS)
+            reasoning_trace = list(reasoning_trace) + [
+                "planner note: empty selected_tools on confident plan defaulted to full dispatch (auditable)"
+            ]
 
     return {
         "intent": intent,
@@ -1121,8 +1123,9 @@ async def fish_finder(state: ORCAState) -> dict:
         # it (TOOL_FIND_FISH unselected means fish branch is intentionally off).
         try:
             _sel = state.get("selected_tools")
-            _safety_on = isinstance(_sel, list) and any(
-                t in _sel for t in (TOOL_OCEAN, TOOL_WEATHER, TOOL_GEOFENCE)
+            _safety_on = _sel is None or (
+                isinstance(_sel, list)
+                and any(t in _sel for t in (TOOL_OCEAN, TOOL_WEATHER, TOOL_GEOFENCE))
             )
         except Exception:
             _safety_on = False
@@ -1449,7 +1452,7 @@ async def decision_agent(state: ORCAState) -> dict:
     # streaming path already scored these exact inputs (deep copy — the veto
     # block below mutates ranked_zones/best). Miss → fresh combine as before.
     _inputs_hash = _combined_inputs_hash(
-        fish, sea, weather, danger, user_location, language, _decision_forecast
+        fish, sea, weather, danger, user_location, language, _decision_forecast, state.get("intent")
     )
     combined = _take_provisional_combined(_inputs_hash)
     if combined is None:
@@ -1543,7 +1546,7 @@ async def decision_agent(state: ORCAState) -> dict:
             and (TOOL_WEATHER in _sel_tools or TOOL_OCEAN in _sel_tools)
         )
     )
-    if _fish_skipped:
+    if _fish_skipped and _wants_fish is not False:
         try:
             _w0 = next((w for w in weather if isinstance(w, dict)), {}) or {}
             _s0 = next((s for s in sea if isinstance(s, dict)), {}) or {}

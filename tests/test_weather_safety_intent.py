@@ -106,18 +106,25 @@ async def test_graph_weather_query_skips_pfz_and_renders_weather_reply():
     """Full graph execution for weather query must not recommend fishing zones."""
     from backend.agents import graph as g
 
-    # Patch redis & live fetchers
+    mock_sea = AsyncMock(return_value=[{
+        "zone_id": "current_location", "place": "Kochi", "wave_height_m": 1.1, "status": "safe", "source": "mock"
+    }])
+    mock_weather = AsyncMock(return_value=[{
+        "zone_id": "current_location", "place": "Kochi", "wind_kt": 11.0, "status": "safe", "source": "mock"
+    }])
+    mock_danger = AsyncMock(return_value=[{
+        "zone_id": "current_location", "inside_eez": True, "inside_mpa": False, "status": "safe"
+    }])
+
+    # Patch redis and fetchers across both subagent and module paths
     with patch("backend.db.redis.get_session", new=AsyncMock(return_value=None)), \
          patch("backend.db.redis.save_session", new=AsyncMock(return_value=None)), \
-         patch("backend.agents.sea_checker.check_sea_conditions", new=AsyncMock(return_value=[{
-             "zone_id": "current_location", "place": "Kochi", "wave_height_m": 1.1, "status": "safe", "source": "mock"
-         }])), \
-         patch("backend.agents.weather_agent.check_weather", new=AsyncMock(return_value=[{
-             "zone_id": "current_location", "place": "Kochi", "wind_kt": 11.0, "status": "safe", "source": "mock"
-         }])), \
-         patch("backend.agents.danger_agent.check_safety_batch", new=AsyncMock(return_value=[{
-             "zone_id": "current_location", "inside_eez": True, "inside_mpa": False, "status": "safe"
-         }])):
+         patch("backend.agents.subagents.sea_checker.check_sea_conditions", new=mock_sea), \
+         patch("backend.agents.sea_checker.check_sea_conditions", new=mock_sea), \
+         patch("backend.agents.subagents.weather_agent.check_weather", new=mock_weather), \
+         patch("backend.agents.weather_agent.check_weather", new=mock_weather), \
+         patch("backend.agents.subagents.danger_agent.check_safety_batch", new=mock_danger), \
+         patch("backend.agents.danger_agent.check_safety_batch", new=mock_danger):
 
         res = await g.orchestrate_via_graph(
             query="What is the weather and sea condition in Kochi?",
