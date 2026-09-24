@@ -22,7 +22,7 @@ function getBackendBase(): string {
     return envUrl.replace(/\/$/, "");
   }
   if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
-    return "https://orca-marine-intelligence-api.onrender.com";
+    return "https://orca-marine-intelligence-backend.vercel.app";
   }
   return "http://localhost:8000";
 }

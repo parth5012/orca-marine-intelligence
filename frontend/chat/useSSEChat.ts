@@ -177,7 +177,7 @@ function getBackendBaseUrl(): string {
     return (
       process.env.NEXT_PUBLIC_API_URL ||
       (process.env.NODE_ENV === 'production' || process.env.VERCEL
-        ? 'https://orca-marine-intelligence-api.onrender.com'
+        ? 'https://orca-marine-intelligence-backend.vercel.app'
         : 'http://localhost:8000')
     );
   }
@@ -190,7 +190,7 @@ function getBackendBaseUrl(): string {
     window.location.hostname !== 'localhost' &&
     window.location.hostname !== '127.0.0.1'
   ) {
-    return 'https://orca-marine-intelligence-api.onrender.com';
+    return 'https://orca-marine-intelligence-backend.vercel.app';
   }
   // Default to localhost:8000 in dev or relative when served together
   return 'http://localhost:8000';
