@@ -92,10 +92,13 @@ export async function translate(
     return { text, sourceLang, targetLang, translated: false };
   }
 
-  // If ULCA API key is configured
+  // Inference credential: BHASHINI_INFERENCE_KEY preferred, else BHASHINI_API_KEY
   const apiKey =
     typeof process !== 'undefined'
-      ? process.env.BHASHINI_API_KEY || process.env.NEXT_PUBLIC_BHASHINI_API_KEY
+      ? process.env.BHASHINI_INFERENCE_KEY ||
+        process.env.NEXT_PUBLIC_BHASHINI_INFERENCE_KEY ||
+        process.env.BHASHINI_API_KEY ||
+        process.env.NEXT_PUBLIC_BHASHINI_API_KEY
       : null;
 
   if (apiKey) {
