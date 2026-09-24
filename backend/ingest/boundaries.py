@@ -596,12 +596,17 @@ def check_point_in_mpa(lat: float, lon: float) -> Tuple[bool, Optional[str], flo
 # ---------------------------------------------------------------------------
 # Ingestion Task (Upsert into PostGIS if DB connected)
 # ---------------------------------------------------------------------------
-async def ingest_boundaries() -> Dict[str, Any]:
+async def ingest_boundaries(datasets: tuple[str, ...] = ("eez", "mpa")) -> Dict[str, Any]:
     """
     Ingests EEZ and MPA boundary datasets from GeoJSON files into memory cache,
     computes feature counts, validates geometries, and attempts upserting into
     PostGIS (eez_boundaries, mpa_boundaries) if database connection is available.
     Gracefully skips database insertion if database is offline.
+
+    Args:
+        datasets: which datasets to write. Only these are upserted, so a
+            caller with one already-populated table can fill the other without
+            duplicating rows (neither table has a feature-level unique key).
 
     Returns:
         dict: {"eez_count": int, "mpa_count": int, "status": str, "db_synced": bool}
@@ -612,7 +617,15 @@ async def ingest_boundaries() -> Dict[str, Any]:
 
     eez_count = len(eez_features)
     mpa_count = len(mpa_features)
-    logger.info("Boundaries loaded from GeoJSON: %d EEZ, %d MPA", eez_count, mpa_count)
+    logger.info(
+        "Boundaries loaded from GeoJSON: %d EEZ, %d MPA (writing %s)",
+        eez_count,
+        mpa_count,
+        ",".join(datasets) or "nothing",
+    )
+
+    eez_to_write = eez_features if "eez" in datasets else []
+    mpa_to_write = mpa_features if "mpa" in datasets else []
 
     db_synced = False
     try:
@@ -629,7 +642,7 @@ async def ingest_boundaries() -> Dict[str, Any]:
         if is_connected:
             async with AsyncSessionLocal() as session:
                 # Upsert EEZ Boundaries
-                for feat in eez_features:
+                for feat in eez_to_write:
                     props = feat.get("properties", {})
                     geom = feat.get("geometry", {})
                     bname = props.get("boundary_name", "India EEZ")
@@ -661,7 +674,7 @@ async def ingest_boundaries() -> Dict[str, Any]:
                     )
 
                 # Upsert MPA Boundaries
-                for feat in mpa_features:
+                for feat in mpa_to_write:
                     props = feat.get("properties", {})
                     geom = feat.get("geometry", {})
                     mpa_name = props.get("mpa_name") or props.get("name") or "Marine Sanctuary"
