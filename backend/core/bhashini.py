@@ -60,6 +60,21 @@ def _get_cache_key(text: str, source_lang: str, target_lang: str) -> str:
     return f"orca:bhashini:v1:{source_lang}:{target_lang}:{text_hash}"
 
 
+def _get_inference_key() -> Optional[str]:
+    """
+    Resolve the inference Authorization credential from env vars.
+
+    Preference order:
+      1. BHASHINI_INFERENCE_KEY (explicit inference key)
+      2. BHASHINI_API_KEY       (ULCA api key fallback, backward compat)
+    """
+    key = os.getenv("BHASHINI_INFERENCE_KEY", "").strip()
+    if key:
+        return key
+    key = os.getenv("BHASHINI_API_KEY", "").strip()
+    return key or None
+
+
 async def translate(
     text: str,
     source_lang: str,
@@ -98,10 +113,13 @@ async def translate(
         except Exception as e:
             logger.warning("Redis cache read failed for Bhashini translation: %s", e)
 
-    # 2. Check API key
-    api_key = os.getenv("BHASHINI_API_KEY")
+    # 2. Check inference credential (BHASHINI_INFERENCE_KEY, else BHASHINI_API_KEY)
+    api_key = _get_inference_key()
     if not api_key:
-        logger.debug("BHASHINI_API_KEY is not set; falling back to original text.")
+        logger.debug(
+            "Neither BHASHINI_INFERENCE_KEY nor BHASHINI_API_KEY is set; "
+            "falling back to original text."
+        )
         return TranslationResult(
             text=text,
             source_lang=source_lang,
@@ -509,6 +527,11 @@ async def transcribe(
         )
 
     service_id, callback_url, inference_key = _parse_pipeline_config(config_data)
+    # Env-provided inference key (BHASHINI_INFERENCE_KEY) wins over the
+    # config-response key; config-derived key remains the fallback.
+    env_inference_key = os.getenv("BHASHINI_INFERENCE_KEY", "").strip()
+    if env_inference_key:
+        inference_key = env_inference_key
     if not service_id or not inference_key:
         logger.warning(
             "Bhashini ASR config missing serviceId/inference key: has_service_id=%s has_key=%s",
