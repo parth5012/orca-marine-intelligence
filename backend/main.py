@@ -185,6 +185,35 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "Bhashini ASR credentials missing (BHASHINI_ULCA_USER_ID or BHASHINI_API_KEY unset). Voice transcription disabled."
         )
+    else:
+        def _bhashini_dirty(v: str) -> bool:
+            s = v.strip()
+            return (
+                s != v
+                or (len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'))
+                or s[:4].lower() == "your_"
+            )
+
+        dirty = [
+            name
+            for name, val in (
+                ("BHASHINI_API_KEY", bhashini_key),
+                ("BHASHINI_ULCA_USER_ID", bhashini_user),
+            )
+            if _bhashini_dirty(val)
+        ]
+        if dirty:
+            logger.warning(
+                "Bhashini env %s contain quotes/whitespace/placeholder in the raw deploy value; "
+                "bhashini.py sanitizes on read, but re-paste clean values in the deploy dashboard.",
+                ", ".join(dirty),
+            )
+        else:
+            logger.info(
+                "Bhashini credentials present (BHASHINI_API_KEY len=%d, BHASHINI_ULCA_USER_ID len=%d).",
+                len(bhashini_key.strip()),
+                len(bhashini_user.strip()),
+            )
 
     # Verify database connection (gracefully handle disconnected state)
     try:

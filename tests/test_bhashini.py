@@ -39,6 +39,41 @@ def mock_200_response():
     return resp
 
 
+# translate() uses the ULCA 2-call flow (Config -> Compute), like transcribe().
+TR_ENV = {"BHASHINI_API_KEY": "test-key", "BHASHINI_ULCA_USER_ID": "test-user"}
+
+
+def _translate_config_200(service_id="svc-tr-test", infer_key="infer-tr-key"):
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "pipelineResponseConfig": [
+            {
+                "taskType": "translation",
+                "config": [
+                    {"serviceId": service_id, "language": {"sourceLanguage": "ml"}}
+                ],
+            }
+        ],
+        "pipelineInferenceAPIEndPoint": {
+            "callbackUrl": "https://dhruva-api.bhashini.gov.in/services/inference/pipeline",
+            "inferenceApiKey": {"name": "Authorization", "value": infer_key},
+        },
+    }
+    return resp
+
+
+def _translate_compute_200(target="Kochi"):
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "pipelineResponse": [
+            {"taskType": "translation", "output": [{"source": "കൊച്ചി", "target": target}]}
+        ]
+    }
+    return resp
+
+
 @pytest.mark.asyncio
 async def test_translate_same_language_noop():
     """translate('hello', 'en', 'en') -> translated=False, text unchanged."""
@@ -64,11 +99,11 @@ async def test_translate_empty_text_noop():
 
 
 @pytest.mark.asyncio
-async def test_translate_happy_path(mock_200_response):
-    """Mocked 200 response -> translated=True, correct target text."""
-    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
+async def test_translate_happy_path():
+    """Config 200 + Compute 200 -> translated=True via ULCA 2-call flow."""
+    with patch.dict("os.environ", TR_ENV):
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_200_response
+            mock_post.side_effect = [_translate_config_200(), _translate_compute_200()]
             res = await translate("കൊച്ചി", "ml", "en")
 
             assert res.text == "Kochi"
@@ -76,7 +111,39 @@ async def test_translate_happy_path(mock_200_response):
             assert res.target_lang == "en"
             assert res.translated is True
             assert res.cached is False
-            assert mock_post.call_count == 1
+            assert mock_post.call_count == 2
+
+            # Config call: ULCA account headers + translation task
+            cfg = mock_post.call_args_list[0][1]
+            assert cfg["headers"]["userID"] == "test-user"
+            assert cfg["headers"]["ulcaApiKey"] == "test-key"
+            assert cfg["json"]["pipelineTasks"][0]["taskType"] == "translation"
+
+            # Compute call: per-pipeline inference key as raw Authorization
+            comp = mock_post.call_args_list[1][1]
+            assert comp["headers"]["Authorization"] == "infer-tr-key"
+            assert comp["json"]["pipelineTasks"][0]["config"]["serviceId"] == "svc-tr-test"
+
+
+@pytest.mark.asyncio
+async def test_translate_env_key_sanitized():
+    """Wrapped quotes/whitespace in Bhashini env vars are stripped before headers.
+
+    Deploy dashboards often paste quoted values (e.g. `"abc"` or trailing
+    newline), which ULCA rejects as an invalid key — sanitize on read.
+    """
+    dirty_env = {
+        "BHASHINI_API_KEY": '  "test-key"\n',
+        "BHASHINI_ULCA_USER_ID": "\n'test-user'\n",
+    }
+    with patch.dict("os.environ", dirty_env):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [_translate_config_200(), _translate_compute_200()]
+            res = await translate("കൊച്ചി", "ml", "en")
+            assert res.translated is True
+            cfg_headers = mock_post.call_args_list[0][1]["headers"]
+            assert cfg_headers["ulcaApiKey"] == "test-key"
+            assert cfg_headers["userID"] == "test-user"
 
 
 @pytest.mark.asyncio
@@ -92,13 +159,23 @@ async def test_translate_no_api_key_fallback():
 
 
 @pytest.mark.asyncio
+async def test_translate_missing_user_id_no_http():
+    """Missing BHASHINI_ULCA_USER_ID -> translated=False, no HTTP (2-call needs both)."""
+    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}, clear=True):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            res = await translate("കൊച്ചി", "ml", "en")
+            assert res.translated is False
+            assert mock_post.call_count == 0
+
+
+@pytest.mark.asyncio
 async def test_translate_429_fallback():
     """Mocked 429 -> translated=False, original text returned, no retry."""
     resp_429 = MagicMock()
     resp_429.status_code = 429
     resp_429.text = "Too Many Requests"
 
-    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
+    with patch.dict("os.environ", TR_ENV):
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = resp_429
             res = await translate("കൊച്ചി", "ml", "en")
@@ -115,7 +192,7 @@ async def test_translate_5xx_retries_then_fallback():
     resp_500.status_code = 500
     resp_500.text = "Internal Server Error"
 
-    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
+    with patch.dict("os.environ", TR_ENV):
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = resp_500
             with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
@@ -149,22 +226,22 @@ async def test_translate_redis_error_still_calls_dhruva(mock_200_response):
     mock_redis.get.side_effect = Exception("Redis connection refused")
     mock_redis.set.side_effect = Exception("Redis write failed")
 
-    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
+    with patch.dict("os.environ", TR_ENV):
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_200_response
+            mock_post.side_effect = [_translate_config_200(), _translate_compute_200()]
             res = await translate("കൊച്ചി", "ml", "en", redis_client=mock_redis)
             assert res.text == "Kochi"
             assert res.translated is True
             assert res.cached is False
-            assert mock_post.call_count == 1
+            assert mock_post.call_count == 2
 
 
 @pytest.mark.asyncio
 async def test_translate_to_english_convenience(mock_200_response):
     """Calls translate() with target_lang='en'."""
-    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
+    with patch.dict("os.environ", TR_ENV):
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_200_response
+            mock_post.side_effect = [_translate_config_200(), _translate_compute_200()]
             res = await translate_to_english("കൊച്ചി", "ml")
             assert res.text == "Kochi"
             assert res.source_lang == "ml"
@@ -175,28 +252,32 @@ async def test_translate_to_english_convenience(mock_200_response):
 @pytest.mark.asyncio
 async def test_translate_from_english_convenience():
     """Calls translate() with source_lang='en'."""
-    mock_ml_resp = MagicMock()
-    mock_ml_resp.status_code = 200
-    mock_ml_resp.json.return_value = {
-        "pipelineResponse": [
-            {
-                "output": [
-                    {
-                        "source": "Kochi",
-                        "target": "കൊച്ചി",
-                    }
-                ]
-            }
-        ]
-    }
-    with patch.dict("os.environ", {"BHASHINI_API_KEY": "test-key"}):
+    with patch.dict("os.environ", TR_ENV):
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_ml_resp
+            mock_post.side_effect = [
+                _translate_config_200(),
+                _translate_compute_200(target="കൊച്ചി"),
+            ]
             res = await translate_from_english("Kochi", "ml")
             assert res.text == "കൊച്ചി"
             assert res.source_lang == "en"
             assert res.target_lang == "ml"
             assert res.translated is True
+
+
+@pytest.mark.asyncio
+async def test_translate_compute_4xx_fallback():
+    """Config 200 + Compute 4xx -> translated=False, original text, no raise."""
+    resp_403 = MagicMock()
+    resp_403.status_code = 403
+    resp_403.text = "Forbidden"
+    with patch.dict("os.environ", TR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [_translate_config_200(), resp_403]
+            res = await translate("കൊച്ചി", "ml", "en")
+            assert res.text == "കൊച്ചി"
+            assert res.translated is False
+            assert mock_post.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +346,23 @@ async def test_transcribe_success():
             assert cfg["audioFormat"] == "wav"
             assert cfg["samplingRate"] == 16000
             assert compute_kwargs["json"]["inputData"]["audio"][0]["audioContent"]
+
+
+@pytest.mark.asyncio
+async def test_transcribe_env_credentials_sanitized():
+    """Wrapped quotes/whitespace in ULCA env vars are stripped before headers."""
+    dirty_env = {
+        "BHASHINI_API_KEY": ' "test-key" ',
+        "BHASHINI_ULCA_USER_ID": "\n'test-user'\n",
+    }
+    with patch.dict("os.environ", dirty_env):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [_config_200(), _compute_200()]
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is True
+            config_headers = mock_post.call_args_list[0][1]["headers"]
+            assert config_headers["userID"] == "test-user"
+            assert config_headers["ulcaApiKey"] == "test-key"
 
 
 @pytest.mark.asyncio
@@ -471,6 +569,22 @@ async def test_transcribe_config_4xx_upstream_error():
             res = await transcribe(b"\x01\x02", "ml")
             assert res.transcribed is False
             assert res.error_code == "BHASHINI_UPSTREAM_ERROR"
+            assert res.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_transcribe_config_4xx_includes_upstream_message():
+    """Config 4xx error_detail surfaces ULCA's message (e.g. 'invalid ulca key')."""
+    resp_401 = MagicMock()
+    resp_401.status_code = 401
+    resp_401.text = '{"message":"invalid ulca key"}'
+    with patch.dict("os.environ", ASR_ENV):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = resp_401
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is False
+            assert res.error_code == "BHASHINI_UPSTREAM_ERROR"
+            assert "invalid ulca key" in (res.error_detail or "")
             assert res.retryable is False
 
 

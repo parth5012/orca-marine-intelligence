@@ -45,6 +45,22 @@ ASR_CACHE_TTL = 3600  # 1 hour in seconds
 ASR_BACKOFF_DELAYS = [1.0, 2.0, 4.0]  # max 4 attempts (mirror translate())
 
 
+def _env_str(name: str) -> Optional[str]:
+    """Read an env var, stripping whitespace and wrapping quotes.
+
+    Deploy dashboards (Vercel/Render) often store pasted values with a
+    trailing newline or surrounding quotes, which Bhashini/ULCA reject
+    as an invalid key. Returns None when unset, "" when set-but-empty.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    val = raw.strip()
+    if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+        val = val[1:-1].strip()
+    return val
+
+
 @dataclass
 class TranslationResult:
     text: str
@@ -98,10 +114,13 @@ async def translate(
         except Exception as e:
             logger.warning("Redis cache read failed for Bhashini translation: %s", e)
 
-    # 2. Check API key
-    api_key = os.getenv("BHASHINI_API_KEY")
-    if not api_key:
-        logger.debug("BHASHINI_API_KEY is not set; falling back to original text.")
+    # 2. ULCA credentials (2-call flow needs BOTH: Config uses account pair)
+    api_key = _env_str("BHASHINI_API_KEY")
+    user_id = _env_str("BHASHINI_ULCA_USER_ID")
+    if not api_key or not user_id:
+        logger.debug(
+            "BHASHINI_API_KEY/BHASHINI_ULCA_USER_ID not set; falling back to original text."
+        )
         return TranslationResult(
             text=text,
             source_lang=source_lang,
@@ -110,8 +129,13 @@ async def translate(
             cached=False,
         )
 
-    # 3. Call Bhashini Dhruva API with retry for 5xx/timeouts
-    payload = {
+    pipeline_id = _env_str("BHASHINI_PIPELINE_ID") or BHASHINI_DEFAULT_PIPELINE_ID
+    timeout_s = min(_get_asr_timeout_s(), 10.0)
+
+    # 3. Config call — resolve translation serviceId + Compute endpoint/key.
+    #    Bhashini no longer accepts the account key directly on Dhruva
+    #    /translation (401) — only the per-pipeline inference key does.
+    config_payload = {
         "pipelineTasks": [
             {
                 "taskType": "translation",
@@ -123,89 +147,121 @@ async def translate(
                 },
             }
         ],
-        "inputData": {
-            "input": [{"source": text}]
-        },
+        "pipelineRequestConfig": {"pipelineId": pipeline_id},
     }
-    headers = {
+    config_headers = {
         "Content-Type": "application/json",
-        "Authorization": api_key,
+        "userID": user_id,
+        "ulcaApiKey": api_key,
     }
+    config_resp, _ = await _ulca_post(
+        _get_ulca_config_url(), config_headers, config_payload, timeout_s
+    )
+    if config_resp is None or config_resp.status_code != 200:
+        status = config_resp.status_code if config_resp is not None else "unreachable"
+        logger.warning("Bhashini translation config call failed with status %s", status)
+        return TranslationResult(
+            text=text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            translated=False,
+            cached=False,
+        )
+    try:
+        config_data = config_resp.json()
+    except Exception as err:
+        logger.warning("Bhashini translation config response unparseable: %s", err)
+        return TranslationResult(
+            text=text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            translated=False,
+            cached=False,
+        )
 
-    backoff_delays = [1.0, 2.0, 4.0]
-    max_attempts = len(backoff_delays) + 1
+    service_id, callback_url, inference_key = _parse_pipeline_config(config_data)
+    if not service_id or not inference_key:
+        logger.warning(
+            "Bhashini translation config missing serviceId/inference key: "
+            "has_service_id=%s has_key=%s",
+            bool(service_id),
+            bool(inference_key),
+        )
+        return TranslationResult(
+            text=text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            translated=False,
+            cached=False,
+        )
+    compute_url = callback_url or BHASHINI_ENDPOINT
 
-    for attempt in range(max_attempts):
+    # 4. Compute call — account key never sent here; inference key only.
+    compute_payload = {
+        "pipelineTasks": [
+            {
+                "taskType": "translation",
+                "config": {
+                    "language": {
+                        "sourceLanguage": source_lang,
+                        "targetLanguage": target_lang,
+                    },
+                    "serviceId": service_id,
+                },
+            }
+        ],
+        "inputData": {"input": [{"source": text}]},
+    }
+    compute_headers = {
+        "Content-Type": "application/json",
+        "Authorization": inference_key,
+    }
+    compute_resp, _ = await _ulca_post(
+        compute_url, compute_headers, compute_payload, timeout_s
+    )
+    if compute_resp is None or compute_resp.status_code != 200:
+        status = compute_resp.status_code if compute_resp is not None else "unreachable"
+        logger.warning("Bhashini translation compute call failed with status %s", status)
+        return TranslationResult(
+            text=text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            translated=False,
+            cached=False,
+        )
+    try:
+        data = compute_resp.json()
+        translated_text = (
+            data.get("pipelineResponse", [{}])[0]
+            .get("output", [{}])[0]
+            .get("target")
+        )
+    except Exception as err:
+        logger.warning("Bhashini translation compute response unparseable: %s", err)
+        translated_text = None
+
+    if not translated_text:
+        logger.warning("Bhashini 200 response missing target text: %s", locals().get("data"))
+        return TranslationResult(
+            text=text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            translated=False,
+            cached=False,
+        )
+
+    # Cache successful translation in Redis
+    if redis_client is not None:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(BHASHINI_ENDPOINT, json=payload, headers=headers)
-                
-                if resp.status_code == 200:
-                    data = resp.json()
-                    translated_text = (
-                        data.get("pipelineResponse", [{}])[0]
-                        .get("output", [{}])[0]
-                        .get("target")
-                    )
-                    if translated_text:
-                        # Cache successful translation in Redis
-                        if redis_client is not None:
-                            try:
-                                await redis_client.set(cache_key, translated_text, ex=CACHE_TTL)
-                            except Exception as ce:
-                                logger.warning("Redis cache write failed: %s", ce)
+            await redis_client.set(cache_key, translated_text, ex=CACHE_TTL)
+        except Exception as ce:
+            logger.warning("Redis cache write failed: %s", ce)
 
-                        return TranslationResult(
-                            text=translated_text,
-                            source_lang=source_lang,
-                            target_lang=target_lang,
-                            translated=True,
-                            cached=False,
-                        )
-                    else:
-                        logger.warning("Bhashini 200 response missing target text: %s", data)
-                        return TranslationResult(
-                            text=text,
-                            source_lang=source_lang,
-                            target_lang=target_lang,
-                            translated=False,
-                            cached=False,
-                        )
-
-                elif 400 <= resp.status_code < 500:
-                    # 4xx client error (429, 401, 400, etc.) — do not retry per spec
-                    logger.warning("Bhashini client error status %s: %s", resp.status_code, resp.text)
-                    return TranslationResult(
-                        text=text,
-                        source_lang=source_lang,
-                        target_lang=target_lang,
-                        translated=False,
-                        cached=False,
-                    )
-
-                else:
-                    # 5xx server error — retry with backoff
-                    logger.warning(
-                        "Bhashini server error status %s on attempt %d: %s",
-                        resp.status_code,
-                        attempt + 1,
-                        resp.text,
-                    )
-
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RequestError) as net_err:
-            logger.warning("Bhashini request error on attempt %d: %s", attempt + 1, net_err)
-        except Exception as err:
-            logger.warning("Unexpected error calling Bhashini on attempt %d: %s", attempt + 1, err)
-
-        if attempt < max_attempts - 1:
-            await asyncio.sleep(backoff_delays[attempt])
-
-    # All retries exhausted or non-retryable error
     return TranslationResult(
-        text=text,
+        text=translated_text,
         source_lang=source_lang,
         target_lang=target_lang,
-        translated=False,
+        translated=True,
         cached=False,
     )
 
@@ -259,13 +315,14 @@ def _get_asr_cache_key(wav_bytes: bytes, source_lang: str) -> str:
 
 
 def _get_ulca_config_url() -> str:
-    base = os.getenv("BHASHINI_ULCA_URL", BHASHINI_ULCA_DEFAULT_BASE).rstrip("/")
+    base = (_env_str("BHASHINI_ULCA_URL") or BHASHINI_ULCA_DEFAULT_BASE).rstrip("/")
     return f"{base}{BHASHINI_ULCA_CONFIG_PATH}"
 
 
 def _get_asr_timeout_s() -> float:
+    raw = _env_str("BHASHINI_ASR_TIMEOUT_S")
     try:
-        return float(os.getenv("BHASHINI_ASR_TIMEOUT_S", str(BHASHINI_DEFAULT_ASR_TIMEOUT_S)))
+        return float(raw) if raw else BHASHINI_DEFAULT_ASR_TIMEOUT_S
     except (TypeError, ValueError):
         return BHASHINI_DEFAULT_ASR_TIMEOUT_S
 
@@ -419,8 +476,8 @@ async def transcribe(
             logger.warning("Redis cache read failed for Bhashini ASR: %s", e)
 
     # 2. Check ULCA credentials (both required for the Config call)
-    api_key = os.getenv("BHASHINI_API_KEY")
-    user_id = os.getenv("BHASHINI_ULCA_USER_ID")
+    api_key = _env_str("BHASHINI_API_KEY")
+    user_id = _env_str("BHASHINI_ULCA_USER_ID")
     if not api_key or not user_id:
         logger.warning(
             "Bhashini ASR credentials missing (BHASHINI_ULCA_USER_ID or BHASHINI_API_KEY unset). Voice transcription disabled."
@@ -436,7 +493,7 @@ async def transcribe(
         )
 
     timeout_s = _get_asr_timeout_s()
-    pipeline_id = os.getenv("BHASHINI_PIPELINE_ID", BHASHINI_DEFAULT_PIPELINE_ID)
+    pipeline_id = _env_str("BHASHINI_PIPELINE_ID") or BHASHINI_DEFAULT_PIPELINE_ID
 
     # 3. Config call — resolve per-language serviceId + Compute endpoint/key
     config_payload = {
@@ -478,7 +535,11 @@ async def transcribe(
                 retryable=True,
             )
         status = config_resp.status_code
+        detail = f"Bhashini ASR config call failed with status {status}."
         if 400 <= status < 500:
+            snippet = (config_resp.text or "").strip()
+            if snippet:
+                detail += f" Upstream: {snippet[:200]}"
             logger.warning(
                 "Bhashini ASR config client error status %s: %s",
                 config_resp.status_code,
@@ -490,7 +551,7 @@ async def transcribe(
             transcribed=False,
             cached=False,
             error_code="BHASHINI_UPSTREAM_ERROR",
-            error_detail=f"Bhashini ASR config call failed with status {status}.",
+            error_detail=detail,
             retryable=(status >= 500),
         )
 
@@ -574,7 +635,11 @@ async def transcribe(
                 retryable=True,
             )
         status = compute_resp.status_code
+        detail = f"Bhashini ASR compute call failed with status {status}."
         if 400 <= status < 500:
+            snippet = (compute_resp.text or "").strip()
+            if snippet:
+                detail += f" Upstream: {snippet[:200]}"
             logger.warning(
                 "Bhashini ASR compute client error status %s: %s",
                 compute_resp.status_code,
@@ -586,7 +651,7 @@ async def transcribe(
             transcribed=False,
             cached=False,
             error_code="BHASHINI_UPSTREAM_ERROR",
-            error_detail=f"Bhashini ASR compute call failed with status {status}.",
+            error_detail=detail,
             retryable=(status >= 500),
         )
 
