@@ -671,6 +671,22 @@ async def _check_imd_safe(lat: float, lon: float) -> tuple[bool, list[str]]:
 # Public API — check_safety + batch
 # ---------------------------------------------------------------------------
 
+async def _postgis_eez_is_empty() -> bool:
+    """True only when we can positively confirm eez_boundaries has 0 rows.
+
+    Returns False when the count is unavailable — never assume emptiness,
+    because a populated table's verdict must stay authoritative.
+    """
+    try:
+        from backend.db.postgis import eez_boundary_row_count
+
+        count = await asyncio.wait_for(eez_boundary_row_count(), timeout=TIMEOUT_S)
+        return int(count) == 0
+    except Exception as exc:
+        logger.debug("danger_agent: eez row count unavailable: %s", exc)
+        return False
+
+
 async def check_safety(
     lat: float,
     lon: float,
@@ -782,20 +798,29 @@ async def check_safety(
     # An unseeded eez_boundaries table makes PostGIS succeed with 0 rows, so
     # EVERY point reads "outside India's EEZ" and downstream combiners emit a
     # false all-zones-unsafe DO NOT SAIL. data/eez.geojson is the exact source
-    # ingest_boundaries() seeds from — when the two disagree, trust the file.
+    # ingest_boundaries() seeds from — but only a CONFIRMED-empty table makes
+    # that disagreement meaningful. A populated table is authoritative, and the
+    # local file is known-mock data, so it never overrides a real verdict.
     if postgis_ok and check_eez and not inside_eez:
-        try:
-            fb_inside, _fb_dist = _fallback_check_eez(lat_f, lon_f)
-            if fb_inside:
-                logger.warning(
-                    "danger_agent: PostGIS reports outside EEZ but GeoJSON says inside "
-                    "for (%s, %s) — eez_boundaries likely unseeded, using GeoJSON",
-                    lat_f,
-                    lon_f,
-                )
-                inside_eez = True
-        except Exception as exc:
-            logger.debug("danger_agent: EEZ cross-check skipped: %s", exc)
+        if await _postgis_eez_is_empty():
+            try:
+                fb_inside, _fb_dist = _fallback_check_eez(lat_f, lon_f)
+                if fb_inside:
+                    logger.warning(
+                        "danger_agent: eez_boundaries is unseeded and GeoJSON says inside "
+                        "for (%s, %s) — using GeoJSON",
+                        lat_f,
+                        lon_f,
+                    )
+                    inside_eez = True
+            except Exception as exc:
+                logger.debug("danger_agent: EEZ cross-check skipped: %s", exc)
+        else:
+            logger.debug(
+                "danger_agent: eez_boundaries populated — keeping PostGIS outside-EEZ verdict for (%s, %s)",
+                lat_f,
+                lon_f,
+            )
 
     # ------------------------------------------------------------------
     # 2. Fallback ray-casting if PostGIS failed or was skipped

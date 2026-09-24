@@ -315,6 +315,19 @@ async def check_geofence(lat: float, lon: float) -> Dict[str, Any]:
         }
 
 
+async def eez_boundary_row_count() -> int:
+    """
+    Row count for ``eez_boundaries``.
+
+    0 means the table was never seeded — a state ``check_geofence`` cannot
+    distinguish from "the point is genuinely outside India's EEZ", because a
+    successful query over an empty table returns no rows for every point.
+    """
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(select(func.count(EEZBoundary.id)))
+        return int(res.scalar() or 0)
+
+
 MVT_LAYER_QUERIES: Dict[str, str] = {
     "pfz": """
         WITH mvtgeom AS (
