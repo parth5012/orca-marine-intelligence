@@ -319,9 +319,9 @@ def combine_and_rank(
         w0 = weather_results[0] if (weather_results and isinstance(weather_results[0], dict)) else {}
         d0 = danger_results[0] if (danger_results and isinstance(danger_results[0], dict)) else {}
 
-        wave = s0.get("wave_height_m")
-        wind = w0.get("wind_kt") if w0.get("wind_kt") is not None else w0.get("wind_speed_kt")
-        current = s0.get("current_kt")
+        wave = _get_wave(s0)
+        wind = _get_wind(w0)
+        current = _get_current(s0)
         wave_status = str(s0.get("wave_status") or s0.get("status") or "unknown").lower()
         wind_status = str(w0.get("wind_status") or w0.get("status") or "unknown").lower()
 
@@ -342,11 +342,11 @@ def combine_and_rank(
             if nearest_cyclone_km is not None:
                 cyc_desc += f" within {nearest_cyclone_km:.0f}km"
             unsafe_reasons.append(cyc_desc)
-        if wave is not None and wave > WAVE_SAFE_MAX_M:
+        if wave is not None and wave >= WAVE_SAFE_MAX_M:
             unsafe_reasons.append(f"wave {wave}m exceeds safe limit {WAVE_SAFE_MAX_M}m")
-        if wind is not None and wind > WIND_SAFE_MAX_KT:
+        if wind is not None and wind >= WIND_SAFE_MAX_KT:
             unsafe_reasons.append(f"wind {wind}kt exceeds safe limit {WIND_SAFE_MAX_KT:g}kt")
-        if current is not None and current > CURRENT_SAFE_MAX_KT:
+        if current is not None and current >= CURRENT_SAFE_MAX_KT:
             unsafe_reasons.append(f"current {current}kt exceeds safe limit {CURRENT_SAFE_MAX_KT}kt")
         if wave_status == "danger" and wave is not None and not any("wave" in r for r in unsafe_reasons):
             unsafe_reasons.append("hazardous wave conditions")
@@ -368,6 +368,11 @@ def combine_and_rank(
             explanation = (
                 f"Marine weather advisory for {place_str}: Live sea and weather data currently unavailable. "
                 f"Treat conditions with caution before sailing. Citation: {citation}."
+            )
+        elif wave is None or wind is None or "caution" in (wave_status, wind_status):
+            explanation = (
+                f"Marine weather and sea conditions for {place_str}: {wave_str}, {wind_str}. "
+                f"Use caution before sailing outside restricted zones. Citation: {citation}."
             )
         else:
             explanation = (
