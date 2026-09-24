@@ -509,6 +509,34 @@ async def test_transcribe_env_inference_key_fills_missing_config_key():
             assert compute_kwargs["headers"]["Authorization"] == "infer-env-key"
 
 
+@pytest.mark.asyncio
+async def test_transcribe_rejects_non_https_callback_url():
+    """CodeRabbit review (comment 4092730794): Config callbackUrl over http://
+    -> rejected before Compute so the inference Authorization never travels
+    cleartext. transcribed=False, compute call never made."""
+    resp_http = MagicMock()
+    resp_http.status_code = 200
+    resp_http.json.return_value = {
+        "pipelineResponseConfig": [
+            {"taskType": "asr", "config": [{"serviceId": "svc-ml-test"}]}
+        ],
+        "pipelineInferenceAPIEndPoint": {
+            "callbackUrl": "http://insecure.example/inference/pipeline",
+            "inferenceApiKey": {"name": "Authorization", "value": "infer-test-key"},
+        },
+    }
+    with patch.dict("os.environ", ASR_ENV, clear=True):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = resp_http
+            res = await transcribe(b"\x01\x02", "ml")
+            assert res.transcribed is False
+            assert res.error_code == "BHASHINI_UPSTREAM_ERROR"
+            assert res.retryable is False
+            assert "HTTPS" in (res.error_detail or "")
+            # Only the Config call happened — Compute was never attempted
+            assert mock_post.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # US-VOICE-503: Detailed error codes, retryable flags, and telemetry
 # ---------------------------------------------------------------------------
