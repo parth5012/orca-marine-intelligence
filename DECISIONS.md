@@ -1,5 +1,23 @@
 # Architectural & Design Decisions
 
+### 2026-09-24: ADR-0006 Force-Include Badge Tools with Fish Recommendations
+
+**Context**:
+Kollam/QuilonPort chat showed "wave data unavailable, wind data unavailable" and SEA ADVISORY rendered `Waves --m, winds -- kts`. Root cause: LLM planner fish-only plan (`selected_tools=["find_fishing_zones","check_geofence"]`) skipped `check_ocean_state`/`check_weather`. `route_after_fish_finder` only Sends to selected tools, so sea/weather never ran → combiner best had `wave/wind=None`. Planner prompt already says ocean/weather run "when fish zones need a safety badge", but the UI always shows that badge for zone recommendations.
+
+**Decision**:
+In `planner_node` (after intent guards, before empty-selection fallback): if `TOOL_FIND_FISH in selected_tools` and ocean and/or weather are missing, force-append them with an auditable `reasoning_trace` note (`planner note: force-selected ... — fish zones always show a safety badge`).
+
+**Alternatives Considered**:
+- Keep latency skip + fix frontend messaging ("not checked" instead of `--`): rejected — prompt already mandates badge tools; fishers need real wave/wind for the advisory they always see.
+- Force-include only when `intent["wants_fish"]`: fish selection alone is the signal; safety-only plans already include ocean/weather without fish.
+- Change `route_after_fish_finder` to always Send sea/weather: weaker — would bypass `selected_tools` contract and break selective-dispatch tests.
+
+**Invariants**:
+- Force-include only when `selected_tools is not None` (legacy `None` = run-all, already includes badge tools).
+- Clarification gate still short-circuits before force-include can cause dispatch (`needs_clarification` clears tools earlier in validate).
+- Auditable: every force-include appends a reasoning_trace line; no silent tool mutation.
+
 ## 2026-09-19: ADR-0003 IMD/INCOIS-aligned Safety Thresholds
 - **Decision**: Update canonical bands in `backend/agents/safety_thresholds.py`:
   - Wave: Safe < 2.0m, Caution 2.0–3.5m, Danger > 3.5m (INCOIS wind-wave warning, FAO Cat-C).

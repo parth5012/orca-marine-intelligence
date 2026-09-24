@@ -1027,6 +1027,31 @@ async def planner_node(state: ORCAState) -> dict:
     except Exception:
         pass
 
+    # Badge force-include: fish zone recommendations always render a safety
+    # badge (Waves/Wind), so ocean+weather must run alongside find_fishing_zones.
+    # Without them, combiner best.wave_height_m/wind_kt are None → "wave data
+    # unavailable" + frontend 'Waves --m' (Kollam/QuilonPort repro).
+    try:
+        if (
+            selected_tools is not None
+            and TOOL_FIND_FISH in selected_tools
+            and (TOOL_OCEAN not in selected_tools or TOOL_WEATHER not in selected_tools)
+        ):
+            _badge_added = []
+            if TOOL_OCEAN not in selected_tools:
+                selected_tools = list(selected_tools) + [TOOL_OCEAN]
+                _badge_added.append(TOOL_OCEAN)
+            if TOOL_WEATHER not in selected_tools:
+                selected_tools = list(selected_tools) + [TOOL_WEATHER]
+                _badge_added.append(TOOL_WEATHER)
+            reasoning_trace = list(reasoning_trace) + [
+                "planner note: force-selected "
+                + ", ".join(_badge_added)
+                + " — fish zones always show a safety badge (auditable)"
+            ]
+    except Exception:
+        pass
+
     # Guard: confident plan with empty toolset would deadlock the pipeline
     # (no fish → no decision). Default to full dispatch with an auditable note.
     if not needs_clarification and not selected_tools:

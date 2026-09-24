@@ -1041,7 +1041,10 @@ def _safety_only_plan_36() -> "ps.PlannerOutput":
 
 
 def _fish_only_plan_36() -> "ps.PlannerOutput":
-    """Fish-only intent: find_fishing_zones + check_geofence, skip sea/weather."""
+    """Fish-only intent: find_fishing_zones + check_geofence, skip sea/weather.
+
+    Deliberately omits badge tools — planner_node must force-include them.
+    """
     return ps.PlannerOutput(
         detected_language="en",
         target_location=ps.TargetLocation(
@@ -1243,8 +1246,11 @@ class TestSelectiveToolExecutionMock:
         assert res.get("reply"), "safety-only must still produce a reply"
 
     @pytest.mark.asyncio
-    async def test_fish_only_runs_fish_and_geofence_skips_sea_weather(self):
-        """Fish-only plan runs find_fishing_zones + check_geofence only."""
+    async def test_fish_only_runs_fish_and_geofence_plus_badge_tools(self):
+        """Fish-only plan runs find_fishing_zones + check_geofence + badge tools.
+
+        Sea/weather force-included: fish zones always show a safety badge.
+        """
         from backend.agents import graph as g
 
         env = _mock_envelope_36(_fish_only_plan_36())
@@ -1300,13 +1306,114 @@ class TestSelectiveToolExecutionMock:
             )
         assert calls["fish"] == 1, f"fish must run once, got {calls}"
         assert calls["danger"] == 1, f"geofence must run, got {calls}"
-        assert calls["sea"] == 0, f"sea must be skipped, got {calls}"
-        assert calls["weather"] == 0, f"weather must be skipped, got {calls}"
+        # Badge force-include (Option A): fish zones always show Waves/Wind,
+        # so sea/weather must run even when the raw plan skipped them.
+        assert calls["sea"] == 1, f"sea must run for badge, got {calls}"
+        assert calls["weather"] == 1, f"weather must run for badge, got {calls}"
         assert set(res.get("selected_tools") or []) == {
             "find_fishing_zones",
             "check_geofence",
+            "check_ocean_state",
+            "check_weather",
         }
         assert res.get("map", {}).get("pfz_features"), "fish-only must render map"
+
+    @pytest.mark.asyncio
+    async def test_fish_only_force_includes_sea_weather_for_badge(self):
+        """Fish-only plan must still run ocean+weather (badge tools).
+
+        Planner prompt mandates check_ocean_state/check_weather "when fish
+        zones need a safety badge". Skipping them yields wave/wind=None →
+        combiner emits "wave data unavailable" and frontend renders
+        'Waves --m' (Kollam/QuilonPort bug).
+        """
+        from backend.agents import graph as g
+
+        env = _mock_envelope_36(_fish_only_plan_36())
+        calls = {"fish": 0, "sea": 0, "weather": 0, "danger": 0}
+
+        async def _fish(lat, lon, radius_km=80.0, **kw):
+            calls["fish"] += 1
+            return list(_SHARED_FISH_36)
+
+        async def _sea(points):
+            calls["sea"] += 1
+            return [
+                {
+                    "zone_id": p.get("zone_id"),
+                    "wave_height_m": 1.5,
+                    "current_kt": 0.4,
+                    "status": "safe",
+                    "source": "mock",
+                }
+                for p in points
+            ]
+
+        async def _weather(points):
+            calls["weather"] += 1
+            return [
+                {
+                    "zone_id": p.get("zone_id"),
+                    "wind_kt": 12.0,
+                    "status": "safe",
+                    "source": "mock",
+                }
+                for p in points
+            ]
+
+        async def _danger(points, **kw):
+            calls["danger"] += 1
+            return [
+                {
+                    "zone_id": p.get("zone_id"),
+                    "inside_eez": True,
+                    "inside_mpa": False,
+                    "status": "safe",
+                }
+                for p in points
+            ]
+
+        with patch(
+            "backend.agents.planner_service.plan_query", new=AsyncMock(return_value=env)
+        ), patch(
+            "backend.agents.fish_finder.find_fishing_zones", side_effect=_fish
+        ), patch(
+            "backend.agents.sea_checker.check_sea_conditions", side_effect=_sea
+        ), patch(
+            "backend.agents.weather_agent.check_weather", side_effect=_weather
+        ), patch(
+            "backend.agents.danger_agent.check_safety_batch", side_effect=_danger
+        ), patch(
+            "backend.agents.synthesizer_service.synthesize_advisory",
+            side_effect=_mock_synth_success_36,
+        ), patch(
+            "backend.db.redis.get_session", new=AsyncMock(return_value=None)
+        ), patch(
+            "backend.db.redis.save_session", new=AsyncMock(return_value=None)
+        ):
+            res = await g.orchestrate_via_graph(
+                query="Where is fish near Kochi?",
+                language="en",
+                location={"lat": KOCHI_LAT, "lon": KOCHI_LON},
+                session_id=f"test-fish-badge-{uuid.uuid4().hex[:8]}",
+            )
+        # Badge tools must run with fish so safety payload has real wave/wind.
+        assert calls["fish"] == 1, f"fish must run once, got {calls}"
+        assert calls["sea"] == 1, f"sea must run for badge, got {calls}"
+        assert calls["weather"] == 1, f"weather must run for badge, got {calls}"
+        assert calls["danger"] == 1, f"geofence must run, got {calls}"
+        selected = set(res.get("selected_tools") or [])
+        assert "check_ocean_state" in selected, f"ocean force-included, got {selected}"
+        assert "check_weather" in selected, f"weather force-included, got {selected}"
+        # Safety payload must carry non-None wave/wind (no '--' / unavailable).
+        safety = res.get("safety") or {}
+        assert safety.get("waves_m") is not None, f"waves_m must be set, got {safety}"
+        assert safety.get("wind_kts") is not None, f"wind_kts must be set, got {safety}"
+        # Auditable trace note explaining the force-include.
+        trace = "\n".join(str(line) for line in (res.get("reasoning_trace") or []))
+        assert "badge" in trace.lower() or "force" in trace.lower(), (
+            f"reasoning_trace must note badge force-include, got: {trace}"
+        )
 
     @pytest.mark.asyncio
     async def test_unselected_nodes_passthrough_without_io(self):
@@ -1316,7 +1423,7 @@ class TestSelectiveToolExecutionMock:
         without check_geofence) so it passthroughs in <1000ms with [] and
         never touches PostGIS. The SELECTED danger path (real I/O) is
         covered separately with a mocked tool in
-        test_fish_only_runs_fish_and_geofence_skips_sea_weather.
+        test_fish_only_runs_fish_and_geofence_plus_badge_tools.
         """
         from backend.agents import graph as g
 
