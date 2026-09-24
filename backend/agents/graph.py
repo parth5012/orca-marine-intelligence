@@ -502,6 +502,9 @@ def _is_tool_selected(state: ORCAState, tool: str) -> bool:
     """
     sel = state.get("selected_tools")
     if sel is None:
+        intent = state.get("intent")
+        if isinstance(intent, dict) and intent.get("wants_fish") is False and tool == TOOL_FIND_FISH:
+            return False
         return True
     try:
         return tool in sel
@@ -828,6 +831,12 @@ async def planner_node(state: ORCAState) -> dict:
         if user_location_det is None and not _needs_clar and is_timeout:
             user_location_det = dict(KOCHI_FALLBACK_LOCATION)
             degraded = True
+
+        if isinstance(intent_det, dict) and intent_det.get("wants_fish") is False:
+            fb_sel = [TOOL_OCEAN, TOOL_WEATHER]
+        else:
+            fb_sel = None
+
         return {
             "intent": intent_det,
             "user_location": user_location_det,
@@ -836,9 +845,9 @@ async def planner_node(state: ORCAState) -> dict:
             "degraded": degraded,
             "query": query,
             "language": language,
-            "selected_tools": None,
+            "selected_tools": fb_sel,
             "reasoning_trace": [
-                f"planner fallback: {exc} using deterministic intent/location"
+                f"planner fallback: {exc}; using deterministic intent/location"
             ],
             "needs_clarification": _needs_clar,
             "clarification_text": _clar_text,
@@ -1052,13 +1061,19 @@ async def planner_node(state: ORCAState) -> dict:
     except Exception:
         pass
 
-    # Guard: confident plan with empty toolset would deadlock the pipeline
-    # (no fish → no decision). Default to full dispatch with an auditable note.
-    if not needs_clarification and not selected_tools:
-        selected_tools = list(_ALL_PLANNER_TOOLS)
-        reasoning_trace = list(reasoning_trace) + [
-            "planner note: empty selected_tools on confident plan — defaulted to full dispatch (auditable)"
-        ]
+        # Guard: a confident plan with an empty toolset would deadlock the pipeline
+        # (no fish, no decision). Default to full dispatch with an auditable note.
+        if not needs_clarification and not selected_tools:
+            if isinstance(intent, dict) and intent.get("wants_fish") is False:
+                selected_tools = [TOOL_OCEAN, TOOL_WEATHER]
+                reasoning_trace = list(reasoning_trace) + [
+                    "planner note: empty selected_tools for safety/weather query defaulted to ocean+weather"
+                ]
+            else:
+                selected_tools = list(_ALL_PLANNER_TOOLS)
+                reasoning_trace = list(reasoning_trace) + [
+                    "planner note: empty selected_tools on confident plan defaulted to full dispatch (auditable)"
+                ]
 
     return {
         "intent": intent,
@@ -1518,10 +1533,15 @@ async def decision_agent(state: ORCAState) -> dict:
     # The override also feeds synthesis (via combined) so LLM wording
     # polishes the weather answer, not the fishing template.
     _sel_tools = state.get("selected_tools")
+    _intent = state.get("intent")
+    _wants_fish = _intent.get("wants_fish") if isinstance(_intent, dict) else None
     _fish_skipped = (
-        isinstance(_sel_tools, list)
-        and TOOL_FIND_FISH not in _sel_tools
-        and (TOOL_WEATHER in _sel_tools or TOOL_OCEAN in _sel_tools)
+        (_wants_fish is False)
+        or (
+            isinstance(_sel_tools, list)
+            and TOOL_FIND_FISH not in _sel_tools
+            and (TOOL_WEATHER in _sel_tools or TOOL_OCEAN in _sel_tools)
+        )
     )
     if _fish_skipped:
         try:
@@ -1567,9 +1587,9 @@ async def decision_agent(state: ORCAState) -> dict:
             logger.debug("graph.decision: weather-led reply skipped (%s)", _wle)
 
     # Build payload fragments (mirrors orchestrator._to_geojson_features etc.)
-    # Veto (#197 choice a): never ship zones / highlight on DO NOT SAIL.
-    pfz_features = [] if _vetoed else _to_geojson_features(ranked)
-    if _vetoed:
+    # Veto (#197 choice a) or weather-only: do not ship zones / highlight DO NOT SAIL.
+    pfz_features = [] if (_vetoed or _fish_skipped) else _to_geojson_features(ranked)
+    if _vetoed or _fish_skipped:
         center = [float(user_location["lon"]), float(user_location["lat"])] if user_location else None
         route = []
     elif best and best.get("lat") is not None:
@@ -2539,12 +2559,13 @@ async def orchestrate_stream_via_graph(
             _prov_forecast = final_state.get("forecast")
             combined = cb.combine_and_rank(
                 fish_results=fish,
-                sea_results=sea_results or [],
-                weather_results=weather_results or [],
-                danger_results=danger_results or [],
+                sea_results=sea_results,
+                weather_results=weather_results,
+                danger_results=danger_results,
                 user_location=_prov_ul,
                 detected_language=_prov_lang,
                 forecast=_prov_forecast,
+                intent=final_state.get("intent"),
             )
             try:
                 _store_provisional_combined(

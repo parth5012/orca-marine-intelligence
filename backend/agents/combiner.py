@@ -203,6 +203,7 @@ def combine_and_rank(
     port_name: str | None = None,
     species_list: list | None = None,
     forecast: dict | None = None,
+    intent: dict | None = None,
 ) -> dict:
     """
     Rank PFZ zones by composite safety and proximity score.
@@ -287,7 +288,146 @@ def combine_and_rank(
         now = datetime.now()
     date_str = now.strftime("%d-%b-%Y")
 
-    # Empty case — still carry the departure forecast advisory when present.
+    # Determine if user requested fishing zones or pure marine weather/safety
+    wants_fish = True
+    if isinstance(intent, dict):
+        wants_fish = bool(intent.get("wants_fish", True))
+    elif fish_results and all(f.get("source") == "synthetic_safety_anchor" for f in fish_results if isinstance(f, dict)):
+        wants_fish = False
+
+    # Weather / Safety only advisory (no fish intent)
+    if not wants_fish:
+        citation = f"INCOIS TextData {date_str}"
+        lat = float(user_location.get("lat", 0.0)) if isinstance(user_location, dict) and user_location.get("lat") is not None else 0.0
+        lon = float(user_location.get("lon", 0.0)) if isinstance(user_location, dict) and user_location.get("lon") is not None else 0.0
+
+        place_str = port_name
+        if not place_str:
+            for source_list in (weather_results, sea_results, fish_results):
+                for item in source_list:
+                    if isinstance(item, dict) and item.get("place"):
+                        p = str(item.get("place")).strip()
+                        if p.lower() not in ("unknown", "current location", "current_location", "none"):
+                            place_str = p
+                            break
+                if place_str:
+                    break
+        if not place_str:
+            place_str = "your area"
+
+        s0 = sea_results[0] if (sea_results and isinstance(sea_results[0], dict)) else {}
+        w0 = weather_results[0] if (weather_results and isinstance(weather_results[0], dict)) else {}
+        d0 = danger_results[0] if (danger_results and isinstance(danger_results[0], dict)) else {}
+
+        wave = s0.get("wave_height_m")
+        wind = w0.get("wind_kt") if w0.get("wind_kt") is not None else w0.get("wind_speed_kt")
+        current = s0.get("current_kt")
+        wave_status = str(s0.get("wave_status") or s0.get("status") or "unknown").lower()
+        wind_status = str(w0.get("wind_status") or w0.get("status") or "unknown").lower()
+
+        cyclone_alert = False
+        cyclone_name = None
+        nearest_cyclone_km = None
+        for w in weather_results:
+            if isinstance(w, dict) and bool(w.get("cyclone_alert", w.get("cyclone", False))):
+                cyclone_alert = True
+                if w.get("cyclone_name"):
+                    cyclone_name = w.get("cyclone_name")
+                if w.get("nearest_cyclone_km") is not None:
+                    nearest_cyclone_km = w.get("nearest_cyclone_km")
+
+        unsafe_reasons = []
+        if cyclone_alert:
+            cyc_desc = f"cyclone alert active ({cyclone_name})" if cyclone_name else "cyclone alert active"
+            if nearest_cyclone_km is not None:
+                cyc_desc += f" within {nearest_cyclone_km:.0f}km"
+            unsafe_reasons.append(cyc_desc)
+        if wave is not None and wave > WAVE_SAFE_MAX_M:
+            unsafe_reasons.append(f"wave {wave}m exceeds safe limit {WAVE_SAFE_MAX_M}m")
+        if wind is not None and wind > WIND_SAFE_MAX_KT:
+            unsafe_reasons.append(f"wind {wind}kt exceeds safe limit {WIND_SAFE_MAX_KT:g}kt")
+        if current is not None and current > CURRENT_SAFE_MAX_KT:
+            unsafe_reasons.append(f"current {current}kt exceeds safe limit {CURRENT_SAFE_MAX_KT}kt")
+        if wave_status == "danger" and wave is not None and not any("wave" in r for r in unsafe_reasons):
+            unsafe_reasons.append("hazardous wave conditions")
+        if wind_status == "danger" and wind is not None and not any("wind" in r for r in unsafe_reasons):
+            unsafe_reasons.append("dangerous wind conditions")
+
+        all_unsafe = bool(unsafe_reasons or cyclone_alert)
+        wave_str = f"wave {wave}m" if wave is not None else "wave data unavailable"
+        wind_str = f"wind {wind}kt" if wind is not None else "wind data unavailable"
+
+        if all_unsafe:
+            reason_str = ", ".join(unsafe_reasons)
+            explanation = (
+                f"Marine weather warning for {place_str}: {reason_str}. "
+                f"Recommendation: DO NOT SAIL. Current conditions: {wave_str}, {wind_str}. "
+                f"Citation: {citation}."
+            )
+        elif wave is None and wind is None:
+            explanation = (
+                f"Marine weather advisory for {place_str}: Live sea and weather data currently unavailable. "
+                f"Treat conditions with caution before sailing. Citation: {citation}."
+            )
+        else:
+            explanation = (
+                f"Marine weather and sea conditions for {place_str}: {wave_str}, {wind_str}. "
+                f"Conditions are safe for sailing outside restricted zones. Citation: {citation}."
+            )
+
+        if isinstance(forecast, dict):
+            _fs = forecast.get("forecast_summary")
+            _dw = forecast.get("best_window_utc") or "Tomorrow morning"
+            _w6 = forecast.get("wind_kts_6h")
+            _v6 = forecast.get("wave_m_6h")
+            _ds = forecast.get("departure_safe")
+            if _w6 is not None and _v6 is not None:
+                _ss = "safe to depart" if _ds is True else ("conditions unsafe / caution" if _ds is False else "conditions uncertain")
+                explanation += f" Departure advisory ({_dw}): wind {_w6} kt, waves {_v6}m ({_ss})."
+            elif _fs and _fs != "Forecast unavailable":
+                explanation += f" Departure advisory: {_fs}."
+
+        best_out = {
+            "id": "current_loc",
+            "place": place_str,
+            "lat": lat,
+            "lon": lon,
+            "distance_km": 0.0,
+            "score": 0.0 if all_unsafe else 1.0,
+            "wave_height_m": wave,
+            "wind_kt": wind,
+            "current_kt": current,
+            "wave_status": wave_status,
+            "wind_status": wind_status,
+            "cyclone_alert": cyclone_alert,
+            "cyclone_name": cyclone_name,
+            "nearest_cyclone_km": nearest_cyclone_km,
+            "all_unsafe": all_unsafe,
+            "inside_eez": d0.get("inside_eez", True),
+            "inside_mpa": d0.get("inside_mpa", False),
+            "score_breakdown": {
+                "closest": 1.0,
+                "safe_sea": 0.0 if (wave is not None and wave > WAVE_SAFE_MAX_M) else 1.0,
+                "wind_ok": 0.0 if (wind is not None and wind > WIND_SAFE_MAX_KT) else 1.0,
+                "not_banned": 1.0,
+            },
+        }
+
+        lang_code = _normalize_lang_code(detected_language)
+        return {
+            "ranked_zones": [],
+            "best": None if all_unsafe else best_out,
+            "explanation": explanation,
+            "explanation_en": explanation,
+            "localized_reply": explanation,
+            "detected_language": lang_code,
+            "citation": citation,
+            "all_unsafe": all_unsafe,
+            "score_breakdown": best_out["score_breakdown"],
+            "forecast": forecast,
+        }
+
+    # Empty case: carry departure forecast advisory when present.
     if not fish_results:
         citation = f"INCOIS TextData {date_str}"
         _empty_en = "No fishing zones found within search radius. Try expanding the search area or check back later."
