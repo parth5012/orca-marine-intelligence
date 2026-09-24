@@ -139,24 +139,45 @@ async def seed_boundaries_if_empty() -> int:
     "outside Indian EEZ", which the combiner turns into a false
     all-zones-unsafe DO NOT SAIL advisory — and the chat danger veto then
     wipes the zone cards (and their Show-on-Map buttons) mid-stream.
-    Mirrors seed_initial_pfz_if_empty. Returns features ingested (0 if
-    already populated).
+    Mirrors seed_initial_pfz_if_empty.
+
+    Only the dataset whose table is actually empty is written (neither table
+    has a feature-level unique key, so re-ingesting a populated one would
+    duplicate rows). Returns rows newly present, and raises when the seed did
+    not reach PostGIS so the caller can retry or degrade loudly.
     """
     from backend.ingest.boundaries import ingest_boundaries
 
     eez_n, mpa_n = await _boundary_counts()
-    if eez_n > 0 and mpa_n > 0:
+    datasets = tuple(name for name, n in (("eez", eez_n), ("mpa", mpa_n)) if n == 0)
+    if not datasets:
         logger.info("seed_boundaries_if_empty: already populated (%d EEZ, %d MPA)", eez_n, mpa_n)
         return 0
-    res = await ingest_boundaries()
-    ingested = int(res.get("eez_count", 0)) + int(res.get("mpa_count", 0))
+
+    res = await ingest_boundaries(datasets)
+    if not res.get("db_synced"):
+        raise RuntimeError(
+            f"boundary seed never reached PostGIS (db_synced=False, requested={list(datasets)})"
+        )
+
+    eez_after, mpa_after = await _boundary_counts()
+    if eez_after == 0 or mpa_after == 0:
+        raise RuntimeError(
+            f"boundary seed incomplete after ingesting {list(datasets)} "
+            f"(eez={eez_after}, mpa={mpa_after})"
+        )
+
+    seeded = (eez_after - eez_n) + (mpa_after - mpa_n)
     logger.info(
-        "seed_boundaries_if_empty: ingested %d EEZ + %d MPA (db_synced=%s)",
-        int(res.get("eez_count", 0)),
-        int(res.get("mpa_count", 0)),
-        res.get("db_synced"),
+        "seed_boundaries_if_empty: +%d rows (eez %d->%d, mpa %d->%d, requested=%s)",
+        seeded,
+        eez_n,
+        eez_after,
+        mpa_n,
+        mpa_after,
+        list(datasets),
     )
-    return ingested
+    return max(seeded, 0)
 
 
 async def init_db():
