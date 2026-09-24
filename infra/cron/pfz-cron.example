@@ -8,7 +8,7 @@
 # Option B — via running backend API (good for Docker/Render, no venv needed).
 # http://localhost:8000 is for same-host or isolated local Docker use only.
 # For remote hosts, use your HTTPS backend URL instead, e.g.
-# https://orca-marine-intelligence-api.onrender.com/api/pfz/refresh:
+# https://orca-marine-intelligence-backend.vercel.app/api/pfz/refresh:
 # 30 6 * * * /usr/bin/curl -sS -X POST http://localhost:8000/api/pfz/refresh -H "Authorization: Bearer $CRON_SECRET" >> /var/log/orca-pfz-cron.log 2>&1
 #
 # Verify: tail /var/log/orca-pfz-cron.log ; ls -l data/pfz-today.geojson ; curl -s http://localhost:8000/api/pfz/today | head -c 300

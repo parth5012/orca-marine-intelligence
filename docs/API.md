@@ -1,6 +1,6 @@
 # ORCA — API Endpoints
 
-**Base URL:** `http://localhost:8000` (development) or `https://orca-marine-intelligence-api.onrender.com` (production)
+**Base URL:** `http://localhost:8000` (development) or `https://orca-marine-intelligence-backend.vercel.app` (production)
 
 **Spec version:** 0.1.0 · **Framework:** FastAPI (`backend/main.py`) · **Mounted** `backend/main.py:226-230`
 
