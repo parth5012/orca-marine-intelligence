@@ -548,6 +548,24 @@ async def transcribe(
             retryable=False,
         )
     compute_url = callback_url or BHASHINI_ASR_COMPUTE_URL
+    # Security (CodeRabbit review, PR #255): never send the inference
+    # Authorization header over cleartext — reject non-HTTPS callback URLs
+    # from the Config response before the Compute request.
+    if not compute_url.lower().startswith("https://"):
+        logger.warning(
+            "Bhashini ASR config callbackUrl is not HTTPS (%s); "
+            "rejecting Compute call to avoid credential exposure.",
+            compute_url,
+        )
+        return TranscriptionResult(
+            text="",
+            source_lang=lang,
+            transcribed=False,
+            cached=False,
+            error_code="BHASHINI_UPSTREAM_ERROR",
+            error_detail="Bhashini ASR config callbackUrl is not HTTPS; refusing to send credentials over cleartext.",
+            retryable=False,
+        )
 
     # 4. Compute call — base64 WAV in inputData.audio[].audioContent
     audio_b64 = base64.b64encode(bytes(audio_bytes)).decode("ascii")
