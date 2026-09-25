@@ -66,6 +66,17 @@ describe('kpiMockData coverage', () => {
     expect(getKPIDataset('ocean', '1Y' as KPITimeRange)).toBeNull();
   });
 
+  // CodeRabbit #4101258333: inherited Object.prototype keys must not resolve to
+  // a "dataset" — spec.values would be undefined and the caller would crash
+  // instead of getting the documented null.
+  it('returns null for inherited Object.prototype keys, not a crash', () => {
+    for (const key of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+      expect(getKPIDataset(key as KPITab, '24H')).toBeNull();
+      expect(getKPIDataset('ocean', key as KPITimeRange)).toBeNull();
+      expect(getKPIDataset(key as KPITab, key as KPITimeRange)).toBeNull();
+    }
+  });
+
   it('serves point counts that match the range: 24H=12, 7D=7, 30D=30', () => {
     const expected: Record<KPITimeRange, number> = { '24H': 12, '7D': 7, '30D': 30 };
     for (const tab of KPI_TABS) {
