@@ -169,6 +169,15 @@ const LABELS: Record<KPITimeRange, string[]> = {
 };
 
 /**
+ * Own-key check only: at runtime a caller may hand us '__proto__' or
+ * 'constructor', which index into Object.prototype and would otherwise resolve
+ * to a truthy non-dataset (then crash on spec.values.length).
+ */
+function isOwnKey(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+/**
  * Resolve the demo series for a tab + time range.
  * Returns null for anything outside the supported matrix so callers can keep
  * an honest empty state instead of rendering fabricated bars.
@@ -177,13 +186,15 @@ export function getKPIDataset(
   tab: KPITab,
   range: KPITimeRange
 ): KPIDataset | null {
-  const byTab: Record<string, Record<string, SeriesSpec> | undefined> = RAW;
-  const tabSeries = byTab[tab];
-  if (!tabSeries) return null;
+  if (!isOwnKey(RAW, tab)) return null;
+  const tabSeries = RAW[tab];
+  if (!isOwnKey(tabSeries, range)) return null;
 
   const spec: SeriesSpec | undefined = tabSeries[range];
+  if (!isOwnKey(LABELS, range)) return null;
   const labels = LABELS[range];
-  if (!spec || !labels) return null;
+  if (!spec || !labels || !Array.isArray(labels)) return null;
+  if (!Array.isArray(spec.values)) return null;
   if (spec.values.length !== labels.length) return null;
 
   const points: KPIPoint[] = labels.map((label, i) => ({
