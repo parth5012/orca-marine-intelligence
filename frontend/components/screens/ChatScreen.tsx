@@ -742,6 +742,17 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                         </div>
                       )}
 
+                      {/* Non-fatal stream warning (partial reply kept) */}
+                      {msg.warning && (
+                        <div
+                          data-testid="stream-warning-banner"
+                          className="mt-2 text-xs text-amber-300 bg-amber-950/60 p-2 rounded-lg border border-amber-700/60 flex items-center gap-1.5"
+                        >
+                          <span className="text-amber-400 font-bold">⚠</span>
+                          <span>{msg.warning}</span>
+                        </div>
+                      )}
+
                       {/* Evidence & latency footer (allowlisted human pills only, #193) */}
                       <div data-testid="evidence-footer" className="mt-3 pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
                         {(() => {
