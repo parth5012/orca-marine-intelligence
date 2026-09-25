@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { describeStreamFailure } from './streamFailure';
 
 // Perf #198: monotonic suffix so message ids stay unique even when two
 // messages are created within the same millisecond (Date.now alone collides).
@@ -1197,15 +1198,34 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
           );
         } else {
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMessageId
-                ? {
-                    ...m,
-                    isStreaming: false,
-                    error: err.message || 'Failed to connect to ORCA advisory stream.',
-                  }
-                : m
-            )
+            prev.map((m) => {
+              if (m.id !== assistantMessageId) return m;
+              const hasPartialResult = Boolean(
+                m.content?.trim() ||
+                  m.safety ||
+                  m.zone_cards?.length ||
+                  m.map_data ||
+                  m.reasoning_steps?.length
+              );
+              const failure = describeStreamFailure({
+                name: err?.name,
+                message: err?.message,
+                hasPartialResult,
+              });
+              if (failure.kind === 'transport') {
+                // Raw engine text (e.g. Firefox "Error in input stream")
+                // stays in the console for debugging, never in the banner.
+                console.warn(
+                  '[useSSEChat] stream failure:',
+                  err?.name,
+                  err?.message,
+                  'partial=' + hasPartialResult
+                );
+              }
+              return failure.severity === 'warning'
+                ? { ...m, isStreaming: false, warning: failure.message }
+                : { ...m, isStreaming: false, error: failure.message };
+            })
           );
         }
       } finally {

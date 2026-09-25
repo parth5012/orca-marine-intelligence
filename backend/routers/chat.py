@@ -68,6 +68,60 @@ logger = logging.getLogger("orca.chat")
 
 router = APIRouter(tags=["chat"])
 
+# Firefox aborts text/event-stream responses after ~10-12s without bytes
+# (github.com/enisdenjo/graphql-sse/issues/99 ΓÇö "FireFox: Error in input
+# stream"), which the frontend surfaces as the red banner
+# "ΓÜá∩╕Å Error in input stream". Our synthesizer can stay silent for ~25-30s,
+# so the stream must emit comment frames well inside that window.
+SSE_KEEPALIVE_INTERVAL = 5.0
+
+
+async def with_keepalive(source: Any, interval: Optional[float] = None) -> Any:
+    """Yield SSE frames from ``source`` while injecting keepalive comments.
+
+    Emits ``: keepalive\\n\\n`` whenever the source has produced nothing for
+    ``interval`` seconds. Comment lines (starting with ``:``) are ignored by
+    the client SSE parser (frontend/chat/useSSEChat.ts only reads
+    ``event:`` / ``data:`` lines), so frames stay backwards compatible.
+
+    The source is pumped on a background task so a slow LLM call is never
+    cancelled by the keepalive timer.
+    """
+    if interval is None:
+        interval = SSE_KEEPALIVE_INTERVAL
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def _pump() -> None:
+        try:
+            async for item in source:
+                await queue.put(("event", item))
+        except BaseException as exc:  # re-raised by the consumer below
+            await queue.put(("error", exc))
+        else:
+            await queue.put(("end", None))
+
+    task = asyncio.create_task(_pump())
+    try:
+        while True:
+            try:
+                kind, payload = await asyncio.wait_for(queue.get(), timeout=interval)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            if kind == "event":
+                yield payload
+            elif kind == "error":
+                raise payload
+            else:
+                return
+    finally:
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
 # Security caps (#199): 2k chat chars, 25MB voice. Rate limits per IP:
 # 30/min chat, 10/min voice (env-overridable ORCA_CHAT_RPM/ORCA_VOICE_RPM).
 CHAT_MESSAGE_MAX_CHARS = 2000
@@ -284,6 +338,10 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
             except Exception as te:
                 logger.warning("translate_to_english failed: %s", te)
 
+        # Flush response headers immediately: starts the browser's SSE idle
+        # clock with a fresh window while input translation / graph init run.
+        yield ": connected\n\n"
+
         try:
             async for event in orchestrate_stream_via_graph(
                 query=english_query,
@@ -359,7 +417,10 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(
-        event_generator(),
+        # Keepalive comments cover the WHOLE response (input translation +
+        # graph silence), not just the graph loop ΓÇö Firefox aborts an SSE
+        # response after ~10-12s without bytes ("Error in input stream").
+        with_keepalive(event_generator()),
         media_type="text/event-stream",
         headers=headers,
     )
