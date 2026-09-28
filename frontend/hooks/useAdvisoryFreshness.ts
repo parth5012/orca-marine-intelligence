@@ -38,6 +38,42 @@ interface CacheEntry {
 let cache: CacheEntry | null = null;
 let inflight: Promise<StoredSnapshot> | null = null;
 
+/**
+ * Weather measurement time, published by whoever actually fetches weather
+ * (MapInner) rather than by the PFZ snapshot fetch. `null` means unknown —
+ * never "now": a PFZ fetch time is not a weather measurement time.
+ */
+let weatherAt: string | null = null;
+const weatherListeners = new Set<(ts: string | null) => void>();
+
+export function setWeatherTimestamp(ts: string | null): void {
+  weatherAt = typeof ts === 'string' && ts.length > 0 ? ts : null;
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = readStoredSnapshot() ?? {};
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...stored, weatherAt }));
+    } catch {
+      // Storage quota or privacy restriction
+    }
+  }
+  for (const listener of [...weatherListeners]) {
+    listener(weatherAt);
+  }
+}
+
+export function getWeatherTimestamp(): string | null {
+  return weatherAt;
+}
+
+export function subscribeWeatherTimestamp(
+  listener: (ts: string | null) => void
+): () => void {
+  weatherListeners.add(listener);
+  return () => {
+    weatherListeners.delete(listener);
+  };
+}
+
 export function clearAdvisoryFreshnessCache(): void {
   cache = null;
   inflight = null;
@@ -74,12 +110,11 @@ export async function fetchAdvisorySnapshot(): Promise<StoredSnapshot> {
       const body = await res.json();
       const validUntil = body?.valid_until ?? null;
       const capturedAt = body?.timestamp ?? null;
-      const weatherAt = null;
 
       const snapshot: StoredSnapshot = {
         validUntil,
         capturedAt,
-        weatherAt,
+        weatherAt: weatherAt ?? readStoredSnapshot()?.weatherAt ?? null,
       };
 
       cache = { at: Date.now(), data: snapshot };
@@ -117,26 +152,32 @@ export function useAdvisoryFreshness(): AdvisoryFreshnessState {
     return true;
   });
   const [input, setInput] = useState<FreshnessInput>(() => {
+    const stored = readStoredSnapshot();
+    const liveWeatherAt = weatherAt ?? stored?.weatherAt ?? null;
     if (cache) {
       return {
         validUntil: cache.data.validUntil,
         capturedAt: cache.data.capturedAt,
-        weatherAt: cache.data.weatherAt,
+        weatherAt: cache.data.weatherAt ?? liveWeatherAt,
       };
     }
-    const stored = readStoredSnapshot();
     if (stored) {
       return {
         validUntil: stored.validUntil,
         capturedAt: stored.capturedAt,
-        weatherAt: stored.weatherAt,
+        weatherAt: liveWeatherAt,
       };
     }
-    return {};
+    return { weatherAt: weatherAt };
   });
 
   useEffect(() => {
     let mounted = true;
+    const unsubscribe = subscribeWeatherTimestamp((ts) => {
+      if (mounted) {
+        setInput((prev) => ({ ...prev, weatherAt: ts }));
+      }
+    });
 
     async function loadFreshness() {
       try {
@@ -145,7 +186,7 @@ export function useAdvisoryFreshness(): AdvisoryFreshnessState {
           setInput({
             validUntil: snapshot.validUntil,
             capturedAt: snapshot.capturedAt,
-            weatherAt: snapshot.weatherAt,
+            weatherAt: weatherAt ?? snapshot.weatherAt ?? null,
           });
           setOffline(false);
           setLoading(false);
@@ -157,10 +198,10 @@ export function useAdvisoryFreshness(): AdvisoryFreshnessState {
             setInput({
               validUntil: stored.validUntil,
               capturedAt: stored.capturedAt,
-              weatherAt: stored.weatherAt,
+              weatherAt: weatherAt ?? stored.weatherAt ?? null,
             });
           } else {
-            setInput({});
+            setInput({ weatherAt: weatherAt });
           }
           setOffline(true);
           setLoading(false);
@@ -172,6 +213,7 @@ export function useAdvisoryFreshness(): AdvisoryFreshnessState {
 
     return () => {
       mounted = false;
+      unsubscribe();
     };
   }, []);
 

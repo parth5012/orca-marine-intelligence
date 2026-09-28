@@ -102,6 +102,9 @@ async def get_today_pfz(
     # 6. Build response with metadata
     source = base_data.get("source", "incois_textdata") if base_data else "incois_textdata"
     valid_until = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+    # Source capture time, carried through from the ingested dataset — NOT the
+    # time of this request. Absent upstream means unknown (null), never "now".
+    timestamp = (base_data or {}).get("timestamp")
     sector_count = len(
         {
             f.get("properties", {}).get("sector")
@@ -113,11 +116,13 @@ async def get_today_pfz(
     return {
         "type": "FeatureCollection",
         "valid_until": valid_until,
+        "timestamp": timestamp,
         "source": source,
         "sector_count": sector_count,
         "count": len(limited_features),
         "metadata": {
             "valid_until": valid_until,
+            "timestamp": timestamp,
             "source": source,
             "sector_count": sector_count,
             "count": len(limited_features),

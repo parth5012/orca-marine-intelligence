@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -59,6 +60,14 @@ class CurrentWeatherResponse(BaseModel):
     status: str
     source: str
     cached: bool
+    # When these readings were obtained from upstream (ISO 8601, UTC).
+    # Cached responses keep the time of the fetch that produced them, so a
+    # client can tell genuinely-old data from data it downloaded a second ago.
+    # Null only when the value is unknown — never "now".
+    timestamp: Optional[str] = Field(
+        default=None,
+        description="Source capture time of these readings (ISO 8601, UTC)",
+    )
     # Backward compatibility / optional fields
     wind_speed_kts: Optional[float] = None
     swell_wave_height_m: Optional[float] = None
@@ -187,6 +196,7 @@ async def get_current_weather(
             "status": status,
             "source": source,
             "cached": False,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "tide_range_m": tide_info.get("tide_range_m"),
             "tidal_state": tide_info.get("tidal_state", "unknown"),
             "next_high_tide_utc": tide_info.get("next_high_tide_utc"),

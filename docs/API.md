@@ -407,9 +407,12 @@ Live weather and marine conditions for a point. Combines OpenWeatherMap / Open-M
   "current_speed_kt": 1.0,
   "status": "safe",
   "source": "live+live",
-  "cached": false
+  "cached": false,
+  "timestamp": "2026-09-28T15:40:12.123456+00:00"
 }
 ```
+
+`timestamp` — when these readings were obtained from upstream (ISO 8601, UTC). A Redis-cached response keeps the time of the fetch that produced it; `null` means unknown. It is **never** the request time.
 
 Composite safety `status` classification:
 - `danger`: `wind_speed_kt > 25.0` or `wave_height_m > 2.5` or `current_speed_kt > 2.5` or `pressure_hpa < 995.0`
@@ -603,7 +606,7 @@ Frozen cross-platform contract (ADR-0008) so any client — the Next.js PWA toda
 **Staleness rules:**
 
 - PFZ advisory data is **stale** when `now > valid_until`; if `valid_until` is absent, a 24-hour window measured from capture time applies.
-- Wave/wind measurements are **stale** after 3 hours.
+- Wave/wind measurements are **stale** after 3 hours, measured from `timestamp` on `GET /api/weather/current` (clients persist it as `weatherAt`). When that timestamp is unknown the readings are not treated as stale — the caution floor is driven by PFZ validity.
 - Map tiles are exempt from staleness.
 
 **Caution floor:**
