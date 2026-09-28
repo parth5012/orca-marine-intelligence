@@ -10,6 +10,7 @@ import {
   classifyRequest,
   createLru,
   isCacheableResponse,
+  isCacheableTileResponse,
   OFFLINE_SHELL_PATHS,
   CACHE_BUDGET_BYTES,
   TILE_ENTRY_LIMIT,
@@ -193,6 +194,13 @@ self.addEventListener('fetch', (event) => {
             }
             return netRes;
           }
+          if ('caches' in self) {
+            const cache = await caches.open(ADVISORY_CACHE);
+            const cached = await cache.match(request);
+            if (cached && isCacheableResponse(cached.status)) {
+              return cached;
+            }
+          }
           return netRes;
         } catch {
           clearTimeout(timeoutId);
@@ -229,12 +237,12 @@ self.addEventListener('fetch', (event) => {
           }
           if (cache) {
             const cached = await cache.match(request);
-            if (cached && isCacheableResponse(cached.status)) {
+            if (cached && isCacheableTileResponse(cached)) {
               tileLru.get(request.url);
               event.waitUntil(
                 fetch(request)
                   .then(async (netRes) => {
-                    if (isCacheableResponse(netRes.status)) {
+                    if (isCacheableTileResponse(netRes)) {
                       await cache.put(request, netRes.clone());
                       await recordTilePut(cache, request, netRes);
                     }
@@ -246,7 +254,7 @@ self.addEventListener('fetch', (event) => {
           }
 
           const netRes = await fetch(request);
-          if (isCacheableResponse(netRes.status) && cache) {
+          if (isCacheableTileResponse(netRes) && cache) {
             const copy = netRes.clone();
             event.waitUntil(
               (async () => {

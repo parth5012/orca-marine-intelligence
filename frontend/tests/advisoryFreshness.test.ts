@@ -470,4 +470,53 @@ describe('MapInner Offline Weather Preservation & Caution Invariant (Gap B)', ()
   });
 });
 
+describe('Advisory age provenance (regression: CodeRabbit review PR #262)', () => {
+  it('measures age from capturedAt, using validUntil only when capture time is absent', () => {
+    const now = 1_700_000_000_000;
+    const capturedAt = new Date(now - 20 * 3_600_000).toISOString();
+    const validUntil = new Date(now - 1 * 3_600_000).toISOString();
+
+    const both = evaluateFreshness({ capturedAt, validUntil, now });
+    expect(both.ageMs).toBe(20 * 3_600_000);
+    expect(both.ageLabel).toBe('20h old');
+    expect(both.stale).toBe(true);
+
+    const noCapture = evaluateFreshness({ validUntil, now });
+    expect(noCapture.ageMs).toBe(3_600_000);
+    expect(noCapture.ageLabel).toBe('1h old');
+  });
+
+  it('never derives capturedAt or weatherAt from the fetch time', async () => {
+    clearAdvisoryFreshnessCache();
+    const originalFetch = globalThis.fetch;
+    const sourceTimestamp = new Date(Date.now() - 5 * 3_600_000).toISOString();
+
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ valid_until: new Date(Date.now() + 3_600_000).toISOString() }),
+    })) as any;
+
+    try {
+      const noTimestamp = await fetchAdvisorySnapshot();
+      expect(noTimestamp.capturedAt).toBeNull();
+      expect(noTimestamp.weatherAt).toBeNull();
+
+      clearAdvisoryFreshnessCache();
+      globalThis.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ valid_until: new Date(Date.now() + 3_600_000).toISOString(), timestamp: sourceTimestamp }),
+      })) as any;
+
+      const withTimestamp = await fetchAdvisorySnapshot();
+      expect(withTimestamp.capturedAt).toBe(sourceTimestamp);
+      expect(withTimestamp.weatherAt).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearAdvisoryFreshnessCache();
+    }
+  });
+});
+
 

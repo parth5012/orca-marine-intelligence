@@ -5,7 +5,7 @@ Because a future Flutter client must reproduce identical safety semantics — th
 **Safety semantics**
 
 - Offline, the app serves an *advisory snapshot*: PFZ GeoJSON, geofence/MPA layers, last-known wave/wind, system status, plus a bounded ~50 MB LRU tile cache. Chat is not available offline.
-- PFZ data is **stale** when `now > valid_until`; if `valid_until` is absent, a 24-hour window measured from capture time applies.
+- PFZ data is **stale** when `now > valid_until`; if `valid_until` is absent, a 24-hour window measured from capture time applies. Capture time is the payload's `timestamp`, persisted by clients as `capturedAt` — never the time the client fetched it.
 - Wave/wind measurements are **stale** after 3 hours.
 - Map tiles are exempt from staleness.
 - A stale advisory is still shown — but its safety tier is floored at CAUTION. It can never render "SEA SAFE". This extends the ADR-0003 invariant *Fail-Open Caution on missing data* to cover stale data as well as missing data; the age banner exists so the user knows why the verdict was downgraded.

@@ -21,6 +21,11 @@ export function classifyRequest(url: string, mode?: string): RequestKind;
 
 export function isCacheableResponse(status: number): boolean;
 
+export function isCacheableTileResponse(response: {
+  status: number;
+  type?: string;
+}): boolean;
+
 export interface LruOptions<T = any> {
   maxBytes?: number;
   maxEntries?: number;

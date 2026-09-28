@@ -110,10 +110,10 @@ export function evaluateFreshness(input: FreshnessInput): FreshnessResult {
   }
 
   let ageMs: number | null = null;
-  if (validUntilMs != null) {
-    ageMs = Math.max(0, now - validUntilMs);
-  } else if (capturedAtMs != null) {
+  if (capturedAtMs != null) {
     ageMs = Math.max(0, now - capturedAtMs);
+  } else if (validUntilMs != null) {
+    ageMs = Math.max(0, now - validUntilMs);
   }
 
   const ageLabel = ageMs != null ? formatAge(ageMs) : null;
