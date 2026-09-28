@@ -1,6 +1,6 @@
 # ORCA Marine Intelligence
 
-Golden-dataset evaluation context for the multi-agent advisory pipeline (planner → fish_finder → sea/weather/danger → combiner). Exists to freeze expected multilingual outputs so evals are deterministic offline.
+Agentic marine intelligence platform delivering Potential Fishing Zone (PFZ) advisories and sea-safety warnings to Indian coastal fishermen via a multi-agent advisory pipeline (planner → fish_finder → sea/weather/danger → combiner) with a map and chat frontend. It also holds the golden-dataset evaluation vocabulary, freezing expected multilingual outputs so evals are deterministic offline.
 
 ## Language
 
@@ -31,3 +31,15 @@ _Avoid_: per-lang accuracy
 **Canonical query**:
 A query in native script for one language (e.g. `കൊച്ചിക്ക് സമീപം മീൻ എവിടെ?`). The source for the one-time freeze.
 _Avoid_: Romanized query, code-mix query
+
+**Advisory snapshot**:
+The last successfully retrieved PFZ and safety dataset retained for offline use.
+_Avoid_: offline cache, cached data, local copy
+
+**Stale advisory**:
+An advisory snapshot past its validity window; still shown to the user, but age-labelled with its safety tier floored at Caution.
+_Avoid_: expired data, old data, outdated advisory
+
+**Caution floor**:
+The rule that stale or missing safety data can never report a verdict better than Caution.
+_Avoid_: fail-open, downgrade, safety buffer
