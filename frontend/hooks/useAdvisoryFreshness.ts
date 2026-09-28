@@ -72,10 +72,9 @@ export async function fetchAdvisorySnapshot(): Promise<StoredSnapshot> {
         throw new Error(`PFZ fetch status: ${res.status}`);
       }
       const body = await res.json();
-      const nowIso = new Date().toISOString();
       const validUntil = body?.valid_until ?? null;
-      const capturedAt = body?.timestamp ?? nowIso;
-      const weatherAt = nowIso;
+      const capturedAt = body?.timestamp ?? null;
+      const weatherAt = null;
 
       const snapshot: StoredSnapshot = {
         validUntil,

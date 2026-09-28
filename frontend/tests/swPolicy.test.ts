@@ -11,6 +11,7 @@ import {
   classifyRequest,
   createLru,
   isCacheableResponse,
+  isCacheableTileResponse,
   OFFLINE_SHELL_PATHS,
   CACHE_BUDGET_BYTES,
   TILE_ENTRY_LIMIT,
@@ -227,5 +228,31 @@ describe('Service Worker Policy — createLru', () => {
     lru.put('tile-1', 1024);
     expect(lru.get('tile-1')).toBe(1024);
     expect(lru.size()).toBe(1024);
+  });
+});
+
+describe('Service Worker Policy — tile classification & opaque caching', () => {
+  it('classifies extensionless ESRI MapServer tile URLs as tile', () => {
+    expect(
+      classifyRequest(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/6/23/36',
+        'no-cors'
+      )
+    ).toBe('tile');
+    expect(
+      classifyRequest('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/info.json', 'cors')
+    ).toBe('other');
+  });
+
+  it('isCacheableTileResponse accepts 200 and opaque responses, rejects others', () => {
+    expect(isCacheableTileResponse({ status: 200, type: 'basic' })).toBe(true);
+    expect(isCacheableTileResponse({ status: 0, type: 'opaque' })).toBe(true);
+    expect(isCacheableTileResponse({ status: 500, type: 'basic' })).toBe(false);
+    expect(isCacheableTileResponse({ status: 404, type: 'basic' })).toBe(false);
+  });
+
+  it('isCacheableResponse stays strict status 200 for non-tile traffic', () => {
+    expect(isCacheableResponse(0)).toBe(false);
+    expect(isCacheableResponse(503)).toBe(false);
   });
 });

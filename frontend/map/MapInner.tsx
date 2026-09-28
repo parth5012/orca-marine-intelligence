@@ -446,10 +446,10 @@ export default function MapInner({
         Number.isFinite(prev.wind_speed_kt);
 
       if (hasPrior) {
+        // Keep the coordinates the readings were taken at — never relabel
+        // prior measurements with the newly requested position.
         return {
           ...prev,
-          lat,
-          lon,
           status: 'Last known conditions (stale)',
           source: 'stale_cache',
           loading: false,

@@ -91,6 +91,7 @@ Today's Potential Fishing Zone data as a GeoJSON FeatureCollection. Never call I
 {
   "type": "FeatureCollection",
   "valid_until": "2026-09-09T14:00:00+00:00",
+  "timestamp": "2026-09-08T18:30:00+00:00",
   "source": "incois_textdata",
   "sector_count": 4,
   "count": 2,
@@ -594,7 +595,7 @@ Frozen cross-platform contract (ADR-0008) so any client — the Next.js PWA toda
 
 **Snapshot payload** (the last successfully retrieved PFZ and safety dataset, retained for offline use when the backend is unreachable):
 
-- PFZ `FeatureCollection` fields the client relies on: `type`, `valid_until`, `timestamp`, `source`, `features`, `metadata` (same shape as `GET /api/pfz/today` above).
+- PFZ `FeatureCollection` fields the client relies on: `type`, `valid_until`, `timestamp`, `source`, `features`, `metadata` (same shape as `GET /api/pfz/today` above). `timestamp` is the source capture time. Clients MUST persist it as `capturedAt` and MUST NOT replace it with fetch time.
 - Plus geofence/MPA layers, last-known wave/wind measurements, and system status.
 - `X-Data-Source` response header on the PFZ fetch: `backend` (live), `local_file` (local GeoJSON fallback), `unavailable` (both failed → 503).
 - A bounded LRU map-tile cache of ~50 MB. Chat is **not** available offline.

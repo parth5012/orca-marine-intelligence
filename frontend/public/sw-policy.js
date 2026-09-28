@@ -19,6 +19,10 @@ export function isCacheableResponse(status) {
   return status === 200;
 }
 
+export function isCacheableTileResponse(response) {
+  return response.status === 200 || response.type === 'opaque';
+}
+
 export function classifyRequest(url, mode) {
   if (mode === 'navigate') {
     return 'navigation';
@@ -54,12 +58,15 @@ export function classifyRequest(url, mode) {
   const isOsmHost =
     hostname === 'tile.openstreetmap.org' ||
     hostname.endsWith('.tile.openstreetmap.org');
+  const isEsriTile =
+    hostname === 'server.arcgisonline.com' &&
+    /\/MapServer\/tile\/\d+\/\d+\/\d+$/i.test(pathname);
   const isTileApi = pathname.startsWith('/api/tiles');
   const isRasterTilePattern =
     /\/\d+\/\d+\/\d+\.(?:png|webp|jpg)(?:$|[?#])/i.test(pathname) ||
     /\/\d+\/\d+\/\d+\.(?:png|webp|jpg)\b/i.test(pathname);
 
-  if (isOsmHost || isTileApi || isRasterTilePattern) {
+  if (isOsmHost || isEsriTile || isTileApi || isRasterTilePattern) {
     return 'tile';
   }
 
