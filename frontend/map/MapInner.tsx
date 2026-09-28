@@ -54,6 +54,7 @@ import {
 import { useThemeModeOptional } from '@/context/AppContext';
 import { haversineKm, segmentCrossesPolygon } from '@/lib/pfz';
 import { fetchPfzCached } from '@/lib/pfzCache';
+import { useAdvisoryFreshness } from '@/hooks/useAdvisoryFreshness';
 
 export interface MapLayerToggles {
   pfz?: boolean;
@@ -174,6 +175,7 @@ export default function MapInner({
   routeMeta,
   themeMode,
 }: MapInnerProps) {
+  const freshness = useAdvisoryFreshness();
   const autoTheme = useThemeModeOptional();
   const effTheme = themeMode ?? autoTheme ?? 'dark';
   const isLight = effTheme === 'light';
@@ -436,19 +438,36 @@ export default function MapInner({
       // Backend offline -> UNKNOWN amber, never synthetic SAFE numbers.
     }
 
-    // Ticket #195: backend offline/unreachable -> UNKNOWN amber with no
-    // measurements. Never invent estWave/estWind green SAFE values.
-    setWeatherState({
-      lat,
-      lon,
-      temperature_c: undefined,
-      wind_speed_kt: undefined,
-      wave_height_m: undefined,
-      status: 'Sea state unavailable (backend offline)',
-      danger: 'unknown',
-      badge: 'amber',
-      source: 'offline_fallback',
-      loading: false,
+    setWeatherState((prev) => {
+      const hasPrior =
+        prev.wave_height_m != null &&
+        Number.isFinite(prev.wave_height_m) &&
+        prev.wind_speed_kt != null &&
+        Number.isFinite(prev.wind_speed_kt);
+
+      if (hasPrior) {
+        return {
+          ...prev,
+          lat,
+          lon,
+          status: 'Last known conditions (stale)',
+          source: 'stale_cache',
+          loading: false,
+        };
+      }
+
+      return {
+        lat,
+        lon,
+        temperature_c: undefined,
+        wind_speed_kt: undefined,
+        wave_height_m: undefined,
+        status: 'Sea state unavailable (backend offline)',
+        danger: 'unknown',
+        badge: 'amber',
+        source: 'offline_fallback',
+        loading: false,
+      };
     });
   }, []);
 
@@ -1197,6 +1216,7 @@ export default function MapInner({
               wind={weatherState.wind_speed_kt}
               danger={weatherState.danger}
               badge={weatherState.badge}
+              stale={freshness.stale || weatherState.source === 'stale_cache'}
               compact
             />
           </div>

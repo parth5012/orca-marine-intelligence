@@ -18,10 +18,13 @@ import { useSearchParams } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { ExploreMap } from '@/map';
 import { normalizeBasemapStyle, BasemapStyle } from '@/map';
+import { useAdvisoryFreshness } from '@/hooks/useAdvisoryFreshness';
+import StaleDataBanner from '@/components/pwa/StaleDataBanner';
 
 function MapPageInner() {
   const { themeMode } = useApp();
   const isLight = themeMode === 'light';
+  const freshness = useAdvisoryFreshness();
   // Client Component: read query params via hook (server page props are
   // unavailable here), wrapped in Suspense for static rendering.
   const searchParams = useSearchParams();
@@ -45,6 +48,7 @@ function MapPageInner() {
         isLight ? 'bg-slate-100 text-slate-900' : 'bg-slate-950 text-slate-100'
       }`}
     >
+      <StaleDataBanner result={freshness} offline={freshness.offline} />
       <div className="flex-1 relative overflow-hidden flex p-3 sm:p-4">
         <ExploreMap
           initialBasemapStyle={resolvedBasemapStyle}

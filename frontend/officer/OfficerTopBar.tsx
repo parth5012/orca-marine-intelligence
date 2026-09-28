@@ -21,6 +21,7 @@ import {
   Moon,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
+import { useAdvisoryFreshness } from '@/hooks/useAdvisoryFreshness';
 import LanguageSwitch from '@/chat/LanguageSwitch';
 import { SafetyBadge } from '@/map';
 import { SystemStatusBadge } from '@/components/common/SystemStatusBadge';
@@ -44,6 +45,7 @@ export interface OfficerTopBarProps {
 
 export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTopBarProps) {
   const router = useRouter();
+  const freshness = useAdvisoryFreshness();
   const {
     themeMode,
     toggleThemeMode,
@@ -282,6 +284,7 @@ export default function OfficerTopBar({ selectedPort, role, safety }: OfficerTop
                 danger={safety.danger ?? 'unknown'}
                 badge={safety.badge ?? 'amber'}
                 language={selectedLanguage}
+                stale={freshness.stale}
                 compact
               />
             )}

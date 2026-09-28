@@ -32,6 +32,8 @@ import { RouteViewScreen } from '@/components/screens/RouteViewScreen';
 import { ProfileScreen } from '@/components/screens/ProfileScreen';
 import { VoiceModal } from '@/components/voice/VoiceModal';
 import { AuthOnboardingOverlay } from '@/components/auth/AuthOnboardingOverlay';
+import { useAdvisoryFreshness } from '@/hooks/useAdvisoryFreshness';
+import StaleDataBanner from '@/components/pwa/StaleDataBanner';
 
 function MainContent({
   onSafetyUpdate,
@@ -217,6 +219,7 @@ function Shell() {
   }, [activeTab]);
 
   const isLight = themeMode === 'light';
+  const freshness = useAdvisoryFreshness();
   void selectedLanguage;
   void handleLanguageChange;
 
@@ -228,6 +231,7 @@ function Shell() {
           : 'bg-[#070d18] text-slate-100 selection:bg-cyan-500 selection:text-slate-950'
       }`}
     >
+      <StaleDataBanner result={freshness} offline={freshness.offline} />
       <Navbar
         safety={{
           waves_m: safetyState.waves_m,
