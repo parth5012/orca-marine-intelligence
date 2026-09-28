@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
+import { useAdvisoryFreshness } from '@/hooks/useAdvisoryFreshness';
 import SafetyBadge from '@/map/SafetyBadge';
 
 interface Weather {
@@ -33,6 +34,7 @@ const FALLBACK: Weather = { waves: null, wind: null, danger: 'unknown', badge: '
 
 export default function SafetyBanner({ lat, lon }: Props) {
   const { themeMode } = useApp();
+  const freshness = useAdvisoryFreshness();
   const isLight = themeMode === 'light';
   const [w, setW] = useState<Weather>(FALLBACK);
 
@@ -64,7 +66,7 @@ export default function SafetyBanner({ lat, lon }: Props) {
           : 'glass-panel-dark border-b border-cyan-900/40 text-slate-300'
       }`}
     >
-      <SafetyBadge waves={w.waves} wind={w.wind} danger={w.danger} badge={w.badge} compact />
+      <SafetyBadge waves={w.waves} wind={w.wind} danger={w.danger} badge={w.badge} stale={freshness.stale} compact />
       <span className={isLight ? 'text-slate-600' : 'text-slate-300'}>{w.status}</span>
     </div>
   );

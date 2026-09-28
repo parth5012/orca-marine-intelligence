@@ -47,6 +47,7 @@ import { parseLocation, formatDMS, haversineDistance } from './geo';
 import type { BasemapStyle } from './carto';
 import { filterEngineLayers, isLayerOn } from './layers';
 import { fetchPfzCached } from '@/lib/pfzCache';
+import { useAdvisoryFreshness } from '@/hooks/useAdvisoryFreshness';
 import { useApp, DEFAULT_ACTIVE_LAYERS, KOCHI_FALLBACK } from '@/context/AppContext';
 import type { MapLayerKey } from '@/context/AppContext';
 
@@ -94,6 +95,7 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
   initialBasemapStyle,
   showNavLinks = true,
 }) => {
+  const freshness = useAdvisoryFreshness();
   const ctx = readCtx();
   const themeMode = ctx?.themeMode ?? 'light';
   const isLight = themeMode === 'light';
@@ -545,6 +547,7 @@ export const ExploreMap: React.FC<ExploreMapProps> = ({
                   wind={toFiniteNumber(zoneProps.wind_kt ?? zoneProps.wind_speed_kt)}
                   danger={zoneProps.danger ?? undefined}
                   badge={zoneProps.badge ?? undefined}
+                  stale={freshness.stale}
                   compact
                 />
                 <button

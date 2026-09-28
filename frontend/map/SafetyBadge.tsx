@@ -17,6 +17,7 @@
 'use client';
 
 import React from 'react';
+import { applyCautionFloor } from '../lib/advisoryFreshness';
 
 export type SeaStatus = 'safe' | 'caution' | 'danger' | 'unknown';
 
@@ -27,6 +28,7 @@ export interface SafetyBadgeProps {
   badge?: 'green' | 'amber' | 'red' | string;
   language?: string;
   compact?: boolean;
+  stale?: boolean;
 }
 
 function toFinite(v: unknown): number | null {
@@ -85,9 +87,11 @@ export default function SafetyBadge({
   badge,
   language = 'en',
   compact = false,
+  stale = false,
 }: SafetyBadgeProps) {
   void language;
-  const statusType = resolveSeaStatus(waves, wind, danger, badge);
+  const base = resolveSeaStatus(waves, wind, danger, badge);
+  const statusType = stale ? applyCautionFloor(base) : base;
   const wv = toFinite(waves);
   const wn = toFinite(wind);
   const waveDisplay = wv != null ? `${wv}m` : '—';
@@ -116,6 +120,7 @@ export default function SafetyBadge({
     <div
       data-testid="safety-badge"
       data-status={statusType}
+      data-stale={stale ? 'true' : undefined}
       role="status"
       aria-label={`Sea status: ${statusMessage}.${measurements}`}
       className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-all shadow-sm ${
@@ -125,7 +130,7 @@ export default function SafetyBadge({
           ? 'bg-amber-950/80 border-amber-500/70 text-amber-200'
           : 'bg-emerald-950/80 border-emerald-500/70 text-emerald-200'
       }`}
-      title={`Sea Status: ${statusType.toUpperCase()} | Waves: ${waveDisplay} | Wind: ${windDisplay}`}
+      title={`Sea Status: ${statusType.toUpperCase()} | Waves: ${waveDisplay} | Wind: ${windDisplay}${stale ? ' (stale advisory)' : ''}`}
     >
       <span className="flex h-2 w-2 relative">
         <span

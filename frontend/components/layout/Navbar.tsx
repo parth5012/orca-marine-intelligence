@@ -38,6 +38,7 @@ import {
   Anchor,
 } from 'lucide-react';
 import { useApp, TabType } from '@/context/AppContext';
+import { useAdvisoryFreshness } from '@/hooks/useAdvisoryFreshness';
 import LanguageSwitch from '@/chat/LanguageSwitch';
 import { SafetyBadge } from '@/map';
 import { SystemStatusBadge } from '@/components/common/SystemStatusBadge';
@@ -55,6 +56,7 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ safety }) => {
+  const freshness = useAdvisoryFreshness();
   const {
     activeTab,
     setActiveTab,
@@ -291,6 +293,7 @@ export const Navbar: React.FC<NavbarProps> = ({ safety }) => {
                 danger={safety.danger ?? 'unknown'}
                 badge={safety.badge ?? 'amber'}
                 language={selectedLanguage}
+                stale={freshness.stale}
                 compact
               />
             )}
