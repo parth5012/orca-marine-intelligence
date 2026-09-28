@@ -588,6 +588,33 @@ kochi,2026-09-18,2,1,1,0,1
 
 ---
 
+## Offline Advisory Snapshot Contract
+
+Frozen cross-platform contract (ADR-0008) so any client — the Next.js PWA today, a Flutter client later — serves identical safety semantics offline. **A future client MUST apply the rules in this section identically: the same coordinates must never produce a different safety tier on web vs Flutter.**
+
+**Snapshot payload** (the last successfully retrieved PFZ and safety dataset, retained for offline use when the backend is unreachable):
+
+- PFZ `FeatureCollection` fields the client relies on: `type`, `valid_until`, `timestamp`, `source`, `features`, `metadata` (same shape as `GET /api/pfz/today` above).
+- Plus geofence/MPA layers, last-known wave/wind measurements, and system status.
+- `X-Data-Source` response header on the PFZ fetch: `backend` (live), `local_file` (local GeoJSON fallback), `unavailable` (both failed → 503).
+- A bounded LRU map-tile cache of ~50 MB. Chat is **not** available offline.
+
+**Staleness rules:**
+
+- PFZ advisory data is **stale** when `now > valid_until`; if `valid_until` is absent, a 24-hour window measured from capture time applies.
+- Wave/wind measurements are **stale** after 3 hours.
+- Map tiles are exempt from staleness.
+
+**Caution floor:**
+
+- A stale advisory is still shown — age-labelled via an age banner — but its safety tier is floored at `CAUTION`. A stale advisory can never render `SEA SAFE`.
+- This extends the ADR-0003 *Fail-Open Caution* invariant (missing data → `CAUTION`) to cover stale data as well as missing data; the age banner tells the user why the verdict was downgraded.
+- Deliberate trade-off: showing stale data risks over-warning; withdrawing it entirely would leave an offshore fisherman with zero guidance exactly when he needs it most. We chose over-warning.
+
+**Offline cache partitions (web client):** `orca-shell-v1` (app shell), `orca-advisory-v1` (advisory snapshot), `orca-tiles-v1` (tile cache, ~50 MB budget).
+
+---
+
 ## Error Response Format
 
 FastAPI `HTTPException` responses (422, 413, 503 — e.g. `POST /api/chat/voice`) use FastAPI's native envelope; there is no custom exception handler:
