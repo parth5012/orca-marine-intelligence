@@ -54,7 +54,7 @@ import {
 import { useThemeModeOptional } from '@/context/AppContext';
 import { haversineKm, segmentCrossesPolygon } from '@/lib/pfz';
 import { fetchPfzCached } from '@/lib/pfzCache';
-import { useAdvisoryFreshness } from '@/hooks/useAdvisoryFreshness';
+import { useAdvisoryFreshness, setWeatherTimestamp } from '@/hooks/useAdvisoryFreshness';
 
 export interface MapLayerToggles {
   pfz?: boolean;
@@ -407,6 +407,10 @@ export default function MapInner({
         const windKt = toFiniteNumber(data.wind_speed_kt);
         const tempC = toFiniteNumber(data.temperature_c);
         const known = waveM != null && windKt != null;
+        // Weather measurement time comes from the backend payload; never from
+        // this fetch. Missing -> unknown (null), so the 3h staleness rule stays
+        // honest instead of being reset by every poll.
+        setWeatherTimestamp(typeof data.timestamp === 'string' && data.timestamp ? data.timestamp : null);
         const backendStatus = String(data.status || '').toLowerCase();
         const dangerHit =
           backendStatus === 'danger' ||

@@ -107,7 +107,7 @@ export async function GET(request: NextRequest) {
         valid_until: validUntil,
         sector_count: 0,
         count: 0,
-        timestamp: validUntil,
+        timestamp: null,
         fallback: true,
         metadata: {
           valid_until: validUntil,
@@ -157,7 +157,7 @@ export async function GET(request: NextRequest) {
       valid_until: validUntil,
       sector_count: features.length,
       count: features.length,
-      timestamp: localData.timestamp || new Date().toISOString(),
+      timestamp: localData.timestamp ?? null,
       fallback: true,
       metadata: {
         valid_until: validUntil,

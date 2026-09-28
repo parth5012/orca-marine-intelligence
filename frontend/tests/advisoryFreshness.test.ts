@@ -27,6 +27,9 @@ import StaleDataBanner from '../components/pwa/StaleDataBanner';
 import {
   fetchAdvisorySnapshot,
   clearAdvisoryFreshnessCache,
+  setWeatherTimestamp,
+  getWeatherTimestamp,
+  subscribeWeatherTimestamp,
   ADVISORY_CACHE_TTL_MS,
 } from '../hooks/useAdvisoryFreshness';
 
@@ -467,6 +470,42 @@ describe('MapInner Offline Weather Preservation & Caution Invariant (Gap B)', ()
     expect(html).toContain('UNKNOWN');
     expect(html).not.toContain('SEA SAFE');
     expect(html).not.toContain('CAUTION');
+  });
+});
+
+describe('Weather measurement timestamp (decision A: backend sends capture time)', () => {
+  it('setWeatherTimestamp notifies subscribers and is readable back', () => {
+    const seen: Array<string | null> = [];
+    const unsubscribe = subscribeWeatherTimestamp((ts) => seen.push(ts));
+
+    const ts = '2026-09-28T10:00:00.000Z';
+    setWeatherTimestamp(ts);
+    expect(getWeatherTimestamp()).toBe(ts);
+    expect(seen).toEqual([ts]);
+
+    setWeatherTimestamp(null);
+    expect(getWeatherTimestamp()).toBeNull();
+    expect(seen).toEqual([ts, null]);
+
+    unsubscribe();
+    setWeatherTimestamp(ts);
+    expect(seen.length).toBe(2);
+    setWeatherTimestamp(null);
+  });
+
+  it('readings older than 3h from that timestamp floor the verdict', () => {
+    const now = 1_700_000_000_000;
+    const fresh = new Date(now - 30 * 60_000).toISOString();
+    const old = new Date(now - 4 * 3_600_000).toISOString();
+    const validUntil = new Date(now + 3_600_000).toISOString();
+
+    const ok = evaluateFreshness({ validUntil, weatherAt: fresh, now });
+    expect(ok.stale).toBe(false);
+    expect(ok.reasons).toEqual(['fresh']);
+
+    const stale = evaluateFreshness({ validUntil, weatherAt: old, now });
+    expect(stale.stale).toBe(true);
+    expect(stale.reasons).toContain('weather_stale');
   });
 });
 
