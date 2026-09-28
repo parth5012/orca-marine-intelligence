@@ -1,12 +1,34 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { LivingOceanBackground } from '../components/common/LivingOceanBackground';
 import { AppProvider } from '@/context/AppContext';
+import { SwRegister } from '@/components/pwa/SwRegister';
+
+export const viewport: Viewport = {
+  themeColor: '#0B3C5D',
+};
 
 export const metadata: Metadata = {
   title: 'ORCA Marine Intelligence | Autonomous Ocean Advisory',
   description:
     'Multilingual multi-agent marine intelligence, Potential Fishing Zone (PFZ) advisory, and sea safety system for Indian coastal waters (SIH26176).',
+  manifest: '/manifest.webmanifest',
+  icons: {
+    icon: [
+      { url: '/icons/orca-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
+    ],
+    apple: '/apple-touch-icon.png',
+    shortcut: '/favicon.svg',
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'ORCA',
+  },
+  formatDetection: {
+    telephone: false,
+  },
 };
 
 // Default light theme (#edf6ff); respects stored `orca_theme` ("dark" | "light").
@@ -26,6 +48,7 @@ export default function RootLayout({
       </head>
       <body className="bg-[#edf6ff] text-slate-900 antialiased min-h-screen">
         <AppProvider>
+          <SwRegister />
           <LivingOceanBackground />
           <div className="relative z-[1]">{children}</div>
         </AppProvider>
