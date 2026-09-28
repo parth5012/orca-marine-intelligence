@@ -749,6 +749,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
 
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setIsStreaming(true);
+      if (typeof window !== 'undefined') window.__orcaChatStreamActive = true;
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -1230,6 +1231,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
         }
       } finally {
         setIsStreaming(false);
+        if (typeof window !== 'undefined') window.__orcaChatStreamActive = false;
         abortControllerRef.current = null;
         setMessages((prev) =>
           prev.map((m) =>
@@ -1259,6 +1261,7 @@ export function useSSEChat(options: UseSSEChatOptions = {}) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsStreaming(false);
+      if (typeof window !== 'undefined') window.__orcaChatStreamActive = false;
     }
   }, []);
 
