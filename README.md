@@ -136,13 +136,15 @@ REDIS_URL=redis://localhost:6379/0
 
 ## 🛡️ Marine Safety Decision Matrix
 
+> Canonical source: `backend/agents/safety_thresholds.py` (ADR-0003). Do not edit bands here — change code, this table follows it.
+
 Every candidate point is evaluated across strict physical and legal safety bands:
 
 | Parameter | 🟢 Safe | 🟡 Caution | 🔴 Danger (Veto) |
 | :--- | :--- | :--- | :--- |
-| **Significant Wave Height** | `< 1.5 m` | `1.5 m — 2.5 m` | `> 2.5 m` |
-| **Ocean Current Speed** | `< 1.5 kt` | `1.5 kt — 2.5 kt` | `> 2.5 kt` |
-| **10m Sustained Wind** | `< 15 kt` | `15 kt — 25 kt` (Small craft warning) | `> 25 kt` (Gale warning) |
+| **Significant Wave Height** | `< 2.0 m` | `2.0 m — 3.5 m` | `> 3.5 m` |
+| **Ocean Current Speed** | `< 2.0 kt` | `2.0 kt — 3.0 kt` | `> 3.0 kt` |
+| **10m Sustained Wind** | `< 22 kt` | `22 kt — 27 kt` (Small craft warning) | `> 27 kt` (Gale warning) |
 | **Barometric Pressure** | `> 1005 hPa` | `995 — 1005 hPa` (Depression) | `< 995 hPa` (Cyclone alert) |
 | **EEZ Maritime Boundary** | `> 10 km` inside | `2 km — 10 km` from border | `< 2 km` / Beyond border |
 | **Marine Protected Area** | Outside | Buffer zone | Inside no-take sanctuary |
