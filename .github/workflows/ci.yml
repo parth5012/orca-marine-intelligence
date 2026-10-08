@@ -1,0 +1,47 @@
+# ORCA minimal CI guardrail — catches dep drift + stale safety docs.
+# Runs on PRs to main. Static only (no DB/Redis/secrets needed).
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  backend-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Deps consistency (pyproject range must allow requirements pin)
+        run: python scripts/check_deps.py
+      - name: Backend compile check
+        run: python -m py_compile backend/main.py backend/agents/safety_thresholds.py backend/db/session.py
+
+  frontend-typecheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  safety-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: README must reference canonical thresholds (no stale numbers)
+        run: python scripts/check_safety_docs.py
