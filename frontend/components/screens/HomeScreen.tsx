@@ -412,6 +412,7 @@ export const HomeScreen: React.FC = () => {
 
           <button
             type="button"
+            id="nav-map-link"
             onClick={() => setActiveTab('map')}
             data-testid="home-explore-map"
             aria-label="Explore map"

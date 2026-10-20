@@ -2,6 +2,7 @@
 Comprehensive Multi-Agent Test Suite — ORCA Marine Intelligence
 Ticket #19 — covers fish_finder, sea_checker, weather_agent, danger_agent, combiner, orchestrator
 """
+import os
 import asyncio
 import json
 import math
@@ -800,6 +801,10 @@ class TestCombiner:
 
 class TestOrchestrator:
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        not os.getenv("CI") and not os.getenv("RUN_PERF_TESTS"),
+        reason="Timing-sensitive perf test; run in CI or set RUN_PERF_TESTS=1",
+    )
     async def test_parallel_gather_efficiency(self):
         """All three agents should run concurrently, not sequentially."""
         from backend.agents import orchestrator

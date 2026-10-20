@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-const BASE_URL = 'http://localhost:3000';
+const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
 
 describe('PFZ Routing End-to-End API & Integration Verification (T9 #168)', () => {
   it('E2E-1: Live route calculation from Kochi GPS to offshore PFZ', async () => {

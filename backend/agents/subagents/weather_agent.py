@@ -25,6 +25,7 @@ Extensible interface:
 """
 
 import asyncio
+import os
 import hashlib
 import math
 import logging
@@ -310,7 +311,14 @@ async def get_wind(
     Returns:
         (wind_kt, wind_dir, wind_deg, source)
     """
-    if lat is not None and lon is not None:
+    # In mock mode, never hit live Open-Meteo; stay deterministic.
+    try:
+        from backend.ingest.mock_fetchers import is_mock_mode
+        _mock = is_mock_mode()
+    except Exception:
+        _mock = (os.getenv("ORCA_DATA_SOURCE", "").strip().lower() != "live")
+
+    if (not _mock) and lat is not None and lon is not None:
         try:
             wind_kt, wind_dir = await fetch_imd_wind(lat, lon)
             deg = _heuristic_wind_deg(wind_dir)

@@ -97,6 +97,7 @@ export const AskOrcaInput: React.FC = () => {
 
       {/* Main Search Input Form */}
       <form
+        id="chat-form"
         onSubmit={handleSubmit}
         className="relative"
         data-testid="ask-orca-form"
@@ -122,6 +123,7 @@ export const AskOrcaInput: React.FC = () => {
             onChange={(e) => setInputText(e.target.value)}
             placeholder={t('searchPlaceholder')}
             aria-label="Ask ORCA"
+            id="chat-input"
             data-testid="ask-orca-input"
             className={`w-full bg-transparent text-sm sm:text-base focus:outline-none px-2 py-2 font-medium ${
               isLight
