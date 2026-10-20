@@ -118,6 +118,7 @@ export default function SafetyBadge({
 
   return (
     <div
+      id="safety-badge"
       data-testid="safety-badge"
       data-status={statusType}
       data-stale={stale ? 'true' : undefined}

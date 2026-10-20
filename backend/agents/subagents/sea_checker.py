@@ -25,6 +25,7 @@ Extensible interface:
 """
 
 import asyncio
+import os
 import hashlib
 import logging
 from pathlib import Path
@@ -288,7 +289,14 @@ async def get_wave_current(
     Returns:
         (wave_height_m, current_kt, source) where source in ("open_meteo_live", "marine_data_package", "mock_heuristic").
     """
-    if lat is not None and lon is not None:
+    # In mock mode, never hit live Open-Meteo; stay deterministic.
+    try:
+        from backend.ingest.mock_fetchers import is_mock_mode
+        _mock = is_mock_mode()
+    except Exception:
+        _mock = (os.getenv("ORCA_DATA_SOURCE", "").strip().lower() != "live")
+
+    if (not _mock) and lat is not None and lon is not None:
         try:
             wave, current = await fetch_osf_wave_current(lat, lon)
             return round(float(wave), 2), round(float(current), 2), "open_meteo_live"
